@@ -46,7 +46,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
   const [businessType, setBusinessType] = useState('business');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null); // Changed to null for proper initialization
 
   const initializeRef = useRef(false);
   const workerUserIdRef = useRef<string | null>(null);
@@ -138,6 +138,8 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
       if (!loaded) {
         stopActiveWorker();
       }
+    } finally {
+      setIsLoading(false);
     }
   }, [applyProfileState, stopActiveWorker]);
 
@@ -181,6 +183,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
       }
     } catch (error) {
       console.error('Error after auth success:', error);
+      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
@@ -202,15 +205,24 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
         data?.responses?.[2] ||
         'business';
 
-      // Create or update business profile
       try {
-        businessProfileManager.updateProfile(completedUserId, {
-          businessName,
-          businessType: nextBusinessType as any,
-        });
+        const existingProfile = businessProfileManager.loadProfile(completedUserId);
+
+        if (existingProfile) {
+          businessProfileManager.updateProfile(completedUserId, {
+            businessName,
+            businessType: nextBusinessType as any,
+          });
+        } else {
+          businessProfileManager.createProfile(
+            completedUserId,
+            businessName,
+            nextBusinessType as any,
+            data?.email || data?.responses?.email || 'owner@business.local'
+          );
+        }
       } catch (error) {
-        // Profile doesn't exist yet, that's OK for demo
-        console.log('Profile update skipped (demo mode)', error);
+        console.error('Error saving profile:', error);
       }
 
       setBusinessType(nextBusinessType);
@@ -221,7 +233,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
     [effectiveUserId, startWorkerForUser]
   );
 
-  if (isLoading) {
+  if (isLoading || isAuthenticated === null) {
     return (
       <div className="app-loading">
         <div className="loading-container">
@@ -455,7 +467,10 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           align-items: center;
           justify-content: center;
           height: 100vh;
-          background: linear-gradient(135deg, #4171ff 0%, #00d4ff 100%);
+          background: linear-gradient(135deg, #4171ff 0%, #00d4ff 100%),
+            url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1200&h=800&fit=crop') center/cover;
+          background-blend-mode: overlay;
+          position: relative;
         }
 
         .loading-container {
@@ -464,6 +479,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           align-items: center;
           gap: 1.5rem;
           color: white;
+          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
         .loading-container h1 {
@@ -475,7 +491,22 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
         .app-container {
           display: flex;
           height: 100vh;
-          background: #f5f5f5;
+          background: linear-gradient(135deg, #f8fafb 0%, #f0f4f8 100%);
+          position: relative;
+        }
+
+        .app-container::before {
+          content: '';
+          position: fixed;
+          top: 0;
+          right: 0;
+          width: 100%;
+          height: 100%;
+          background: url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1600&h=900&fit=crop') right/cover no-repeat,
+            url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1600&h=900&fit=crop') center/cover;
+          opacity: 0.08;
+          pointer-events: none;
+          z-index: 0;
         }
 
         .sidebar {
@@ -504,6 +535,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           align-items: center;
           justify-content: space-between;
           gap: 0.5rem;
+          background: linear-gradient(135deg, #ffffff 0%, #f8fafb 100%);
         }
 
         .logo {
@@ -513,6 +545,10 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           display: flex;
           align-items: center;
           gap: 0.5rem;
+          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
         }
 
         .sidebar-toggle {
@@ -546,23 +582,40 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           text-align: left;
           cursor: pointer;
           font-size: 0.95rem;
-          transition: background 0.2s ease;
+          transition: all 0.2s ease;
           min-height: 44px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .nav-item::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+          opacity: 0;
+          transition: opacity 0.2s ease;
+          pointer-events: none;
         }
 
         .nav-item:hover {
           background: #f3f4f6;
         }
 
+        .nav-item:hover::before {
+          opacity: 1;
+        }
+
         .nav-item.active {
-          background: #e8f0ff;
+          background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
           color: #2563eb;
           font-weight: 600;
+          box-shadow: inset 0 0 12px rgba(37, 99, 235, 0.15);
         }
 
         .sidebar-divider {
           height: 1px;
-          background: #ececec;
+          background: linear-gradient(90deg, transparent, #ececec, transparent);
           margin: 0.75rem 0;
         }
 
@@ -572,12 +625,16 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           border-top: 1px solid #f0f0f0;
           font-size: 0.8rem;
           color: #666;
+          background: linear-gradient(180deg, transparent, rgba(248, 250, 251, 0.5));
         }
 
         .main-content {
           flex: 1;
           overflow: auto;
           position: relative;
+          z-index: 1;
+          background: linear-gradient(135deg, rgba(248, 250, 251, 0.95) 0%, rgba(240, 244, 248, 0.95) 100%),
+            url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1600&h=900&fit=crop') right/cover no-repeat;
         }
 
         .floating-chat-fab {
@@ -588,7 +645,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           height: 60px;
           border-radius: 50%;
           border: none;
-          background: #2563eb;
+          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
           color: white;
           cursor: pointer;
           box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3);

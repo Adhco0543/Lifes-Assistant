@@ -171,7 +171,7 @@ Example interactions:
   }
 
   /**
-   * Send to Anthropic Claude API
+   * Send to Anthropic Claude API via backend route
    */
   private async sendToAnthropic(userMessage: string, businessContext?: string): Promise<string> {
     if (!this.config.apiKey) {
@@ -182,16 +182,14 @@ Example interactions:
       ? `${this.config.systemPrompt}\n\nBusiness Context: ${businessContext}`
       : this.config.systemPrompt;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Call our backend API route instead of Anthropic directly
+    const response = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
         model: this.config.model || 'claude-3-sonnet-20240229',
-        max_tokens: 1500,
         system: systemPrompt,
         messages: this.conversationHistory.slice(-20), // Last 20 messages for context
       }),
@@ -199,11 +197,11 @@ Example interactions:
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(`Anthropic API error: ${error.error?.message || 'Unknown error'}`);
+      throw new Error(`Chat API error: ${error.error || 'Unknown error'}`);
     }
 
     const data = await response.json();
-    return data.content[0].text;
+    return data.content;
   }
 
   /**

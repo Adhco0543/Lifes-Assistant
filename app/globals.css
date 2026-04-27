@@ -1,16 +1,54 @@
-/* Global Styles - Tailwind removed as app uses inline styles */
+/* Global Styles - Modern Color Scheme */
 :root {
-  --bg-surface: #ffffff;
+  /* Light Theme */
+  --bg-primary: #f8fafb;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f3f4f6;
   --text-primary: #1f2937;
   --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
   --border-color: #e5e7eb;
+  --border-light: #f0f0f0;
+  
+  /* Accent Colors */
+  --accent-primary: #3b82f6;
+  --accent-secondary: #10b981;
+  --accent-tertiary: #f59e0b;
+  --accent-danger: #ef4444;
+  
+  /* Gradient & Effects */
+  --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #047857 100%);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
+  --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.2);
 }
 
 [data-theme="dark"] {
-  --bg-surface: #1f2937;
-  --text-primary: #f3f4f6;
-  --text-secondary: #d1d5db;
-  --border-color: #374151;
+  /* Dark Theme */
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --border-color: #475569;
+  --border-light: #1e293b;
+  
+  /* Accent Colors */
+  --accent-primary: #3b82f6;
+  --accent-secondary: #10b981;
+  --accent-tertiary: #f59e0b;
+  --accent-danger: #ef4444;
+  
+  /* Gradient & Effects */
+  --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #047857 100%);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 12px 32px rgba(0, 0, 0, 0.6);
 }
 
 * {

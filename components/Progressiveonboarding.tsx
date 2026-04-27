@@ -120,11 +120,17 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   useEffect(() => {
     if (isComplete) {
       const timer = setTimeout(() => {
-        onComplete?.({
+        // Format data for the callback with proper structure
+        const completionData = {
           timestamp: Date.now(),
           responses,
           completedSteps: steps.length,
-        });
+          // Extract key fields for business profile
+          businessName: responses[1] || 'My Business',
+          businessType: responses[2] || 'other',
+          email: responses.email || 'owner@business.local',
+        };
+        onComplete?.(completionData);
       }, 2000); // Show completion message for 2 seconds
 
       return () => clearTimeout(timer);

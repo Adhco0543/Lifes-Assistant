@@ -63,22 +63,56 @@ export interface BusinessContext {
   successRate: number;
 }
 
-class BusinessProfileManager {
-  private storageKey = 'business_profile';
+const PROFILE_KEY = "lifes_assistant_business_profile";
+const ONBOARDING_FLAG_KEY = "onboarding_completed";
 
-  /**
-   * Create new business profile
-   */
-  createProfile(
-    userId: string,
-    businessName: string,
-    businessType: BusinessType,
-    email: string
-  ): BusinessProfile {
-    const profile: BusinessProfile = {
+export const businessProfileManager = {
+  saveProfile(userId: string, profile: any) {
+    localStorage.setItem(
+      PROFILE_KEY,
+      JSON.stringify({
+        ...profile,
+        userId,
+        savedAt: Date.now(),
+      })
+    );
+    // Mark onboarding as complete
+    localStorage.setItem(ONBOARDING_FLAG_KEY, 'true');
+  },
+
+  loadProfile(userId: string) {
+    const saved = localStorage.getItem(PROFILE_KEY);
+
+    if (!saved) return null;
+
+    try {
+      const profile = JSON.parse(saved);
+      // Verify the profile has required fields for onboarding to be considered complete
+      if (profile.businessName && profile.businessType) {
+        return profile;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
+  isOnboardingComplete(): boolean {
+    return localStorage.getItem(ONBOARDING_FLAG_KEY) === 'true';
+  },
+
+  updateProfile(userId: string, updates: any) {
+    const existing = this.loadProfile(userId);
+    const merged = { ...existing, ...updates };
+    this.saveProfile(userId, merged);
+  },
+
+  createProfile(userId: string, businessName: string, businessType: string, email: string) {
+    const profile: any = {
       userId,
       businessName,
       businessType,
+      email,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       details: {
@@ -105,245 +139,11 @@ class BusinessProfileManager {
         jobBoards: [],
       },
     };
-
-    this.saveProfile(profile);
+    this.saveProfile(userId, profile);
     return profile;
-  }
+  },
 
-  /**
-   * Get or create business profile for user
-   */
-  getOrCreateProfile(userId: string): BusinessProfile | null {
-    const stored = this.getStoredProfile();
-    if (stored && stored.userId === userId) {
-      return stored;
-    }
-    return null;
-  }
-
-  /**
-   * Load existing profile
-   */
-  loadProfile(userId: string): BusinessProfile | null {
-    const stored = this.getStoredProfile();
-    if (stored && stored.userId === userId) {
-      return stored;
-    }
-    return null;
-  }
-
-  /**
-   * Update profile
-   */
-  updateProfile(userId: string, updates: Partial<BusinessProfile>): BusinessProfile {
-    const profile = this.getStoredProfile();
-    if (!profile || profile.userId !== userId) {
-      throw new Error('Profile not found');
-    }
-
-    const updated: BusinessProfile = {
-      ...profile,
-      ...updates,
-      userId,
-      updatedAt: Date.now(),
-    };
-
-    this.saveProfile(updated);
-    return updated;
-  }
-
-  /**
-   * Update settings
-   */
-  updateSettings(userId: string, settings: Partial<BusinessProfile['settings']>): void {
-    const profile = this.getStoredProfile();
-    if (!profile || profile.userId !== userId) {
-      throw new Error('Profile not found');
-    }
-
-    profile.settings = { ...profile.settings, ...settings };
-    profile.updatedAt = Date.now();
-    this.saveProfile(profile);
-  }
-
-  /**
-   * Update business details
-   */
-  updateDetails(userId: string, details: Partial<BusinessProfile['details']>): void {
-    const profile = this.getStoredProfile();
-    if (!profile || profile.userId !== userId) {
-      throw new Error('Profile not found');
-    }
-
-    profile.details = { ...profile.details, ...details };
-    profile.updatedAt = Date.now();
-    this.saveProfile(profile);
-  }
-
-  /**
-   * Get business context with metrics
-   */
-  getBusinessContext(userId: string): BusinessContext | null {
-    const profile = this.loadProfile(userId);
-    if (!profile) return null;
-
-    return {
-      profile,
-      activeProjects: [],
-      clientCount: 0,
-      averageProjectValue: profile.settings.defaultHourlyRate ? profile.settings.defaultHourlyRate * 8 : 0,
-      successRate: 0.95,
-    };
-  }
-
-  /**
-   * Get business features based on type
-   */
-  getBusinessTypeFeatures(businessType: BusinessType): Record<string, boolean> {
-    const baseFeatures = {
-      estimating: true,
-      materialCalculation: false,
-      bidding: true,
-      scheduling: true,
-      clientTracking: true,
-      marketing: true,
-    };
-
-    const typeSpecific: Record<BusinessType, Record<string, boolean>> = {
-      carpentry: {
-        ...baseFeatures,
-        materialCalculation: true,
-        woodworkingCalcs: true,
-        cuttingLists: true,
-      },
-      plumbing: {
-        ...baseFeatures,
-        materialCalculation: true,
-        pipeCalculations: true,
-        partsList: true,
-      },
-      electrical: {
-        ...baseFeatures,
-        materialCalculation: true,
-        wiringCalcs: true,
-        loadCalculations: true,
-      },
-      landscaping: {
-        ...baseFeatures,
-        materialCalculation: true,
-        areaCalculations: true,
-        plantingPlans: true,
-      },
-      consulting: {
-        ...baseFeatures,
-        materialCalculation: false,
-        reportGeneration: true,
-        strategyPlanning: true,
-      },
-      retail: {
-        ...baseFeatures,
-        materialCalculation: false,
-        inventory: true,
-        salesTracking: true,
-      },
-      restaurant: {
-        ...baseFeatures,
-        materialCalculation: false,
-        menuPlanning: true,
-        inventoryTracking: true,
-      },
-      cleaning: {
-        ...baseFeatures,
-        materialCalculation: true,
-        supplyEstimation: true,
-        scheduleOptimization: true,
-      },
-      hvac: {
-        ...baseFeatures,
-        materialCalculation: true,
-        loadCalculations: true,
-        efficencyAnalysis: true,
-      },
-      roofing: {
-        ...baseFeatures,
-        materialCalculation: true,
-        squareCalculations: true,
-        slopeCalculations: true,
-      },
-      painting: {
-        ...baseFeatures,
-        materialCalculation: true,
-        coverageCalculations: true,
-        paintEstimates: true,
-      },
-      other: baseFeatures,
-    };
-
-    return typeSpecific[businessType] || baseFeatures;
-  }
-
-  /**
-   * Get recommended tools for business type
-   */
-  getRecommendedTools(businessType: BusinessType): string[] {
-    const toolMap: Record<BusinessType, string[]> = {
-      carpentry: ['QuoteBuilder', 'MaterialEstimator', 'ProjectTracker', 'ClientManager'],
-      plumbing: ['QuoteBuilder', 'MaterialEstimator', 'ServiceScheduler', 'ClientManager'],
-      electrical: ['QuoteBuilder', 'LoadCalculator', 'ProjectTracker', 'SafetyChecker'],
-      landscaping: ['DesignTool', 'MaterialEstimator', 'ProjectVisualizer', 'ClientGallery'],
-      consulting: ['ProposalBuilder', 'DocumentGenerator', 'ContractManager', 'ClientTracker'],
-      retail: ['InventoryManager', 'PricingTool', 'SalesTracker', 'CustomerAnalytics'],
-      restaurant: ['MenuPlanner', 'InventoryManager', 'StaffScheduler', 'OrderManager'],
-      cleaning: ['JobScheduler', 'SupplyEstimator', 'ClientTracker', 'RoutePlanner'],
-      hvac: ['LoadCalculator', 'SystemDesigner', 'MaintenanceTracker', 'ClientManager'],
-      roofing: ['MeasurementTool', 'MaterialCalculator', 'InspectionReporter', 'ClientGallery'],
-      painting: ['ColorSelector', 'CoverageCalculator', 'ProjectTracker', 'BeforeAfterShowcase'],
-      other: ['BasicQuoteBuilder', 'ClientManager', 'DocumentStorage', 'TaskTracker'],
-    };
-
-    return toolMap[businessType] || toolMap.other;
-  }
-
-  /**
-   * Save profile to localStorage
-   */
-  private saveProfile(profile: BusinessProfile): void {
-    try {
-      localStorage.setItem(this.storageKey, JSON.stringify(profile));
-    } catch (e) {
-      console.warn('Failed to save business profile:', e);
-    }
-  }
-
-  /**
-   * Get stored profile from localStorage
-   */
-  private getStoredProfile(): BusinessProfile | null {
-    try {
-      const stored = localStorage.getItem(this.storageKey);
-      return stored ? JSON.parse(stored) : null;
-    } catch (e) {
-      console.warn('Failed to read business profile:', e);
-      return null;
-    }
-  }
-
-  /**
-   * Export profile data
-   */
-  exportProfile(userId: string): BusinessProfile | null {
-    return this.loadProfile(userId);
-  }
-
-  /**
-   * Clear profile
-   */
-  clearProfile(userId: string): void {
-    const profile = this.getStoredProfile();
-    if (profile && profile.userId === userId) {
-      localStorage.removeItem(this.storageKey);
-    }
-  }
-}
-
-export const businessProfileManager = new BusinessProfileManager();
+  clearProfile() {
+    localStorage.removeItem(PROFILE_KEY);
+  },
+};

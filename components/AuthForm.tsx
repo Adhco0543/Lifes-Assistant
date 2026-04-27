@@ -100,7 +100,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 disabled={isLoading}
-                autocomplete="name"
+                autoComplete="name"
                 required
               />
             </div>
@@ -115,7 +115,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={isLoading}
-              autocomplete="email"
+              autoComplete="email"
               required
             />
           </div>
@@ -129,7 +129,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isLoading}
-              autocomplete={mode === 'login' ? 'current-password' : 'new-password'}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               required
             />
             {mode === 'login' && <p className="help-text">At least 6 characters</p>}
