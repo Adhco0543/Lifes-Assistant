@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 
+type ChatRequest = {
+  message?: string;
+  businessContext?: string;
+};
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-
-    const message =
-      body.message?.trim?.() ||
-      body.input?.trim?.() ||
-      body.content?.trim?.() ||
-      body.messages?.[body.messages.length - 1]?.content?.trim?.() ||
-      '';
+    const body = (await req.json()) as ChatRequest;
+    const message = body.message?.trim() || '';
 
     if (!message) {
       return NextResponse.json({
@@ -28,7 +27,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         type: 'chat',
         message:
-          "I can help you create quotes, draft emails, manage customers, write notes, create reminders, estimate materials, and organize business tasks. For example, say: 'Create a quote for John for a deck repair for $2,500.'",
+          "I can help you create quotes, draft emails, manage customers, write notes, create reminders, estimate materials, and organize business tasks. For example, you can say: 'Create a quote for John for a deck repair for $2,500.'",
       });
     }
 

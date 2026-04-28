@@ -1,9 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { realAI } from '../lib/realAI';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
-import { intelligenceEngine, type BusinessInsight } from '../lib/intelligenceEngine';
 import type { ChatMessage, Conversation } from '../lib/firebaseBackend';
 
 interface AdvancedChatProps {
@@ -13,34 +11,33 @@ interface AdvancedChatProps {
   fullScreen?: boolean;
 }
 
+type ChatApiResponse = {
+  type?: 'chat' | 'quote' | 'email' | 'task' | string;
+  message?: string;
+  data?: any;
+};
+
 export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
-  userId,
+  userId = 'default-user',
   businessContext,
   onClose,
   fullScreen = false,
 }) => {
-  // State
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentConversationId, setCurrentConversationId] = useState<string>('');
-  const [insights, setInsights] = useState<BusinessInsight[]>([]);
-  const [showInsights, setShowInsights] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [chatbotName, setChatbotName] = useState('AI Assistant');
+  const [currentConversationId, setCurrentConversationId] = useState('');
+  const [chatbotName, setChatbotName] = useState("Life's Assistant");
   const [isEditingName, setIsEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState('AI Assistant');
+  const [nameInput, setNameInput] = useState("Life's Assistant");
   const [isListening, setIsListening] = useState(false);
 
-  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Load chatbot name from localStorage
   useEffect(() => {
     const savedName = localStorage.getItem('chatbot_name');
     if (savedName) {
@@ -49,9 +46,21 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   }, []);
 
-  // Initialize Firebase and real-time sync
+  const loadConversation = useCallback(async (conversationId: string) => {
+    try {
+      if (!firebaseBackend.isAvailable()) return;
+
+      const msgs = await firebaseBackend.getMessages(conversationId, 100);
+      setMessages(msgs);
+      setCurrentConversationId(conversationId);
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+    }
+  }, []);
+
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
 
     const initializeChat = async () => {
       try {
@@ -62,120 +71,107 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
         if (firebaseBackend.isAvailable() && currentUser) {
           unsubscribe = firebaseBackend.onConversationsChange((convs) => {
+            if (cancelled) return;
+
             setConversations(convs);
+
             if (convs.length > 0 && !currentConversationId) {
               loadConversation(convs[0].id);
             }
           });
 
           const existingConvs = await firebaseBackend.getConversations();
+          if (cancelled) return;
+
           setConversations(existingConvs);
 
           if (existingConvs.length > 0) {
             await loadConversation(existingConvs[0].id);
           } else {
-            const newConvId = await firebaseBackend.createConversation(
-              'New Chat',
-              businessContext
-            );
-            setCurrentConversationId(newConvId);
+            const newConvId = await firebaseBackend.createConversation('New Chat', businessContext);
+            if (!cancelled) {
+              setCurrentConversationId(newConvId);
+            }
           }
         } else {
-          // Fallback to local storage
-          realAI.loadConversationHistory();
-          const history = realAI.getConversationHistory();
+          const welcomeMsg: ChatMessage = {
+            id: 'welcome',
+            userId: userId || 'local-user',
+            conversationId: 'local',
+            role: 'assistant',
+            content:
+              "👋 Hi! I'm Life's Assistant. I can help you create quotes, draft emails, manage customers, write notes, create reminders, estimate materials, and organize business tasks.",
+            timestamp: Date.now(),
+          };
 
-          if (history.length > 0) {
-            setMessages(
-              history.map((msg, idx) => ({
-                id: `local-${idx}`,
-                userId: 'local-user',
-                conversationId: 'local',
-                role: msg.role,
-                content: msg.content,
-                timestamp: Date.now() - (history.length - idx) * 1000,
-              }))
-            );
-          } else {
-            const welcomeMsg: ChatMessage = {
-              id: 'welcome',
-              userId: 'local-user',
-              conversationId: 'local',
-              role: 'assistant',
-              content: `👋 Hi! I'm your business assistant. Tell me about what you're working on—any business, any challenge—and I'll help you figure it out.`,
-              timestamp: Date.now(),
-            };
-            setMessages([welcomeMsg]);
-          }
+          setMessages([welcomeMsg]);
         }
-
-        setIsInitialized(true);
-        setTimeout(() => inputRef.current?.focus(), 100);
       } catch (error) {
         console.error('Error initializing chat:', error);
-        setIsInitialized(true);
+
+        const welcomeMsg: ChatMessage = {
+          id: 'welcome',
+          userId: userId || 'local-user',
+          conversationId: 'local',
+          role: 'assistant',
+          content:
+            "👋 Hi! I'm Life's Assistant. I can help with quotes, emails, reminders, customers, notes, materials, and business tasks.",
+          timestamp: Date.now(),
+        };
+
+        setMessages([welcomeMsg]);
+      } finally {
+        if (!cancelled) {
+          setIsInitialized(true);
+          setTimeout(() => inputRef.current?.focus(), 100);
+        }
       }
     };
 
     initializeChat();
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [userId, businessContext, currentConversationId, loadConversation]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // Generate insights
   useEffect(() => {
-    if (messages.length > 5) {
-      const newInsights = intelligenceEngine.analyzeConversations(messages, conversations);
-      setInsights(newInsights.slice(0, 3));
-    }
-  }, [messages, conversations]);
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-  // Initialize voice recognition
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
+    if (!SpeechRecognition) return;
 
-      recognitionRef.current.onstart = () => {
-        setIsListening(true);
-      };
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.continuous = false;
+    recognitionRef.current.interimResults = true;
+    recognitionRef.current.lang = 'en-US';
 
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
+    recognitionRef.current.onstart = () => setIsListening(true);
+    recognitionRef.current.onend = () => setIsListening(false);
 
-      recognitionRef.current.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            setInput((prev) => prev + transcript + ' ');
-          }
+    recognitionRef.current.onresult = (event: any) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          setInput((prev) => `${prev}${transcript} `);
         }
-      };
+      }
+    };
 
-      recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsListening(false);
-      };
-    }
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+    };
   }, []);
 
-  // Toggle microphone
   const handleToggleMic = () => {
     if (!recognitionRef.current) {
-      alert('Voice input is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      alert('Voice input is not supported in this browser.');
       return;
     }
 
@@ -188,22 +184,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  // Load conversation
-  const loadConversation = async (conversationId: string) => {
-    try {
-      if (firebaseBackend.isAvailable()) {
-        const msgs = await firebaseBackend.getMessages(conversationId, 100);
-        setMessages(msgs);
-        setCurrentConversationId(conversationId);
-      }
-    } catch (error) {
-      console.error('Error loading conversation:', error);
-    }
-  };
-
-  // Create new conversation
   const createNewConversation = async () => {
     try {
+      if (!firebaseBackend.isAvailable()) {
+        setMessages([]);
+        setCurrentConversationId('local');
+        setInput('');
+        return;
+      }
+
       const title = `Chat ${new Date().toLocaleDateString()}`;
       const newConvId = await firebaseBackend.createConversation(title, businessContext);
       setCurrentConversationId(newConvId);
@@ -214,19 +203,32 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  // Send message
-  const handleSendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) {
-      return;
+  const handleToolHandoff = (data: ChatApiResponse) => {
+    if (data.type === 'quote') {
+      localStorage.setItem('quote_draft', JSON.stringify(data.data || {}));
+      window.dispatchEvent(new CustomEvent('open-quote-builder'));
     }
+
+    if (data.type === 'email') {
+      localStorage.setItem('email_draft', JSON.stringify(data.data || {}));
+      window.dispatchEvent(new CustomEvent('open-email'));
+    }
+
+    if (data.type === 'task') {
+      localStorage.setItem('task_draft', JSON.stringify(data.data || {}));
+      window.dispatchEvent(new CustomEvent('open-tasks'));
+    }
+  };
+
+  const handleSendMessage = useCallback(async () => {
+    if (!input.trim() || isLoading) return;
 
     const userMessage = input.trim();
     setInput('');
 
-    // Add user message
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
-      userId: firebaseBackend.getCurrentUser()?.uid || 'local-user',
+      userId: firebaseBackend.getCurrentUser()?.uid || userId || 'local-user',
       conversationId: currentConversationId || 'local',
       role: 'user',
       content: userMessage,
@@ -235,26 +237,36 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
     setMessages((prev) => [...prev, userMsg]);
 
-    // Save to Firebase
-    if (firebaseBackend.isAvailable() && currentConversationId) {
+    if (firebaseBackend.isAvailable() && currentConversationId && currentConversationId !== 'local') {
       try {
         await firebaseBackend.saveMessage(userMsg);
         await firebaseBackend.trackEvent('message_sent', { length: userMessage.length });
       } catch (error) {
-        console.warn('Error saving message to Firebase:', error);
+        console.warn('Error saving user message:', error);
       }
     }
 
-    // Get AI response
     setIsLoading(true);
-    try {
-      console.log('[Chat] Sending message:', userMessage);
-      const response = await realAI.sendMessage(userMessage, businessContext, chatbotName);
-      console.log('[Chat] Got response:', response ? response.substring(0, 50) : 'EMPTY');
 
-      if (!response || response.trim() === '') {
-        throw new Error('Empty response from AI service');
+    try {
+      const apiResponse = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: userMessage,
+          businessContext,
+          chatbotName,
+        }),
+      });
+
+      if (!apiResponse.ok) {
+        throw new Error(`Chat API error: ${apiResponse.status}`);
       }
+
+      const data = (await apiResponse.json()) as ChatApiResponse;
+
+      const response =
+        data.message || "I received your message, but I couldn't generate a response.";
 
       const assistantMsg: ChatMessage = {
         id: `assistant-${Date.now()}`,
@@ -267,13 +279,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       setMessages((prev) => [...prev, assistantMsg]);
 
-      if (firebaseBackend.isAvailable() && currentConversationId) {
+      if (firebaseBackend.isAvailable() && currentConversationId && currentConversationId !== 'local') {
         try {
           await firebaseBackend.saveMessage(assistantMsg);
         } catch (error) {
           console.warn('Error saving assistant message:', error);
         }
       }
+
+      handleToolHandoff(data);
     } catch (error) {
       console.error('Error in handleSendMessage:', error);
 
@@ -282,7 +296,9 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         userId: 'system',
         conversationId: currentConversationId || 'local',
         role: 'assistant',
-        content: `I encountered an error processing your request. ${error instanceof Error ? error.message : 'Please try again.'}`,
+        content: `I encountered an error processing your request. ${
+          error instanceof Error ? error.message : 'Please try again.'
+        }`,
         timestamp: Date.now(),
       };
 
@@ -291,30 +307,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [input, isLoading, isInitialized, currentConversationId, businessContext, chatbotName]);
+  }, [input, isLoading, currentConversationId, businessContext, chatbotName, userId]);
 
-  // Search messages
-  const handleSearch = async (term: string) => {
-    if (!term.trim()) {
-      setSearchTerm('');
-      return;
-    }
-
-    setIsSearching(true);
-    try {
-      if (firebaseBackend.isAvailable()) {
-        const results = await firebaseBackend.searchMessages(term);
-        setMessages(results);
-        setSearchTerm(term);
-      }
-    } catch (error) {
-      console.error('Error searching:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  // Handle key press
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -322,96 +316,65 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  // Save name
   const handleSaveName = () => {
-    const trimmedName = nameInput.trim() || 'AI Assistant';
+    const trimmedName = nameInput.trim() || "Life's Assistant";
     setChatbotName(trimmedName);
     localStorage.setItem('chatbot_name', trimmedName);
     setIsEditingName(false);
   };
 
-  // Loading state
   if (!isInitialized) {
     return (
       <div className={`advanced-chat ${fullScreen ? 'fullscreen' : 'floating'}`}>
         <div className="chat-header">
           <div className="header-left">
-            <h2>Business AI Assistant</h2>
+            <h2>Life&apos;s Assistant</h2>
             <p>Loading...</p>
           </div>
         </div>
-        <div className="chat-main" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px' }}>
-          <div style={{ textAlign: 'center', color: '#999' }}>
-            <p>Initializing chat...</p>
-          </div>
+
+        <div className="chat-main loading-center">
+          <p>Initializing chat...</p>
         </div>
+
+        <style jsx>{styles}</style>
       </div>
     );
   }
 
-  // Main render
   return (
     <div className={`advanced-chat ${fullScreen ? 'fullscreen' : 'floating'}`}>
-      {/* Header */}
       <div className="chat-header">
         <div className="header-left">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="bot-name-row">
             {isEditingName ? (
-              <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+              <div className="name-editor">
                 <input
                   type="text"
                   value={nameInput}
                   onChange={(e) => setNameInput(e.target.value)}
                   autoFocus
                   maxLength={30}
-                  style={{
-                    padding: '0.25rem 0.5rem',
-                    borderRadius: '0.25rem',
-                    border: '1px solid rgba(255,255,255,0.3)',
-                    background: 'rgba(255,255,255,0.1)',
-                    color: 'white',
-                    fontSize: '0.95rem',
-                    width: '150px',
-                  }}
                 />
-                <button
-                  onClick={handleSaveName}
-                  style={{
-                    padding: '0.25rem 0.5rem',
-                    background: 'rgba(255,255,255,0.2)',
-                    border: 'none',
-                    color: 'white',
-                    borderRadius: '0.25rem',
-                    cursor: 'pointer',
-                    fontSize: '0.75rem',
-                  }}
-                >
-                  Save
-                </button>
+                <button onClick={handleSaveName}>Save</button>
               </div>
             ) : (
               <>
                 <h2>{chatbotName}</h2>
                 <button
                   onClick={() => setIsEditingName(true)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'rgba(255,255,255,0.6)',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    padding: '0.25rem',
-                    marginLeft: '0.25rem',
-                  }}
-                  title="Edit bot name"
+                  className="edit-name-btn"
+                  title="Edit assistant name"
                 >
                   ✎
                 </button>
               </>
             )}
           </div>
-          <p>With Real-Time Sync & Intelligence</p>
+
+          <p>Business assistant with chat-to-action support</p>
         </div>
+
         {!fullScreen && onClose && (
           <button className="close-btn" onClick={onClose}>
             ✕
@@ -419,17 +382,19 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         )}
       </div>
 
-      {/* Conversations Sidebar */}
-      {firebaseBackend.isAvailable() && (
+      {firebaseBackend.isAvailable() && conversations.length > 0 && (
         <div className="conversations-panel">
           <button className="new-chat-btn" onClick={createNewConversation}>
             + New Chat
           </button>
+
           <div className="conversations-list">
             {conversations.map((conv) => (
               <button
                 key={conv.id}
-                className={`conversation-item ${conv.id === currentConversationId ? 'active' : ''}`}
+                className={`conversation-item ${
+                  conv.id === currentConversationId ? 'active' : ''
+                }`}
                 onClick={() => loadConversation(conv.id)}
               >
                 <span className="conv-title">{conv.title}</span>
@@ -440,15 +405,13 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         </div>
       )}
 
-      {/* Main Chat Area */}
       <div className="chat-main">
-        {/* Messages */}
         <div className="messages-wrapper">
           <div className="messages-container">
             {messages.length === 0 ? (
               <div className="empty-state">
-                <h3>Welcome! 👋</h3>
-                <p>Start a conversation about your business and I'll help you succeed.</p>
+                <h3>Welcome 👋</h3>
+                <p>Ask me to create a quote, draft an email, make a reminder, or plan work.</p>
               </div>
             ) : (
               messages.map((msg) => (
@@ -465,9 +428,9 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             {isLoading && (
               <div className="message message-assistant">
                 <div className="message-bubble typing">
-                  <span className="typing-dot"></span>
-                  <span className="typing-dot"></span>
-                  <span className="typing-dot"></span>
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
                 </div>
               </div>
             )}
@@ -476,31 +439,17 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           </div>
         </div>
 
-        {/* Input Area with Microphone */}
         <div className="input-area">
           <div className="input-wrapper">
             <button
-              className="mic-btn"
+              className={`mic-btn ${isListening ? 'listening' : ''}`}
               onClick={handleToggleMic}
               title={isListening ? 'Stop listening' : 'Start voice input'}
-              style={{
-                background: isListening ? 'rgba(239, 68, 68, 0.8)' : 'rgba(255,255,255,0.1)',
-                border: 'none',
-                color: 'white',
-                width: '32px',
-                height: '32px',
-                borderRadius: '50%',
-                cursor: 'pointer',
-                flexShrink: 0,
-                transition: 'all 0.2s ease',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1rem',
-              }}
+              type="button"
             >
               {isListening ? '🔴' : '🎤'}
             </button>
+
             <input
               id="message-input"
               name="message-input"
@@ -509,134 +458,315 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               placeholder="Type or use microphone..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               disabled={isLoading}
               maxLength={2000}
             />
+
             <button
               className="send-btn"
               onClick={handleSendMessage}
               disabled={!input.trim() || isLoading}
+              type="button"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-              </svg>
+              ➤
             </button>
           </div>
+
           <p className="sync-status">
-            {firebaseBackend.isAvailable() ? '✓ Syncing across devices' : '📱 Local storage mode'}
+            {firebaseBackend.isAvailable() ? '✓ Syncing across devices' : '📱 Local mode'}
           </p>
         </div>
       </div>
 
-      {/* Inline Styles */}
-      <style jsx>{`
-        .advanced-chat {
-          display: flex;
-          background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
-          color: #fff;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-          border-radius: 0.75rem;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-          overflow: hidden;
-          z-index: 1000;
-        }
-
-        .advanced-chat.floating {
-          position: fixed;
-          right: 24px;
-          bottom: 100px;
-          width: 500px;
-          max-width: calc(100vw - 32px);
-          height: 650px;
-          max-height: 80vh;
-        }
-
-        .chat-header {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          padding: 1rem 1.5rem;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .messages-wrapper {
-          flex: 1;
-          overflow-y: auto;
-          padding: 1rem;
-          background: linear-gradient(180deg, rgba(15, 15, 30, 0.8) 0%, rgba(26, 26, 46, 0.9) 100%);
-          backdrop-filter: blur(10px);
-        }
-
-        .message-bubble {
-          max-width: 80%;
-          padding: 0.75rem 1rem;
-          border-radius: 0.75rem;
-          word-wrap: break-word;
-          line-height: 1.4;
-          font-size: 0.9rem;
-        }
-
-        .message-user .message-bubble {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          border-radius: 0.75rem 0.2rem 0.75rem 0.75rem;
-        }
-
-        .message-assistant .message-bubble {
-          background: rgba(255, 255, 255, 0.08);
-          color: #e0e0e0;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 0.2rem 0.75rem 0.75rem 0.75rem;
-        }
-
-        .input-wrapper {
-          display: flex;
-          gap: 0.5rem;
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid rgba(102, 126, 234, 0.3);
-          border-radius: 1.5rem;
-          padding: 0.4rem;
-        }
-
-        .input-wrapper input {
-          flex: 1;
-          background: transparent;
-          border: none;
-          color: white;
-          font-size: 0.9rem;
-          padding: 0.5rem 0.75rem;
-          outline: none;
-        }
-
-        .send-btn {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border: none;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          cursor: pointer;
-          flex-shrink: 0;
-          transition: all 0.2s ease;
-        }
-
-        @media (max-width: 768px) {
-          .advanced-chat.floating {
-            width: calc(100vw - 16px);
-            height: calc(100vh - 140px);
-            right: 8px;
-            bottom: 60px;
-          }
-
-          .message-bubble {
-            max-width: 90%;
-          }
-        }
-      `}</style>
+      <style jsx>{styles}</style>
     </div>
   );
 };
+
+const styles = `
+  .advanced-chat {
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    border-radius: 0.75rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    z-index: 1000;
+  }
+
+  .advanced-chat.floating {
+    position: fixed;
+    right: 24px;
+    bottom: 100px;
+    width: 500px;
+    max-width: calc(100vw - 32px);
+    height: 650px;
+    max-height: 80vh;
+  }
+
+  .advanced-chat.fullscreen {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .chat-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-left h2 {
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .header-left p {
+    margin: 0.25rem 0 0;
+    opacity: 0.85;
+    font-size: 0.85rem;
+  }
+
+  .bot-name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .edit-name-btn,
+  .close-btn {
+    background: rgba(255, 255, 255, 0.15);
+    border: none;
+    color: white;
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .name-editor {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .name-editor input {
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.4rem;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.1);
+    color: white;
+  }
+
+  .name-editor button {
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.4rem;
+    border: none;
+    cursor: pointer;
+  }
+
+  .conversations-panel {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    overflow-x: auto;
+    padding: 0.65rem;
+    background: rgba(255,255,255,0.04);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .new-chat-btn,
+  .conversation-item {
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.7rem;
+    background: rgba(255,255,255,0.08);
+    color: white;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .conversation-item.active {
+    background: rgba(102, 126, 234, 0.6);
+  }
+
+  .conv-count {
+    margin-left: 0.4rem;
+    opacity: 0.7;
+    font-size: 0.75rem;
+  }
+
+  .chat-main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .loading-center {
+    align-items: center;
+    justify-content: center;
+  }
+
+  .messages-wrapper {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1rem;
+    background: linear-gradient(180deg, rgba(15, 15, 30, 0.8) 0%, rgba(26, 26, 46, 0.9) 100%);
+  }
+
+  .messages-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .empty-state {
+    text-align: center;
+    color: rgba(255,255,255,0.75);
+    margin-top: 3rem;
+  }
+
+  .message {
+    display: flex;
+  }
+
+  .message-user {
+    justify-content: flex-end;
+  }
+
+  .message-assistant {
+    justify-content: flex-start;
+  }
+
+  .message-bubble {
+    max-width: 80%;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    word-wrap: break-word;
+    line-height: 1.4;
+    font-size: 0.9rem;
+  }
+
+  .message-user .message-bubble {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 0.75rem 0.2rem 0.75rem 0.75rem;
+  }
+
+  .message-assistant .message-bubble {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e0e0e0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.2rem 0.75rem 0.75rem 0.75rem;
+  }
+
+  .typing {
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  .typing-dot {
+    width: 7px;
+    height: 7px;
+    background: white;
+    border-radius: 50%;
+    opacity: 0.7;
+    animation: pulse 1s infinite ease-in-out;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: translateY(0); opacity: 0.4; }
+    50% { transform: translateY(-3px); opacity: 1; }
+  }
+
+  .input-area {
+    padding: 1rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    background: rgba(15, 15, 30, 0.95);
+  }
+
+  .input-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 1.5rem;
+    padding: 0.4rem;
+  }
+
+  .input-wrapper input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 0.9rem;
+    padding: 0.5rem 0.75rem;
+    outline: none;
+  }
+
+  .mic-btn,
+  .send-btn {
+    border: none;
+    color: white;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .mic-btn {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .mic-btn.listening {
+    background: rgba(239, 68, 68, 0.8);
+  }
+
+  .send-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  }
+
+  .send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .sync-status {
+    margin: 0.5rem 0 0;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+  }
+
+  @media (max-width: 768px) {
+    .advanced-chat.floating {
+      width: calc(100vw - 16px);
+      height: calc(100vh - 140px);
+      right: 8px;
+      bottom: 60px;
+    }
+
+    .message-bubble {
+      max-width: 90%;
+    }
+  }
+`;
 
 export default AdvancedConversationalChat;
