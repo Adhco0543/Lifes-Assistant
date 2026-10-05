@@ -203,10 +203,10 @@ class WorkflowExecutorClass {
   private async executeResearch(
     input: Record<string, any>
   ): Promise<Record<string, any>> {
-    // In production, this would call external research APIs
     return {
-      researchNotes: "Research completed with key findings and insights",
-      confidence: 70,
+      researchNotes: "Live research is not connected in this beta yet.",
+      confidence: 0,
+      providerConnected: false,
     };
   }
 
@@ -294,10 +294,10 @@ class WorkflowExecutorClass {
     input: Record<string, any>,
     previousOutput: Record<string, any>
   ): Promise<Record<string, any>> {
-    // This would be sent via emailService
     return {
-      emailSent: true,
-      result: `Email composed and ready to send to ${previousOutput.recipientEmail}`,
+      emailSent: false,
+      requiresApproval: true,
+      result: `Email composed and ready for review for ${previousOutput.recipientEmail || "the recipient"}`,
     };
   }
 
@@ -309,8 +309,9 @@ class WorkflowExecutorClass {
     previousOutput: Record<string, any>
   ): Promise<Record<string, any>> {
     return {
-      sent: true,
-      result: "Message sent successfully",
+      sent: false,
+      requiresApproval: true,
+      result: "Message is prepared, but no connected delivery tool has confirmed sending it.",
       timestamp: new Date().toISOString(),
     };
   }
@@ -393,8 +394,9 @@ class WorkflowExecutorClass {
     previousOutput: Record<string, any>
   ): Promise<Record<string, any>> {
     return {
-      sent: true,
-      result: "Estimate sent to customer",
+      sent: false,
+      requiresApproval: true,
+      result: "Estimate is prepared for the customer, but delivery is not connected yet.",
       confidence: 85,
     };
   }
@@ -407,8 +409,9 @@ class WorkflowExecutorClass {
     taskDescription: string
   ): Promise<Record<string, any>> {
     return {
-      scheduled: true,
-      result: `Event scheduled: ${taskDescription}`,
+      scheduled: false,
+      requiresApproval: true,
+      result: `Calendar action prepared but not scheduled: ${taskDescription}`,
       confidence: 70,
     };
   }
