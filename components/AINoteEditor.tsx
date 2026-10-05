@@ -1,210 +1,230 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface AINoteEditorProps {
   userId: string;
 }
 
-export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
-  const [notes, setNotes] = useState('');
-  const [aiHint, setAiHint] = useState('');
-  const [notifications, setNotifications] = useState<{ title: string; type: 'email' | 'note' | 'bid'; timestamp: string }[]>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
+type SavedNote = {
+  id: string;
+  text: string;
+  createdAt: number;
+};
 
-  const handleAINote = async () => {
-    if (!aiHint.trim()) {
-      alert('Please tell the AI what you need noted');
+type ChatResponse = {
+  message?: string;
+};
+
+export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
+  const storageKey = `lifes-assistant-notes:${userId}`;
+  const [instructions, setInstructions] = useState('');
+  const [note, setNote] = useState('');
+  const [savedNotes, setSavedNotes] = useState<SavedNote[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      setSavedNotes(stored ? JSON.parse(stored) : []);
+    } catch {
+      setSavedNotes([]);
+    }
+  }, [storageKey]);
+
+  const persist = (notes: SavedNote[]) => {
+    setSavedNotes(notes);
+    localStorage.setItem(storageKey, JSON.stringify(notes));
+  };
+
+  const generateNote = async () => {
+    if (!instructions.trim()) {
+      setStatus('Tell the assistant what you want captured first.');
       return;
     }
 
-    // Simulate AI processing
-    const note = `
-📝 AI-Generated Note
-Time: ${new Date().toLocaleTimeString()}
-Context: ${aiHint}
+    setIsGenerating(true);
+    setStatus('');
 
-Summary: The AI has processed your note and will send a notification to the relevant parties.
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message:
+            `Turn this into a concise useful note with clear facts and next steps. Do not claim that anyone was notified or contacted. Input: ${instructions}`,
+          businessContext: 'note-organizing',
+          chatbotName: "Life's Assistant",
+        }),
+      });
 
-Original instruction: "${aiHint}"
-    `;
+      if (!response.ok) {
+        throw new Error(`AI request failed with status ${response.status}`);
+      }
 
-    setNotes(note);
+      const data = (await response.json()) as ChatResponse;
+      setNote(data.message?.trim() || instructions.trim());
+      setStatus('Note prepared. Review it, then save it if you want to keep it.');
+    } catch (error) {
+      setNote(instructions.trim());
+      setStatus(error instanceof Error ? `AI unavailable: ${error.message}. Your original note is still here.` : 'AI unavailable. Your original note is still here.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-    // Simulate sending notification
-    setTimeout(() => {
-      setNotifications([
-        ...notifications,
-        {
-          title: `Note Created - ${aiHint.substring(0, 30)}...`,
-          type: 'note',
-          timestamp: new Date().toLocaleTimeString(),
-        },
-      ]);
-      alert('✅ Note created and notification sent!');
-    }, 1000);
+  const saveNote = () => {
+    const text = note.trim();
+    if (!text) {
+      setStatus('There is no note to save yet.');
+      return;
+    }
 
-    setAiHint('');
+    const next = [
+      { id: `note-${Date.now()}`, text, createdAt: Date.now() },
+      ...savedNotes,
+    ];
+    persist(next);
+    setStatus('Note saved on this device.');
+  };
+
+  const removeNote = (id: string) => {
+    persist(savedNotes.filter((item) => item.id !== id));
+  };
+
+  const copyNote = async () => {
+    if (!note.trim()) return;
+    try {
+      await navigator.clipboard.writeText(note);
+      setStatus('Note copied.');
+    } catch {
+      setStatus('Clipboard access was blocked by the browser.');
+    }
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '2rem' }}>📝 AI-Powered Notes</h1>
+    <div className="notes-page">
+      <div className="notes-inner">
+        <header>
+          <span className="eyebrow">NOTES</span>
+          <h1>Capture it before it disappears.</h1>
+          <p>AI can organize your rough note, but this screen will never claim it notified someone unless a real messaging connection confirms it.</p>
+        </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-        {/* Note Input */}
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>Tell AI What to Note</h2>
-          <p style={{ color: '#6b7280', fontSize: '0.95rem' }}>Describe what you need noted down, and the AI will process it and send notifications.</p>
-
-          <textarea
-            id="note-content"
-            name="note-content"
-            placeholder="E.g., 'Customer John Smith wants a quote for 10 units of product X. Follow up Monday morning.'"
-            value={aiHint}
-            onChange={(e) => setAiHint(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '1rem',
-              border: '1px solid #d1d5db',
-              borderRadius: '0.5rem',
-              minHeight: '150px',
-              fontFamily: 'inherit',
-              marginBottom: '1rem',
-              fontSize: '0.95rem',
-            }}
-          />
-
-          <button
-            onClick={handleAINote}
-            style={{
-              width: '100%',
-              padding: '1rem',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '1rem',
-            }}
-          >
-            🤖 AI Process & Send Note
-          </button>
-
-          <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f0f9ff', borderRadius: '0.5rem', border: '1px solid #bfdbfe' }}>
-            <h4 style={{ margin: '0 0 0.75rem 0', color: '#1e40af' }}>💡 AI Memory Enabled</h4>
-            <p style={{ margin: 0, fontSize: '0.9rem', color: '#1e40af' }}>The AI remembers your daily routines and will automatically route notes to the right people.</p>
-          </div>
-        </div>
-
-        {/* Generated Note Preview */}
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>Generated Note</h2>
-
-          {notes ? (
-            <>
-              <pre
-                style={{
-                  background: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                  marginBottom: '1rem',
-                  maxHeight: '200px',
-                  overflow: 'auto',
-                }}
-              >
-                {notes}
-              </pre>
-              <button
-                onClick={() => navigator.clipboard.writeText(notes)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  marginBottom: '0.5rem',
-                }}
-              >
-                📋 Copy Note
-              </button>
-              <button
-                onClick={() => setNotes('')}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  background: '#f3f4f6',
-                  color: '#1f2937',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                }}
-              >
-                Clear
-              </button>
-            </>
-          ) : (
-            <div
-              style={{
-                padding: '3rem 1rem',
-                textAlign: 'center',
-                color: '#9ca3af',
-                background: '#f9fafb',
-                borderRadius: '0.5rem',
-              }}
-            >
-              <p style={{ margin: 0 }}>Your AI-processed note will appear here</p>
+        <div className="grid">
+          <section className="panel">
+            <div className="panel-title">
+              <span className="eyebrow">CAPTURE</span>
+              <h2>What do you need to remember?</h2>
             </div>
-          )}
-        </div>
-      </div>
 
-      {/* Notifications Log */}
-      {notifications.length > 0 && (
-        <div style={{ marginTop: '2rem', background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-            <h2 style={{ margin: 0 }}>🔔 Notifications Sent</h2>
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              style={{
-                padding: '0.5rem 1rem',
-                background: '#f3f4f6',
-                border: '1px solid #d1d5db',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-              }}
-            >
-              {showNotifications ? 'Hide' : 'Show'} ({notifications.length})
+            <textarea
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="Example: Customer wants the porch estimate by Friday. Need to check lumber pricing and call before 3 PM."
+            />
+
+            <button className="primary" onClick={generateNote} disabled={isGenerating}>
+              {isGenerating ? 'Organizing…' : 'Organize with AI'}
             </button>
+
+            <div className="truth-note">
+              <strong>Notification status</strong>
+              <p>No email, text, or push notification is sent from this screen yet.</p>
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-title">
+              <span className="eyebrow">WORKING NOTE</span>
+              <h2>Edit before saving</h2>
+            </div>
+
+            <textarea
+              className="note-editor"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="Your organized note will appear here."
+            />
+
+            <div className="actions">
+              <button className="secondary" onClick={copyNote} disabled={!note.trim()}>Copy</button>
+              <button className="primary" onClick={saveNote} disabled={!note.trim()}>Save note</button>
+            </div>
+
+            {status && <div className="status" role="status">{status}</div>}
+          </section>
+        </div>
+
+        <section className="saved-panel">
+          <div className="saved-heading">
+            <div>
+              <span className="eyebrow">SAVED</span>
+              <h2>Your recent notes</h2>
+            </div>
+            <span className="count">{savedNotes.length}</span>
           </div>
 
-          {showNotifications && (
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {notifications.map((notif, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '1rem',
-                    background: '#f9fafb',
-                    borderRadius: '0.5rem',
-                    border: '1px solid #e5e7eb',
-                  }}
-                >
-                  <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>{notif.title}</div>
-                  <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>{notif.timestamp} - {notif.type}</div>
-                </div>
+          {savedNotes.length === 0 ? (
+            <div className="empty">No saved notes yet.</div>
+          ) : (
+            <div className="saved-list">
+              {savedNotes.map((item) => (
+                <article key={item.id} className="saved-note">
+                  <div>
+                    <p>{item.text}</p>
+                    <small>{new Date(item.createdAt).toLocaleString()}</small>
+                  </div>
+                  <button onClick={() => removeNote(item.id)} aria-label="Delete note">×</button>
+                </article>
               ))}
             </div>
           )}
-        </div>
-      )}
+        </section>
+      </div>
+
+      <style jsx>{`
+        .notes-page { height: 100%; overflow-y: auto; background: #212121; color: #ececec; }
+        .notes-inner { width: min(1080px, calc(100% - 44px)); margin: 0 auto; padding: 42px 0 70px; }
+        header { margin-bottom: 24px; }
+        .eyebrow { color: #747474; font-size: .64rem; letter-spacing: .14em; font-weight: 750; }
+        h1 { margin: 8px 0; font-size: clamp(1.8rem, 4vw, 3rem); letter-spacing: -.045em; font-weight: 650; }
+        header p { margin: 0; color: #858585; max-width: 760px; line-height: 1.55; font-size: .8rem; }
+        .grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 12px; }
+        .panel, .saved-panel { border: 1px solid #343434; background: #262626; border-radius: 17px; }
+        .panel { padding: 20px; display: grid; gap: 14px; align-content: start; }
+        .panel-title h2, .saved-heading h2 { margin: 5px 0 0; font-size: 1rem; }
+        textarea { width: 100%; min-height: 180px; border: 1px solid #414141; border-radius: 10px; background: #1f1f1f; color: #f2f2f2; padding: 12px; outline: none; resize: vertical; line-height: 1.5; }
+        textarea::placeholder { color: #676767; }
+        textarea:focus { border-color: #666; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
+        .note-editor { min-height: 260px; }
+        button { min-height: 42px; border-radius: 10px; padding: 0 14px; font-weight: 650; cursor: pointer; }
+        .primary { border: 0; background: #ededed; color: #111; }
+        .secondary { border: 1px solid #454545; background: #303030; color: #ededed; }
+        button:disabled { opacity: .4; cursor: default; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .truth-note { padding: 13px; border: 1px solid rgba(143,196,255,.22); background: rgba(143,196,255,.04); border-radius: 12px; }
+        .truth-note strong { font-size: .73rem; }
+        .truth-note p { margin: 4px 0 0; color: #748597; font-size: .67rem; line-height: 1.45; }
+        .status { color: #9b9b9b; background: #222; border: 1px solid #343434; border-radius: 10px; padding: 10px 12px; font-size: .7rem; }
+        .saved-panel { margin-top: 12px; padding: 20px; }
+        .saved-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .count { min-width: 30px; height: 25px; padding: 0 8px; border-radius: 999px; display: grid; place-items: center; background: #303030; color: #8b8b8b; font-size: .67rem; }
+        .empty { min-height: 100px; display: grid; place-items: center; color: #6f6f6f; font-size: .73rem; }
+        .saved-list { display: grid; gap: 8px; }
+        .saved-note { display: grid; grid-template-columns: minmax(0,1fr) 30px; gap: 10px; align-items: start; padding: 12px; border: 1px solid #343434; background: #2b2b2b; border-radius: 11px; }
+        .saved-note p { margin: 0; white-space: pre-wrap; color: #cfcfcf; font-size: .73rem; line-height: 1.45; }
+        .saved-note small { display: block; margin-top: 6px; color: #646464; font-size: .61rem; }
+        .saved-note button { min-height: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: #686868; font-size: 1rem; }
+        @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+        @media (max-width: 620px) {
+          .notes-inner { width: calc(100% - 28px); padding-top: 24px; }
+          .actions { grid-template-columns: 1fr; }
+        }
+      `}</style>
     </div>
   );
 };
+
+export default AINoteEditor;
