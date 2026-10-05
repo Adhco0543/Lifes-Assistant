@@ -1,15 +1,5 @@
-import Link from "next/link";
-import { OnboardingForm } from "@/components/OnboardingForm";
+import { redirect } from "next/navigation";
 
 export default function OnboardingPage() {
-  return (
-    <main className="page">
-      <div className="stack">
-        <Link className="back" href="/">
-          ← Home
-        </Link>
-        <OnboardingForm />
-      </div>
-    </main>
-  );
+  redirect("/");
 }
