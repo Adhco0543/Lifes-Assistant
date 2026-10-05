@@ -63,8 +63,17 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
           setError('Login failed');
         }
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
+        setError("That email/password doesn't match an account. If this is your first time here, tap Sign up. If you already had an account, use Forgot password.");
+      } else if (code === 'auth/email-already-in-use') {
+        setError('An account already exists with this email. Sign in or use Forgot password.');
+      } else if (code === 'auth/weak-password') {
+        setError('Choose a password with at least 6 characters.');
+      } else {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -77,6 +86,32 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
     setEmail('');
     setPassword('');
     setDisplayName('');
+  };
+
+  const handleForgotPassword = async () => {
+    setError('');
+    setSuccess('');
+
+    if (!email.trim()) {
+      setError('Enter your email first, then tap Forgot password.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      await firebaseBackend.initialize();
+      await firebaseBackend.sendPasswordReset(email.trim());
+      setSuccess('Password reset email sent. Check your inbox and spam folder.');
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/invalid-email') {
+        setError('Enter a valid email address.');
+      } else {
+        setError('I could not send the reset email. Try again in a moment.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -132,7 +167,19 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               required
             />
-            {mode === 'login' && <p className="help-text">At least 6 characters</p>}
+            {mode === 'login' && (
+              <div className="password-help-row">
+                <p className="help-text">At least 6 characters</p>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="link-btn forgot-btn"
+                  disabled={isLoading}
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
           </div>
 
           {error && <div className="error-message">{error}</div>}
@@ -254,6 +301,18 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
           margin: 0;
           font-size: 0.75rem;
           color: #999;
+        }
+
+        .password-help-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+        }
+
+        .forgot-btn {
+          font-size: 0.78rem;
+          white-space: nowrap;
         }
 
         .error-message {
