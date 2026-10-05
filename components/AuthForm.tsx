@@ -231,29 +231,29 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
           align-items: center;
           justify-content: center;
           min-height: 100vh;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: #212121;
           padding: 1rem;
         }
 
         .auth-form {
-          background: white;
+          background: #2b2b2b;
           padding: 2.5rem;
           border-radius: 1rem;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
           width: 100%;
           max-width: 400px;
         }
 
         .auth-form h2 {
           margin: 0 0 0.5rem;
-          color: #333;
+          color: #f2f2f2;
           font-size: 1.75rem;
           font-weight: 700;
         }
 
         .subtitle {
           margin: 0 0 1.5rem;
-          color: #666;
+          color: #a6a6a6;
           font-size: 0.9rem;
           line-height: 1.4;
         }
@@ -272,13 +272,13 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
 
         .form-group label {
           font-weight: 600;
-          color: #333;
+          color: #d0d0d0;
           font-size: 0.9rem;
         }
 
         .form-group input {
           padding: 0.75rem;
-          border: 1px solid #ddd;
+          border: 1px solid #474747;
           border-radius: 0.5rem;
           font-size: 0.95rem;
           transition: all 0.2s ease;
@@ -287,14 +287,14 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
 
         .form-group input:focus {
           outline: none;
-          border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-          background: rgba(102, 126, 234, 0.02);
+          border-color: #6e6e6e;
+          box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
+          background: #303030;
         }
 
         .form-group input:disabled {
-          background: #f5f5f5;
-          color: #999;
+          background: #262626;
+          color: #8c8c8c;
         }
 
         .help-text {
@@ -337,8 +337,8 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
 
         .submit-btn {
           padding: 0.75rem;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
+          background: #f4f4f4;
+          color: #111;
           border: none;
           border-radius: 0.5rem;
           font-weight: 600;
@@ -354,7 +354,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
 
         .submit-btn:hover:not(:disabled) {
           transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+          box-shadow: 0 8px 20px rgba(0,0,0,0.22);
         }
 
         .submit-btn:active:not(:disabled) {
@@ -384,14 +384,14 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
         .toggle-mode {
           margin: 1.5rem 0 0;
           text-align: center;
-          color: #666;
+          color: #a6a6a6;
           font-size: 0.9rem;
         }
 
         .link-btn {
           background: none;
           border: none;
-          color: #667eea;
+          color: #d6d6d6;
           font-weight: 600;
           cursor: pointer;
           text-decoration: none;
@@ -402,15 +402,15 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
 
         .link-btn:hover {
           text-decoration: underline;
-          color: #764ba2;
+          color: #ffffff;
         }
 
         .info-box {
           margin-top: 1.5rem;
           padding: 1rem;
-          background: #f0f4ff;
+          background: #242424;
           border-radius: 0.5rem;
-          border-left: 3px solid #667eea;
+          border-left: 3px solid #5b5b5b;
         }
 
         .info-box p {
@@ -421,7 +421,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
         }
 
         .info-box strong {
-          color: #667eea;
+          color: #d6d6d6;
         }
 
         @media (max-width: 480px) {
