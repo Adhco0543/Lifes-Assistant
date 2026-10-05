@@ -6,225 +6,199 @@ interface AIEmailComposerProps {
   userId: string;
 }
 
-export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
-  const [emailData, setEmailData] = useState({
-    recipient: '',
-    subject: '',
-    aiHint: '',
-  });
-  const [generatedEmail, setGeneratedEmail] = useState('');
-  const [draftsPrepared, setDraftsPrepared] = useState<string[]>([]);
+type ChatResponse = {
+  message?: string;
+};
 
-  const handleAIGenerate = () => {
-    if (!emailData.recipient || !emailData.aiHint) {
-      alert('Please enter recipient email and what the email should be about');
+export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
+  const [recipient, setRecipient] = useState('');
+  const [subject, setSubject] = useState('');
+  const [instructions, setInstructions] = useState('');
+  const [body, setBody] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const generateDraft = async () => {
+    if (!recipient.trim() || !instructions.trim()) {
+      setStatus('Enter a recipient and tell the assistant what the email should say.');
       return;
     }
 
-    // Simulate AI email generation
-    const email = `
-To: ${emailData.recipient}
-Subject: ${emailData.subject || 'Professional Communication'}
+    setIsGenerating(true);
+    setStatus('');
 
-Dear Valued Client,
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message:
+            `Draft an email for me. Recipient: ${recipient}. Subject: ${subject || 'Create a suitable subject'}. Instructions: ${instructions}. Return only the email body, without To/From/Subject labels.`,
+          businessContext: 'email-drafting',
+          chatbotName: "Life's Assistant",
+        }),
+      });
 
-${emailData.aiHint}
+      if (!response.ok) {
+        throw new Error(`AI request failed with status ${response.status}`);
+      }
 
-Thank you for your business and continued partnership.
-
-Best regards,
-Your Business
-    `;
-
-    setGeneratedEmail(email);
+      const data = (await response.json()) as ChatResponse;
+      setBody(data.message?.trim() || '');
+      setStatus(data.message ? 'Draft ready. Review it before copying or sending later.' : 'No draft was returned.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not generate the email draft.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handlePrepareEmail = async () => {
-    if (!generatedEmail) {
-      alert('Please generate an email first');
+  const copyDraft = async () => {
+    if (!body.trim()) {
+      setStatus('There is no email body to copy yet.');
       return;
     }
 
-    await navigator.clipboard.writeText(generatedEmail);
-    setDraftsPrepared([
-      ...draftsPrepared,
-      `${emailData.recipient} - ${new Date().toLocaleTimeString()}`,
-    ]);
-    alert('Draft copied. Sending is not connected in this beta yet.');
+    const formatted = `To: ${recipient}\nSubject: ${subject || '(no subject)'}\n\n${body}`;
+
+    try {
+      await navigator.clipboard.writeText(formatted);
+      setStatus('Draft copied to your clipboard.');
+    } catch {
+      setStatus('Clipboard access was blocked by the browser.');
+    }
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '2rem' }}>📧 AI Email Composer</h1>
+    <div className="email-page">
+      <div className="email-inner">
+        <header>
+          <span className="eyebrow">EMAIL DRAFTS</span>
+          <h1>Write it clearly. Send it only when sending is truly connected.</h1>
+          <p>
+            Drafting is live through the AI. Direct sending is intentionally disabled until a verified sending domain is connected.
+          </p>
+        </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-        {/* Email Composer */}
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>Compose with AI</h2>
+        <div className="grid">
+          <section className="panel">
+            <div className="panel-title">
+              <span className="eyebrow">COMPOSE</span>
+              <h2>Email details</h2>
+            </div>
 
-          <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="email-recipient">Recipient Email</label>
+            <label className="field">
+              <span>Recipient email</span>
               <input
-                id="email-recipient"
-                name="email-recipient"
                 type="email"
-                placeholder="client@example.com"
-                value={emailData.recipient}
-                onChange={(e) => setEmailData({ ...emailData, recipient: e.target.value })}
-                style={{ width: '100%', padding: '0.75rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
+                value={recipient}
+                onChange={(event) => setRecipient(event.target.value)}
+                placeholder="person@example.com"
+                autoComplete="email"
               />
-            </div>
+            </label>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="email-subject">Subject (Optional)</label>
+            <label className="field">
+              <span>Subject</span>
               <input
-                id="email-subject"
-                name="email-subject"
                 type="text"
-                placeholder="Email subject"
-                value={emailData.subject}
-                onChange={(e) => setEmailData({ ...emailData, subject: e.target.value })}
-                style={{ width: '100%', padding: '0.75rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+                placeholder="Optional"
               />
-            </div>
+            </label>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="email-hint">Tell AI What This Email Should Say</label>
+            <label className="field">
+              <span>What should the email say?</span>
               <textarea
-                id="email-hint"
-                name="email-hint"
-                placeholder="E.g., 'Send a follow-up about the quote we sent yesterday for the renovation project...'"
-                value={emailData.aiHint}
-                onChange={(e) => setEmailData({ ...emailData, aiHint: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  minHeight: '150px',
-                  fontFamily: 'inherit',
-                }}
+                value={instructions}
+                onChange={(event) => setInstructions(event.target.value)}
+                placeholder="Example: Tell her I love her and apologize for being on my phone too much. Keep it sincere and not too long."
               />
+            </label>
+
+            <button className="primary" onClick={generateDraft} disabled={isGenerating}>
+              {isGenerating ? 'Writing draft…' : 'Generate draft with AI'}
+            </button>
+
+            <div className="connection-note">
+              <strong>Sending status</strong>
+              <p>No verified sending domain is connected yet, so the app will not pretend an email was sent.</p>
             </div>
-          </div>
+          </section>
 
-          <button
-            onClick={handleAIGenerate}
-            style={{
-              width: '100%',
-              padding: '1rem',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.5rem',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '1rem',
-            }}
-          >
-            🤖 AI Generate Email
-          </button>
-
-          <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#fef3c7', borderRadius: '0.5rem', border: '1px solid #fcd34d' }}>
-            <h4 style={{ margin: '0 0 0.5rem 0', color: '#b45309' }}>💡 Pro Tip</h4>
-            <p style={{ margin: 0, fontSize: '0.9rem', color: '#b45309' }}>The AI learns your email style from your daily routines and can automatically draft follow-ups.</p>
-          </div>
-        </div>
-
-        {/* Generated Email Preview */}
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>Email Preview</h2>
-
-          {generatedEmail ? (
-            <>
-              <pre
-                style={{
-                  background: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                  marginBottom: '1rem',
-                  maxHeight: '300px',
-                  overflow: 'auto',
-                  fontSize: '0.9rem',
-                }}
-              >
-                {generatedEmail}
-              </pre>
-
-              <div style={{ display: 'grid', gap: '0.5rem' }}>
-                <button
-                  onClick={handlePrepareEmail}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  📋 Prepare & Copy Draft
-                </button>
-                <button
-                  onClick={() => navigator.clipboard.writeText(generatedEmail)}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    background: '#f3f4f6',
-                    color: '#1f2937',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  📋 Copy
-                </button>
-              </div>
-            </>
-          ) : (
-            <div
-              style={{
-                padding: '4rem 1rem',
-                textAlign: 'center',
-                color: '#9ca3af',
-                background: '#f9fafb',
-                borderRadius: '0.5rem',
-              }}
-            >
-              <p style={{ margin: 0 }}>Your AI-generated email will appear here</p>
+          <section className="panel preview-panel">
+            <div className="panel-title">
+              <span className="eyebrow">PREVIEW</span>
+              <h2>Review before anything leaves the app</h2>
             </div>
-          )}
+
+            <div className="address-card">
+              <div><span>To</span><strong>{recipient || 'No recipient yet'}</strong></div>
+              <div><span>Subject</span><strong>{subject || 'No subject yet'}</strong></div>
+            </div>
+
+            <label className="field body-field">
+              <span>Email body</span>
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                placeholder="Your generated email will appear here and remain editable."
+              />
+            </label>
+
+            <div className="actions">
+              <button className="secondary" onClick={copyDraft} disabled={!body.trim()}>Copy draft</button>
+              <button className="disabled-send" type="button" disabled title="Connect a verified sending domain first">
+                Send email · not connected
+              </button>
+            </div>
+
+            {status && <div className="status" role="status">{status}</div>}
+          </section>
         </div>
       </div>
 
-      {/* Sent Emails Log */}
-      {draftsPrepared.length > 0 && (
-        <div style={{ marginTop: '2rem', background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>📝 Drafts Prepared ({draftsPrepared.length})</h2>
-          <div style={{ display: 'grid', gap: '0.75rem' }}>
-            {draftsPrepared.map((email, idx) => (
-              <div
-                key={idx}
-                style={{
-                  padding: '0.75rem',
-                  background: '#f9fafb',
-                  borderRadius: '0.5rem',
-                  border: '1px solid #e5e7eb',
-                  fontSize: '0.9rem',
-                }}
-              >
-                📝 {email}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <style jsx>{`
+        .email-page { height: 100%; overflow-y: auto; background: #212121; color: #ececec; }
+        .email-inner { width: min(1080px, calc(100% - 44px)); margin: 0 auto; padding: 42px 0 70px; }
+        header { margin-bottom: 24px; }
+        .eyebrow { color: #747474; font-size: .64rem; letter-spacing: .14em; font-weight: 750; }
+        h1 { margin: 8px 0; max-width: 780px; font-size: clamp(1.8rem, 4vw, 3rem); letter-spacing: -.045em; font-weight: 650; }
+        header p { margin: 0; max-width: 720px; color: #878787; line-height: 1.55; font-size: .8rem; }
+        .grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 12px; }
+        .panel { border: 1px solid #343434; background: #262626; border-radius: 17px; padding: 20px; display: grid; gap: 14px; align-content: start; }
+        .panel-title h2 { margin: 5px 0 0; font-size: 1rem; }
+        .field { display: grid; gap: 7px; }
+        .field > span { font-size: .73rem; color: #bdbdbd; font-weight: 650; }
+        input, textarea { width: 100%; border: 1px solid #414141; border-radius: 10px; background: #1f1f1f; color: #f2f2f2; padding: 11px 12px; outline: none; }
+        input::placeholder, textarea::placeholder { color: #676767; }
+        input:focus, textarea:focus { border-color: #666; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
+        textarea { min-height: 142px; resize: vertical; line-height: 1.5; }
+        .body-field textarea { min-height: 290px; }
+        button { min-height: 42px; border-radius: 10px; padding: 0 14px; font-weight: 650; cursor: pointer; }
+        .primary { border: 0; background: #ededed; color: #111; }
+        .primary:disabled { opacity: .45; cursor: default; }
+        .secondary { border: 1px solid #454545; background: #303030; color: #ededed; }
+        .disabled-send { border: 1px solid #383838; background: #292929; color: #686868; cursor: not-allowed; }
+        .connection-note { padding: 13px; border: 1px solid rgba(225,191,115,.24); background: rgba(225,191,115,.05); border-radius: 12px; }
+        .connection-note strong { font-size: .73rem; }
+        .connection-note p { margin: 4px 0 0; color: #8b8170; font-size: .67rem; line-height: 1.45; }
+        .address-card { border: 1px solid #353535; border-radius: 12px; background: #2b2b2b; overflow: hidden; }
+        .address-card > div { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 10px; padding: 10px 12px; border-top: 1px solid #333; }
+        .address-card > div:first-child { border-top: 0; }
+        .address-card span { color: #6f6f6f; font-size: .67rem; }
+        .address-card strong { font-size: .72rem; color: #cfcfcf; overflow: hidden; text-overflow: ellipsis; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .status { color: #9b9b9b; background: #222; border: 1px solid #343434; border-radius: 10px; padding: 10px 12px; font-size: .7rem; line-height: 1.45; }
+        @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+        @media (max-width: 620px) {
+          .email-inner { width: calc(100% - 28px); padding-top: 24px; }
+          .actions { grid-template-columns: 1fr; }
+        }
+      `}</style>
     </div>
   );
 };
+
+export default AIEmailComposer;
