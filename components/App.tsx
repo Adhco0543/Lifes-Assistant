@@ -88,6 +88,22 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
     hydrate();
   }, [hydrate]);
 
+  useEffect(() => {
+    const openQuote = () => navigate('quotes');
+    const openEmail = () => navigate('email');
+    const openTasks = () => navigate('tasks');
+
+    window.addEventListener('open-quote-builder', openQuote);
+    window.addEventListener('open-email', openEmail);
+    window.addEventListener('open-tasks', openTasks);
+
+    return () => {
+      window.removeEventListener('open-quote-builder', openQuote);
+      window.removeEventListener('open-email', openEmail);
+      window.removeEventListener('open-tasks', openTasks);
+    };
+  }, [navigate]);
+
   const handleAuthSuccess = useCallback(async () => {
     setIsLoading(true);
     await hydrate();
