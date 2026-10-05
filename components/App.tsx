@@ -196,7 +196,13 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           </div>
         </button>
 
-        <button className="new-chat" onClick={() => navigate('chat')}>
+        <button
+          className="new-chat"
+          onClick={() => {
+            navigate('chat');
+            window.setTimeout(() => window.dispatchEvent(new CustomEvent('new-conversation')), 0);
+          }}
+        >
           <span className="new-chat-icon">＋</span>
           <span>New conversation</span>
         </button>
