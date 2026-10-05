@@ -64,8 +64,49 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
       ? quoteData.itemsAndPrices
           .map((item) =>
             item.item +
-            ': 
+            ': $' +
+            item.price.toFixed(2) +
+            ' x ' +
+            item.quantity +
+            ' = $' +
+            (item.price * item.quantity).toFixed(2)
+          )
+          .join('; ')
+      : 'No line items added yet';
 
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message:
+            'Create a professional quote draft. Keep every amount exactly as provided. Do not invent prices, taxes, discounts, scope, warranties, or payment terms. Client: ' +
+            quoteData.clientName +
+            '. Project: ' +
+            quoteData.projectDescription +
+            '. Items: ' +
+            lineItems +
+            '. Total: $' +
+            quoteData.total.toFixed(2) +
+            '. Notes: ' +
+            (quoteData.notes || 'none') +
+            '. Return only the quote draft.',
+          businessContext: 'quote-drafting',
+          chatbotName: "Life's Assistant",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Quote AI request failed');
+      }
+
+      const data = await response.json();
+      setGeneratedQuote(data.message || '');
+    } catch (error) {
+      console.error('Quote generation failed:', error);
+      alert('I could not generate the AI quote draft. Try again.');
+    }
+  };
   const handleAIComplete = (message: string) => {
     // AI will generate quote based on message
     const quote = `
