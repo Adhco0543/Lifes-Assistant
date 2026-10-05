@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
   staticPageGenerationTimeout: 60,
   skipTrailingSlashRedirect: true,
   env: {
-    NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaSyACd1FEPB7AlmbPPhs4qG_nn-naEZqSKtIM",
+    NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaSyCdLfEPB7AlmbPPhs4qG_nn-naEZqSKtIM",
     NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "business-ai-assistant-bc6b6.firebaseapp.com",
     NEXT_PUBLIC_FIREBASE_PROJECT_ID: "business-ai-assistant-bc6b6",
     NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "business-ai-assistant-bc6b6.firebasestorage.app",
