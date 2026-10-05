@@ -376,7 +376,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             )}
           </div>
 
-          <p>Business assistant with chat-to-action support</p>
+          <p>Ask anything. Draft, plan, organize, and get work moving.</p>
         </div>
 
         {!fullScreen && onClose && (
@@ -459,7 +459,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               name="message-input"
               ref={inputRef}
               type="text"
-              placeholder="Type or use microphone..."
+              placeholder="Message Life's Assistant"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyPress}
@@ -492,11 +492,11 @@ const styles = `
   .advanced-chat {
     display: flex;
     flex-direction: column;
-    background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+    background: #212121;
     color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-    border-radius: 0.75rem;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    border-radius: 0;
+    box-shadow: none;
     overflow: hidden;
     z-index: 1000;
   }
@@ -520,8 +520,8 @@ const styles = `
   }
 
   .chat-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 1rem 1.5rem;
+    background: #212121;
+    padding: 0.8rem 1.1rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -581,8 +581,8 @@ const styles = `
     align-items: center;
     overflow-x: auto;
     padding: 0.65rem;
-    background: rgba(255,255,255,0.04);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    background: #1f1f1f;
+    border-bottom: 1px solid #2f2f2f;
   }
 
   .new-chat-btn,
@@ -590,14 +590,14 @@ const styles = `
     border: none;
     border-radius: 0.5rem;
     padding: 0.45rem 0.7rem;
-    background: rgba(255,255,255,0.08);
+    background: #2f2f2f;
     color: white;
     cursor: pointer;
     white-space: nowrap;
   }
 
   .conversation-item.active {
-    background: rgba(102, 126, 234, 0.6);
+    background: #3a3a3a;
   }
 
   .conv-count {
@@ -622,20 +622,20 @@ const styles = `
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 1rem;
-    background: linear-gradient(180deg, rgba(15, 15, 30, 0.8) 0%, rgba(26, 26, 46, 0.9) 100%);
+    padding: 1.25rem 1rem 2rem;
+    background: #212121;
   }
 
   .messages-container {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 1rem;
   }
 
   .empty-state {
     text-align: center;
     color: rgba(255,255,255,0.75);
-    margin-top: 3rem;
+    margin-top: 16vh;
   }
 
   .message {
@@ -651,7 +651,7 @@ const styles = `
   }
 
   .message-bubble {
-    max-width: 80%;
+    max-width: 760px;
     padding: 0.75rem 1rem;
     border-radius: 0.75rem;
     word-wrap: break-word;
@@ -660,16 +660,16 @@ const styles = `
   }
 
   .message-user .message-bubble {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #303030;
     color: white;
-    border-radius: 0.75rem 0.2rem 0.75rem 0.75rem;
+    border-radius: 18px;
   }
 
   .message-assistant .message-bubble {
-    background: rgba(255, 255, 255, 0.08);
+    background: transparent;
     color: #e0e0e0;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 0.2rem 0.75rem 0.75rem 0.75rem;
+    border: none;
+    border-radius: 0;
   }
 
   .typing {
@@ -702,15 +702,15 @@ const styles = `
   .input-area {
     padding: 1rem;
     border-top: 1px solid rgba(255,255,255,0.08);
-    background: rgba(15, 15, 30, 0.95);
+    background: #212121;
   }
 
   .input-wrapper {
     display: flex;
     gap: 0.5rem;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(102, 126, 234, 0.3);
-    border-radius: 1.5rem;
+    background: #2f2f2f;
+    border: 1px solid #4a4a4a;
+    border-radius: 24px;
     padding: 0.4rem;
   }
 
@@ -744,7 +744,8 @@ const styles = `
   }
 
   .send-btn {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #f4f4f4;
+    color: #111;
   }
 
   .send-btn:disabled {
