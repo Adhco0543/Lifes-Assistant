@@ -6,6 +6,7 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
   updateProfile,
 } from "firebase/auth";
 import type { Firestore } from "firebase/firestore";
@@ -150,6 +151,11 @@ class FirebaseBackend {
     const { auth } = await this.getServices();
     const result = await signInWithEmailAndPassword(auth, email, password);
     return result.user;
+  }
+
+  async sendPasswordReset(email: string): Promise<void> {
+    const { auth } = await this.getServices();
+    await sendPasswordResetEmail(auth, email);
   }
 
   async logout(): Promise<void> {
