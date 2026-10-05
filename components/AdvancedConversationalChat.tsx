@@ -256,6 +256,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           message: userMessage,
           businessContext,
           chatbotName,
+          history: messages
+            .slice(-12)
+            .filter((item) => item.role === 'user' || item.role === 'assistant')
+            .map((item) => ({ role: item.role, content: item.content })),
         }),
       });
 
