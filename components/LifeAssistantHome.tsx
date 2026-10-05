@@ -125,8 +125,8 @@ export default function LifeAssistantHome({
             <div className="status-row">
               <span className="status-icon ok">✓</span>
               <div>
-                <strong>Conversation sync</strong>
-                <p>Signed-in conversations use the Firebase account workspace.</p>
+                <strong>Conversation storage</strong>
+                <p>Firebase sync is configured for signed-in chat, with local fallback if Firestore access is restricted.</p>
               </div>
             </div>
             <div className="status-row">
