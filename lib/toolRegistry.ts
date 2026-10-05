@@ -86,14 +86,14 @@ export class EmailTool extends Tool {
       switch (action) {
         case "send":
           return {
-            success: true,
-            message: `Email sent to ${to}`,
+            success: false,
+            message: "Email sending is not connected yet. The draft is ready for review.",
+            error: "EMAIL_PROVIDER_NOT_CONNECTED",
             data: {
               to,
               subject,
               body,
-              sentAt: new Date(),
-              emailId: `email_${Date.now()}`,
+              requiresApproval: true,
             },
           };
 
@@ -217,11 +217,12 @@ export class QuoteTool extends Tool {
 
         case "send": {
           return {
-            success: true,
-            message: `Quote sent to ${customerName}`,
+            success: false,
+            message: "Quote sending is not connected yet. The quote remains a draft.",
+            error: "QUOTE_DELIVERY_NOT_CONNECTED",
             data: {
-              sentAt: new Date(),
               customerName,
+              requiresApproval: true,
             },
           };
         }
@@ -343,8 +344,9 @@ export class JobSearchTool extends Tool {
       const jobs = await this.searchJobs(query as string, location as string);
 
       return {
-        success: true,
-        message: `Found ${jobs.length} job opportunities`,
+        success: false,
+        message: "Live job search is not connected yet.",
+        error: "JOB_SEARCH_PROVIDER_NOT_CONNECTED",
         data: {
           jobs,
           searchQuery: query,
@@ -362,16 +364,8 @@ export class JobSearchTool extends Tool {
   }
 
   private async searchJobs(query: string, location: string) {
-    // Placeholder - would call job board APIs
-    return [
-      {
-        id: `job_${Date.now()}`,
-        title: `${query} opportunity in ${location}`,
-        description: "Job description here",
-        budget: 5000,
-        deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    ];
+    // A live provider must be connected before returning real opportunities.
+    return [];
   }
 }
 
@@ -492,15 +486,12 @@ export class CustomerLookupTool extends Tool {
 
     try {
       return {
-        success: true,
-        message: `Customer found`,
+        success: false,
+        message: "Customer lookup is not connected to a customer database yet.",
+        error: "CUSTOMER_DATABASE_NOT_CONNECTED",
         data: {
-          customerId: customerId || `cust_${Date.now()}`,
+          customerId,
           name: customerName,
-          email: "customer@example.com",
-          phone: "555-0000",
-          previousProjects: [],
-          totalSpent: 0,
         },
       };
     } catch (error) {
