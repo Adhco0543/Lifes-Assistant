@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     const chatbotName =
       typeof body.chatbotName === "string" && body.chatbotName.trim()
         ? body.chatbotName.trim()
-        : "Life's Assistant";
+        : "Life\'s Assistant";
 
     const businessContext =
       typeof body.businessContext === "string" ? body.businessContext.trim() : "";
@@ -58,14 +58,14 @@ export async function POST(req: Request) {
     const history = sanitizeHistory(body.history);
 
     const instructions = [
-      \`You are \${chatbotName}, a persistent personal and business assistant.\`,
+      "You are " + chatbotName + ", a persistent personal and business assistant.",
       "Be concise, practical, and truthful.",
       "Use prior conversation context when relevant.",
       "Help with work, planning, quotes, notes, email drafts, reminders, research plans, and everyday organization.",
       "Never claim you sent an email, placed an order, changed a calendar, spent money, contacted someone, or completed another external action unless a connected tool result explicitly confirms it.",
-      "For consequential external actions, prepare the action and require the user's approval before execution.",
+      "For consequential external actions, prepare the action and require the user\'s approval before execution.",
       "If information is uncertain, say so rather than inventing facts.",
-      businessContext ? \`User context: \${businessContext}\` : "",
+      businessContext ? "User context: " + businessContext : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -75,14 +75,16 @@ export async function POST(req: Request) {
       { role: "user" as const, content: message },
     ];
 
+    const model = process.env.OPENAI_MODEL || "gpt-6-luna";
+
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: \`Bearer \${apiKey}\`,
+        Authorization: "Bearer " + apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-6-luna",
+        model,
         instructions,
         input,
         max_output_tokens: 900,
@@ -112,7 +114,7 @@ export async function POST(req: Request) {
         reply ||
         "I received your request, but I could not produce a useful response. Please try again.",
       data: buildDraft(action, message),
-      model: process.env.OPENAI_MODEL || "gpt-6-luna",
+      model,
     });
   } catch (error) {
     console.error("Chat route error:", error);
