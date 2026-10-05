@@ -203,6 +203,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
+  useEffect(() => {
+    const handleNewConversation = () => {
+      createNewConversation();
+    };
+
+    window.addEventListener('new-conversation', handleNewConversation);
+    return () => window.removeEventListener('new-conversation', handleNewConversation);
+  });
+
   const handleToolHandoff = (data: ChatApiResponse) => {
     if (data.type === 'quote') {
       localStorage.setItem('quote_draft', JSON.stringify(data.data || {}));
@@ -512,10 +521,10 @@ const styles = `
   }
 
   .advanced-chat.fullscreen {
-    position: fixed;
+    position: absolute;
     inset: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     border-radius: 0;
   }
 
