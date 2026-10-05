@@ -1,203 +1,94 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import Dashboard from './Dashboard';
+import React, { useCallback, useEffect, useState } from 'react';
 import AdvancedConversationalChat from './AdvancedConversationalChat';
 import MaterialEstimator from './MaterialEstimator';
 import Progressiveonboarding from './Progressiveonboarding';
 import AuthForm from './AuthForm';
-import { RichMedia } from './Richmedia';
 import { businessProfileManager } from '../lib/businessProfile';
 import { firebaseBackend } from '../lib/firebaseBackend';
-import { useAppIntegration } from '../lib/hooks';
-import NotificationSystem from './NotificationSystem';
-import { IntelligentBackgroundWorker } from '../lib/intelligentBackgroundWorker';
-import { TasksView } from './TasksView';
-import { TeamWorkspace } from './TeamWorkspace';
-import { BusinessRecommendations } from './BusinessRecommendations';
-import { AppCustomization } from './AppCustomization';
-import { SettingsHub } from './SettingsHub';
 import { AIQuoteBuilder } from './AIQuoteBuilder';
 import { AINoteEditor } from './AINoteEditor';
 import { AIEmailComposer } from './AIEmailComposer';
+import { SettingsHub } from './SettingsHub';
 
 type ViewType =
-  | 'dashboard'
   | 'chat'
   | 'quotes'
   | 'notes'
   | 'email'
   | 'materials'
-  | 'onboarding'
   | 'settings'
-  | 'tasks'
-  | 'team'
-  | 'recommendations'
-  | 'customization';
+  | 'onboarding';
 
 interface AppProps {
   userId?: string;
 }
 
+const NAV_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
+  { id: 'chat', label: 'Chat', icon: '✦' },
+  { id: 'quotes', label: 'Quotes', icon: '▤' },
+  { id: 'notes', label: 'Notes', icon: '✎' },
+  { id: 'email', label: 'Email drafts', icon: '✉' },
+  { id: 'materials', label: 'Materials', icon: '⌂' },
+  { id: 'settings', label: 'Settings', icon: '⚙' },
+];
+
 export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
-  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
-  const [hasProfile, setHasProfile] = useState(false);
+  const [currentView, setCurrentView] = useState<ViewType>('chat');
   const [isLoading, setIsLoading] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [businessType, setBusinessType] = useState('business');
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null); // Changed to null for proper initialization
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const initializeRef = useRef(false);
-  const workerUserIdRef = useRef<string | null>(null);
-
-  const effectiveUserId = useMemo(
-    () => (isAuthenticated ? userId : 'default-user'),
-    [isAuthenticated, userId]
-  );
-
-  const integration = useAppIntegration(effectiveUserId);
-
-  const stopActiveWorker = useCallback(() => {
-    if (workerUserIdRef.current) {
-      try {
-        IntelligentBackgroundWorker.stop(workerUserIdRef.current);
-      } catch (error) {
-        console.error('Error stopping background worker:', error);
-      } finally {
-        workerUserIdRef.current = null;
-      }
+  const loadProfile = useCallback((targetUserId: string) => {
+    const profile = businessProfileManager.loadProfile(targetUserId);
+    if (!profile) {
+      setCurrentView('onboarding');
+      return;
     }
+
+    setBusinessType(profile.businessType || 'business');
+    setCurrentView('chat');
   }, []);
 
-  const startWorkerForUser = useCallback(
-    (targetUserId: string) => {
-      if (!targetUserId) return;
-
-      if (workerUserIdRef.current === targetUserId) return;
-
-      stopActiveWorker();
-
-      try {
-        IntelligentBackgroundWorker.start(targetUserId);
-        workerUserIdRef.current = targetUserId;
-      } catch (error) {
-        console.error('Error starting background worker:', error);
-      }
-    },
-    [stopActiveWorker]
-  );
-
-  const applyProfileState = useCallback(
-    (targetUserId: string) => {
-      const profile = businessProfileManager.loadProfile(targetUserId);
-
-      if (!profile) {
-        setHasProfile(false);
-        setBusinessType('business');
-        setCurrentView('onboarding');
-        return false;
-      }
-
-      setHasProfile(true);
-      setBusinessType(profile.businessType || 'business');
-      setCurrentView('dashboard');
-      startWorkerForUser(targetUserId);
-      return true;
-    },
-    [startWorkerForUser]
-  );
-
-  const hydrateFromAuthState = useCallback(async () => {
+  const hydrate = useCallback(async () => {
     try {
       await firebaseBackend.initialize();
       const currentUser = firebaseBackend.getCurrentUser();
 
       if (currentUser) {
         setIsAuthenticated(true);
-        const loaded = applyProfileState(currentUser.uid);
-
-        if (!loaded) {
-          stopActiveWorker();
-        }
-
-        return;
-      }
-
-      setIsAuthenticated(false);
-      const loaded = applyProfileState('default-user');
-
-      if (!loaded) {
-        stopActiveWorker();
-      }
-    } catch (error) {
-      console.error('Error hydrating auth state:', error);
-      setIsAuthenticated(false);
-
-      const loaded = applyProfileState('default-user');
-      if (!loaded) {
-        stopActiveWorker();
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [applyProfileState, stopActiveWorker]);
-
-  useEffect(() => {
-    if (initializeRef.current) return;
-    initializeRef.current = true;
-
-    const initializeApp = async () => {
-      try {
-        await hydrateFromAuthState();
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initializeApp();
-  }, [hydrateFromAuthState]);
-
-  useEffect(() => {
-    return () => {
-      stopActiveWorker();
-    };
-  }, [stopActiveWorker]);
-
-  const handleAuthSuccess = useCallback(async () => {
-    setIsLoading(true);
-
-    try {
-      await firebaseBackend.initialize();
-      const currentUser = firebaseBackend.getCurrentUser();
-
-      if (currentUser) {
-        setIsAuthenticated(true);
-        const loaded = applyProfileState(currentUser.uid);
-
-        if (!loaded) {
-          stopActiveWorker();
-        }
+        loadProfile(currentUser.uid);
       } else {
         setIsAuthenticated(false);
       }
     } catch (error) {
-      console.error('Error after auth success:', error);
+      console.error('Error hydrating app:', error);
       setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
-  }, [applyProfileState, stopActiveWorker]);
+  }, [loadProfile]);
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  const handleAuthSuccess = useCallback(async () => {
+    setIsLoading(true);
+    await hydrate();
+  }, [hydrate]);
 
   const handleOnboardingComplete = useCallback(
     (data: any) => {
-      const completedUserId = effectiveUserId;
+      const targetUserId = firebaseBackend.getCurrentUser()?.uid || userId;
 
       const businessName =
         data?.businessName ||
         data?.responses?.businessName ||
         data?.responses?.[1] ||
-        'My Business';
+        'My Workspace';
 
       const nextBusinessType =
         data?.businessType ||
@@ -206,561 +97,397 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
         'business';
 
       try {
-        const existingProfile = businessProfileManager.loadProfile(completedUserId);
-
+        const existingProfile = businessProfileManager.loadProfile(targetUserId);
         if (existingProfile) {
-          businessProfileManager.updateProfile(completedUserId, {
+          businessProfileManager.updateProfile(targetUserId, {
             businessName,
             businessType: nextBusinessType as any,
           });
         } else {
           businessProfileManager.createProfile(
-            completedUserId,
+            targetUserId,
             businessName,
             nextBusinessType as any,
-            data?.email || data?.responses?.email || 'owner@business.local'
+            data?.email || 'owner@business.local'
           );
         }
       } catch (error) {
-        console.error('Error saving profile:', error);
+        console.error('Error saving local profile:', error);
       }
 
       setBusinessType(nextBusinessType);
-      setHasProfile(true);
-      setCurrentView('dashboard');
-      startWorkerForUser(completedUserId);
+      setCurrentView('chat');
     },
-    [effectiveUserId, startWorkerForUser]
+    [userId]
   );
+
+  const handleLogout = async () => {
+    try {
+      await firebaseBackend.logout();
+    } finally {
+      window.location.href = '/';
+    }
+  };
 
   if (isLoading || isAuthenticated === null) {
     return (
-      <div className="app-loading">
-        <div className="loading-container">
-          <RichMedia type="animation" animation="pulse" size="xl" />
-          <h1>Loading Life's Assistant...</h1>
-        </div>
+      <div className="boot-screen">
+        <div className="boot-mark">✦</div>
+        <div className="boot-text">Life&apos;s Assistant</div>
       </div>
     );
   }
 
-  if (!isAuthenticated && !hasProfile) {
+  if (!isAuthenticated) {
     return <AuthForm onSuccess={handleAuthSuccess} />;
   }
 
-  return (
-    <div className="app-container">
-      <NotificationSystem userId={effectiveUserId} />
+  if (currentView === 'onboarding') {
+    return (
+      <Progressiveonboarding
+        userId={firebaseBackend.getCurrentUser()?.uid || userId}
+        onComplete={handleOnboardingComplete}
+      />
+    );
+  }
 
-      <div className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
-        <div className="sidebar-header">
-          <h1 className="logo">
-            <RichMedia icon="settings" size="md" /> AI Assistant
-          </h1>
-          <button
-            className="sidebar-toggle"
-            onClick={() => setSidebarOpen((prev) => !prev)}
-          >
-            {sidebarOpen ? '✕' : '☰'}
-          </button>
+  const effectiveUserId = firebaseBackend.getCurrentUser()?.uid || userId;
+
+  return (
+    <div className="shell">
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+        <div className="brand">
+          <div className="brand-mark">✦</div>
+          <div>
+            <div className="brand-title">Life&apos;s Assistant</div>
+            <div className="brand-subtitle">Personal AI workspace</div>
+          </div>
         </div>
 
-        <nav className="sidebar-nav">
-          <button
-            className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('dashboard');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'dashboard' });
-            }}
-          >
-            <RichMedia icon="settings" size="sm" />
-            Dashboard
-          </button>
+        <button className="new-chat" onClick={() => setCurrentView('chat')}>
+          <span>＋</span>
+          New chat
+        </button>
 
-          <button
-            className={`nav-item ${currentView === 'chat' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('chat');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'chat' });
-            }}
-          >
-            <RichMedia icon="settings" size="sm" />
-            AI Chat
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'quotes' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('quotes');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'quotes' });
-            }}
-          >
-            <RichMedia icon="checkmark" size="sm" />
-            Quotes & Bids
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'notes' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('notes');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'notes' });
-            }}
-          >
-            <RichMedia icon="heart" size="sm" />
-            Notes
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'email' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('email');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'email' });
-            }}
-          >
-            <RichMedia icon="star" size="sm" />
-            Email
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'materials' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('materials');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'materials' });
-            }}
-          >
-            <RichMedia icon="arrow" size="sm" />
-            Materials
-          </button>
-
-          <div className="sidebar-divider"></div>
-
-          <button
-            className={`nav-item ${currentView === 'settings' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('settings');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'settings' });
-            }}
-          >
-            <RichMedia icon="settings" size="sm" />
-            Settings
-          </button>
-
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', margin: '1rem 0' }} />
-
-          <button
-            className={`nav-item ${currentView === 'tasks' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('tasks');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'tasks' });
-            }}
-          >
-            ✓ Task Queue
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'team' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('team');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'team' });
-            }}
-          >
-            👥 Team
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'recommendations' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('recommendations');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'recommendations' });
-            }}
-          >
-            🔧 Tools & Safety
-          </button>
-
-          <button
-            className={`nav-item ${currentView === 'customization' ? 'active' : ''}`}
-            onClick={() => {
-              setCurrentView('customization');
-              integration.trackUserAction('nav_click', 'sidebar', { view: 'customization' });
-            }}
-          >
-            🎨 Customize
-          </button>
+        <nav>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              className={`nav-item ${currentView === item.id ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView(item.id);
+                setSidebarOpen(false);
+              }}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
         </nav>
 
-        <div className="sidebar-footer">
-          <p>Life's Assistant beta</p>
-        </div>
-      </div>
+        <div className="sidebar-spacer" />
 
-      <div className="main-content">
-        {currentView === 'onboarding' && (
-          <Progressiveonboarding
-            userId={effectiveUserId}
-            onComplete={handleOnboardingComplete}
-          />
-        )}
-
-        {currentView === 'dashboard' && (
-          <>
-            <Dashboard
-              userId={effectiveUserId}
-              onViewChange={setCurrentView}
-              businessType={businessType}
-            />
-            {/* Floating Tasks Panel on Dashboard */}
-            <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 500 }}>
-              <TasksView userId={effectiveUserId} />
+        <div className="account-card">
+          <div className="account-avatar">
+            {(firebaseBackend.getCurrentUser()?.displayName || firebaseBackend.getCurrentUser()?.email || 'U')
+              .charAt(0)
+              .toUpperCase()}
+          </div>
+          <div className="account-copy">
+            <div className="account-name">
+              {firebaseBackend.getCurrentUser()?.displayName || 'Your account'}
             </div>
-          </>
-        )}
+            <div className="account-email">
+              {firebaseBackend.getCurrentUser()?.email || ''}
+            </div>
+          </div>
+        </div>
 
-        {currentView === 'quotes' && <AIQuoteBuilder userId={effectiveUserId} />}
-        {currentView === 'notes' && <AINoteEditor userId={effectiveUserId} />}
-        {currentView === 'email' && <AIEmailComposer userId={effectiveUserId} />}
-        {currentView === 'materials' && <MaterialEstimator userId={effectiveUserId} />}
-        {currentView === 'settings' && <SettingsHub userId={effectiveUserId} />}
-        {currentView === 'tasks' && <TasksView userId={effectiveUserId} />}
-        {currentView === 'team' && (
-          <TeamWorkspace userId={effectiveUserId} businessName={businessType} />
-        )}
-        {currentView === 'recommendations' && (
-          <BusinessRecommendations businessType={businessType} />
-        )}
-        {currentView === 'customization' && (
-          <AppCustomization userId={effectiveUserId} />
-        )}
-      </div>
+        <button className="logout-btn" onClick={handleLogout}>Sign out</button>
+      </aside>
 
-      {currentView === 'chat' && (
-        <AdvancedConversationalChat
-          userId={effectiveUserId}
-          fullScreen
-          businessContext={businessType}
-        />
-      )}
+      {sidebarOpen && <button className="scrim" onClick={() => setSidebarOpen(false)} aria-label="Close menu" />}
 
-      {hasProfile && currentView === 'dashboard' && (
-        chatOpen ? (
-          <AdvancedConversationalChat
-            userId={effectiveUserId}
-            businessContext={businessType}
-            onClose={() => setChatOpen(false)}
-            fullScreen={false}
-          />
-        ) : (
-          <button
-            className="floating-chat-fab"
-            onClick={() => setChatOpen(true)}
-            title="Open AI Chat"
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
-            </svg>
+      <main className="main">
+        <header className="topbar">
+          <button className="menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+            ☰
           </button>
-        )
-      )}
+          <div className="topbar-title">Life&apos;s Assistant</div>
+          <div className="beta-pill">Beta</div>
+        </header>
+
+        <section className="content">
+          {currentView === 'chat' && (
+            <AdvancedConversationalChat
+              userId={effectiveUserId}
+              fullScreen
+              businessContext={businessType}
+            />
+          )}
+          {currentView === 'quotes' && <AIQuoteBuilder userId={effectiveUserId} />}
+          {currentView === 'notes' && <AINoteEditor userId={effectiveUserId} />}
+          {currentView === 'email' && <AIEmailComposer userId={effectiveUserId} />}
+          {currentView === 'materials' && <MaterialEstimator userId={effectiveUserId} />}
+          {currentView === 'settings' && <SettingsHub userId={effectiveUserId} />}
+        </section>
+      </main>
 
       <style jsx>{`
-        .app-loading {
+        .boot-screen {
+          min-height: 100vh;
+          display: grid;
+          place-content: center;
+          gap: 0.75rem;
+          text-align: center;
+          background: #212121;
+          color: #f4f4f4;
+        }
+
+        .boot-mark {
+          font-size: 2rem;
+        }
+
+        .boot-text {
+          font-size: 1rem;
+          color: #b4b4b4;
+        }
+
+        .shell {
+          min-height: 100vh;
           display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          background: linear-gradient(135deg, #4171ff 0%, #00d4ff 100%),
-            url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1200&h=800&fit=crop') center/cover;
-          background-blend-mode: overlay;
-          position: relative;
-        }
-
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 1.5rem;
-          color: white;
-          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        .loading-container h1 {
-          margin: 0;
-          font-size: 1.5rem;
-          font-weight: 700;
-        }
-
-        .app-container {
-          display: flex;
-          height: 100vh;
-          background: linear-gradient(135deg, #f8fafb 0%, #f0f4f8 100%);
-          position: relative;
-        }
-
-        .app-container::before {
-          content: '';
-          position: fixed;
-          top: 0;
-          right: 0;
-          width: 100%;
-          height: 100%;
-          background: url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1600&h=900&fit=crop') right/cover no-repeat,
-            url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1600&h=900&fit=crop') center/cover;
-          opacity: 0.08;
-          pointer-events: none;
-          z-index: 0;
+          background: #212121;
+          color: #ececec;
         }
 
         .sidebar {
-          width: 280px;
-          background: white;
-          border-right: 1px solid #e0e0e0;
+          width: 260px;
+          min-width: 260px;
+          height: 100vh;
+          background: #171717;
+          border-right: 1px solid #2f2f2f;
           display: flex;
           flex-direction: column;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-          overflow-y: auto;
-          transition: all 0.3s ease;
+          padding: 0.8rem;
           position: relative;
-          z-index: 100;
+          z-index: 30;
         }
 
-        .sidebar.closed {
-          width: 0;
-          overflow: hidden;
-          box-shadow: none;
-        }
-
-        .sidebar-header {
-          padding: 1.5rem;
-          border-bottom: 1px solid #f0f0f0;
+        .brand {
           display: flex;
+          gap: 0.75rem;
           align-items: center;
-          justify-content: space-between;
-          gap: 0.5rem;
-          background: linear-gradient(135deg, #ffffff 0%, #f8fafb 100%);
+          padding: 0.55rem 0.45rem 1rem;
         }
 
-        .logo {
-          margin: 0;
-          font-size: 1.25rem;
-          font-weight: 700;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
+        .brand-mark {
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
+          display: grid;
+          place-items: center;
+          background: #2f2f2f;
+          color: #ffffff;
+          font-size: 1rem;
         }
 
-        .sidebar-toggle {
-          background: none;
-          border: none;
-          font-size: 1.25rem;
+        .brand-title {
+          font-weight: 650;
+          font-size: 0.95rem;
+          color: #f7f7f7;
+        }
+
+        .brand-subtitle {
+          color: #8e8e8e;
+          font-size: 0.72rem;
+          margin-top: 0.12rem;
+        }
+
+        .new-chat,
+        .nav-item,
+        .logout-btn {
+          width: 100%;
+          border: 0;
+          background: transparent;
+          color: #d8d8d8;
+          border-radius: 9px;
           cursor: pointer;
-          padding: 0.5rem;
-          min-width: 44px;
-          min-height: 44px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          text-align: left;
+          min-height: 42px;
         }
 
-        .sidebar-nav {
+        .new-chat {
+          display: flex;
+          align-items: center;
+          gap: 0.65rem;
+          padding: 0.65rem 0.75rem;
+          border: 1px solid #333;
+          margin-bottom: 0.75rem;
+          background: #212121;
+        }
+
+        .new-chat:hover,
+        .nav-item:hover,
+        .logout-btn:hover {
+          background: #2a2a2a;
+        }
+
+        nav {
           display: flex;
           flex-direction: column;
-          padding: 1rem;
-          gap: 0.5rem;
+          gap: 0.2rem;
         }
 
         .nav-item {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
-          padding: 0.85rem 1rem;
-          border: none;
-          border-radius: 12px;
-          background: transparent;
-          text-align: left;
-          cursor: pointer;
-          font-size: 0.95rem;
-          transition: all 0.2s ease;
-          min-height: 44px;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .nav-item::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
-          opacity: 0;
-          transition: opacity 0.2s ease;
-          pointer-events: none;
-        }
-
-        .nav-item:hover {
-          background: #f3f4f6;
-        }
-
-        .nav-item:hover::before {
-          opacity: 1;
+          gap: 0.7rem;
+          padding: 0.6rem 0.7rem;
+          font-size: 0.9rem;
         }
 
         .nav-item.active {
-          background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-          color: #2563eb;
-          font-weight: 600;
-          box-shadow: inset 0 0 12px rgba(37, 99, 235, 0.15);
+          background: #2f2f2f;
+          color: #fff;
         }
 
-        .sidebar-divider {
-          height: 1px;
-          background: linear-gradient(90deg, transparent, #ececec, transparent);
-          margin: 0.75rem 0;
+        .nav-icon {
+          width: 20px;
+          display: inline-grid;
+          place-items: center;
+          color: #a7a7a7;
         }
 
-        .sidebar-footer {
-          margin-top: auto;
-          padding: 1rem 1.5rem;
-          border-top: 1px solid #f0f0f0;
-          font-size: 0.8rem;
-          color: #666;
-          background: linear-gradient(180deg, transparent, rgba(248, 250, 251, 0.5));
-        }
-
-        .main-content {
+        .sidebar-spacer {
           flex: 1;
-          overflow: auto;
-          position: relative;
-          z-index: 1;
-          background: linear-gradient(135deg, rgba(248, 250, 251, 0.95) 0%, rgba(240, 244, 248, 0.95) 100%),
-            url('https://images.unsplash.com/photo-1552664730-d307ca884978?w=1600&h=900&fit=crop') right/cover no-repeat;
         }
 
-        .floating-chat-fab {
-          position: fixed;
-          right: 24px;
-          bottom: 24px;
-          width: 60px;
-          height: 60px;
-          border-radius: 50%;
-          border: none;
-          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-          color: white;
-          cursor: pointer;
-          box-shadow: 0 10px 25px rgba(37, 99, 235, 0.3);
+        .account-card {
           display: flex;
           align-items: center;
-          justify-content: center;
-          z-index: 200;
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
+          gap: 0.7rem;
+          padding: 0.65rem 0.55rem;
+          border-top: 1px solid #2f2f2f;
+          margin-top: 0.7rem;
         }
 
-        .floating-chat-fab:hover {
-          transform: scale(1.1);
-          box-shadow: 0 15px 35px rgba(37, 99, 235, 0.4);
+        .account-avatar {
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          background: #3a3a3a;
+          font-size: 0.85rem;
+          font-weight: 700;
         }
 
-        .floating-chat-fab:active {
-          transform: scale(0.95);
+        .account-copy {
+          min-width: 0;
         }
 
-        .floating-chat-fab svg {
-          width: 28px;
-          height: 28px;
+        .account-name {
+          font-size: 0.84rem;
+          color: #f0f0f0;
         }
 
-        /* Mobile responsiveness */
-        @media (max-width: 768px) {
+        .account-email {
+          font-size: 0.68rem;
+          color: #858585;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 155px;
+        }
+
+        .logout-btn {
+          padding: 0.55rem 0.7rem;
+          color: #9b9b9b;
+          font-size: 0.82rem;
+        }
+
+        .main {
+          min-width: 0;
+          flex: 1;
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          background: #212121;
+        }
+
+        .topbar {
+          height: 54px;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          padding: 0 1rem;
+          border-bottom: 1px solid #2f2f2f;
+          background: rgba(33,33,33,0.94);
+          backdrop-filter: blur(12px);
+          gap: 0.7rem;
+        }
+
+        .menu-btn {
+          display: none;
+          border: 0;
+          background: transparent;
+          color: #d6d6d6;
+          font-size: 1.15rem;
+          width: 38px;
+          height: 38px;
+          border-radius: 8px;
+        }
+
+        .topbar-title {
+          font-size: 0.9rem;
+          font-weight: 600;
+        }
+
+        .beta-pill {
+          margin-left: auto;
+          padding: 0.2rem 0.5rem;
+          border-radius: 999px;
+          border: 1px solid #3b3b3b;
+          color: #9f9f9f;
+          font-size: 0.68rem;
+        }
+
+        .content {
+          flex: 1;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .scrim {
+          display: none;
+        }
+
+        @media (max-width: 800px) {
           .sidebar {
             position: fixed;
             left: 0;
             top: 0;
-            height: 100vh;
-            width: 280px;
-            z-index: 1000;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+            transform: translateX(-101%);
+            transition: transform 180ms ease;
+            box-shadow: 12px 0 30px rgba(0,0,0,0.35);
           }
 
-          .sidebar.closed {
-            transform: translateX(-100%);
-            width: 280px;
-            overflow: visible;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+          .sidebar.open {
+            transform: translateX(0);
           }
 
-          .app-container {
-            flex-direction: column;
+          .menu-btn {
+            display: grid;
+            place-items: center;
           }
 
-          .main-content {
-            flex: 1;
-            width: 100%;
-            overflow: auto;
-          }
-
-          .sidebar-nav {
-            padding: 0.75rem;
-            gap: 0.25rem;
-          }
-
-          .nav-item {
-            font-size: 0.9rem;
-            padding: 0.75rem 0.85rem;
-          }
-
-          .sidebar-header {
-            padding: 1.25rem;
-          }
-
-          .logo {
-            font-size: 1.1rem;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .sidebar {
-            width: 75vw;
-            max-width: 280px;
-          }
-
-          .sidebar.closed {
-            transform: translateX(-100%);
-          }
-
-          .app-container {
-            overflow: hidden;
-          }
-
-          .sidebar-header {
-            padding: 1rem;
-          }
-
-          .sidebar-nav {
-            padding: 0.5rem;
-            gap: 0.25rem;
-          }
-
-          .nav-item {
-            font-size: 0.85rem;
-            padding: 0.7rem 0.75rem;
-            gap: 0.5rem;
-          }
-
-          .logo {
-            font-size: 1rem;
-          }
-
-          .floating-chat-fab {
-            right: 16px;
-            bottom: 16px;
-            width: 56px;
-            height: 56px;
-          }
-
-          .floating-chat-fab svg {
-            width: 24px;
-            height: 24px;
+          .scrim {
+            display: block;
+            position: fixed;
+            inset: 0;
+            border: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 20;
           }
         }
       `}</style>
