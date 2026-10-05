@@ -13,7 +13,7 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
     aiHint: '',
   });
   const [generatedEmail, setGeneratedEmail] = useState('');
-  const [emailsSent, setEmailsSent] = useState<string[]>([]);
+  const [draftsPrepared, setDraftsPrepared] = useState<string[]>([]);
 
   const handleAIGenerate = () => {
     if (!emailData.recipient || !emailData.aiHint) {
@@ -39,19 +39,18 @@ Your Business
     setGeneratedEmail(email);
   };
 
-  const handleSendEmail = () => {
+  const handlePrepareEmail = async () => {
     if (!generatedEmail) {
       alert('Please generate an email first');
       return;
     }
 
-    // Simulate sending
-    setEmailsSent([...emailsSent, `${emailData.recipient} - ${new Date().toLocaleTimeString()}`]);
-    alert(`✅ Email sent to ${emailData.recipient}!`);
-    
-    // Reset form
-    setEmailData({ recipient: '', subject: '', aiHint: '' });
-    setGeneratedEmail('');
+    await navigator.clipboard.writeText(generatedEmail);
+    setDraftsPrepared([
+      ...draftsPrepared,
+      `${emailData.recipient} - ${new Date().toLocaleTimeString()}`,
+    ]);
+    alert('Draft copied. Sending is not connected in this beta yet.');
   };
 
   return (
@@ -157,7 +156,7 @@ Your Business
 
               <div style={{ display: 'grid', gap: '0.5rem' }}>
                 <button
-                  onClick={handleSendEmail}
+                  onClick={handlePrepareEmail}
                   style={{
                     width: '100%',
                     padding: '0.75rem',
@@ -169,7 +168,7 @@ Your Business
                     fontWeight: '600',
                   }}
                 >
-                  📤 Send Email
+                  📋 Prepare & Copy Draft
                 </button>
                 <button
                   onClick={() => navigator.clipboard.writeText(generatedEmail)}
@@ -205,11 +204,11 @@ Your Business
       </div>
 
       {/* Sent Emails Log */}
-      {emailsSent.length > 0 && (
+      {draftsPrepared.length > 0 && (
         <div style={{ marginTop: '2rem', background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>✅ Emails Sent ({emailsSent.length})</h2>
+          <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>📝 Drafts Prepared ({draftsPrepared.length})</h2>
           <div style={{ display: 'grid', gap: '0.75rem' }}>
-            {emailsSent.map((email, idx) => (
+            {draftsPrepared.map((email, idx) => (
               <div
                 key={idx}
                 style={{
@@ -220,7 +219,7 @@ Your Business
                   fontSize: '0.9rem',
                 }}
               >
-                📤 {email}
+                📝 {email}
               </div>
             ))}
           </div>
