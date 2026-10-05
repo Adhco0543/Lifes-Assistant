@@ -238,7 +238,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
       <div className="app-loading">
         <div className="loading-container">
           <RichMedia type="animation" animation="pulse" size="xl" />
-          <h1>Loading Business AI Assistant...</h1>
+          <h1>Loading Life's Assistant...</h1>
         </div>
       </div>
     );
@@ -389,7 +389,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
         </nav>
 
         <div className="sidebar-footer">
-          <p>© 2024 Business AI Assistant</p>
+          <p>Life's Assistant beta</p>
         </div>
       </div>
 
