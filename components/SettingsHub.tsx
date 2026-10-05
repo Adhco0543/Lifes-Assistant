@@ -1,359 +1,231 @@
 'use client';
 
-import React, { useState } from 'react';
-import { MinimizablePanel } from './MinimizablePanel';
+import React, { useEffect, useState } from 'react';
 
-type SettingCategory = 'general' | 'notifications' | 'privacy' | 'appearance' | 'business' | 'ai-settings' | 'integrations';
+type SettingCategory = 'general' | 'assistant' | 'appearance' | 'privacy' | 'integrations';
 
 interface SettingsHubProps {
   userId: string;
 }
 
-const SETTING_CATEGORIES: Array<{ id: SettingCategory; name: string; icon: string; description: string }> = [
-  { id: 'general', name: 'General', icon: '⚙️', description: 'Basic app settings' },
-  { id: 'notifications', name: 'Notifications', icon: '🔔', description: 'Manage notifications' },
-  { id: 'privacy', name: 'Privacy & Security', icon: '🔒', description: 'Control your data' },
-  { id: 'appearance', name: 'Appearance', icon: '🎨', description: 'Customize look & feel' },
-  { id: 'business', name: 'Business', icon: '💼', description: 'Business settings' },
-  { id: 'ai-settings', name: 'AI Settings', icon: '🤖', description: 'AI personality & memory' },
-  { id: 'integrations', name: 'Integrations', icon: '🔗', description: 'Connected services' },
+type Preferences = {
+  assistantName: string;
+  tone: 'concise' | 'balanced' | 'detailed';
+  memoryEnabled: boolean;
+  compactMode: boolean;
+  timezone: string;
+};
+
+const CATEGORIES: Array<{ id: SettingCategory; label: string; icon: string; note: string }> = [
+  { id: 'general', label: 'General', icon: '⚙', note: 'Workspace basics' },
+  { id: 'assistant', label: 'Assistant', icon: '✦', note: 'Name, tone & memory' },
+  { id: 'appearance', label: 'Appearance', icon: '◐', note: 'Interface preferences' },
+  { id: 'privacy', label: 'Privacy', icon: '◇', note: 'What is stored where' },
+  { id: 'integrations', label: 'Integrations', icon: '↗', note: 'External services' },
 ];
 
+const DEFAULTS: Preferences = {
+  assistantName: "Life's Assistant",
+  tone: 'balanced',
+  memoryEnabled: true,
+  compactMode: false,
+  timezone: 'America/New_York',
+};
+
 export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
-  const [activeCategory, setActiveCategory] = useState<SettingCategory>('general');
-  const [settings, setSettings] = useState({
-    autoSave: true,
-    tutorial: true,
-    betaFeatures: false,
-    emailNotifications: true,
-    pushNotifications: true,
-    chatNotifications: true,
-    taskReminders: true,
-    twoFactor: true,
-    encryption: true,
-    activityLogging: true,
-    darkMode: false,
-    compactView: false,
-    timezone: 'UTC',
-    language: 'English',
-    businessName: '',
-    businessType: 'Retail',
-    aiPersonality: 'professional',
-    aiMemory: '',
-  });
+  const storageKey = `lifes-assistant-preferences:${userId}`;
+  const [active, setActive] = useState<SettingCategory>('general');
+  const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
+  const [saved, setSaved] = useState(false);
 
-  const handleCategoryClick = (categoryId: SettingCategory) => {
-    setActiveCategory(categoryId);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) setPrefs({ ...DEFAULTS, ...JSON.parse(stored) });
+    } catch {
+      setPrefs(DEFAULTS);
+    }
+  }, [storageKey]);
+
+  const update = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
+    setPrefs((current) => ({ ...current, [key]: value }));
+    setSaved(false);
   };
 
-  const handleSettingChange = (key: string, value: any) => {
-    setSettings(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
-
-  const renderSettings = () => {
-    switch (activeCategory) {
-      case 'general':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>General Settings</h3>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.autoSave} onChange={(e) => handleSettingChange('autoSave', e.target.checked)} />
-                <span>Auto-save preferences</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.tutorial} onChange={(e) => handleSettingChange('tutorial', e.target.checked)} />
-                <span>Display tutorial on startup</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.betaFeatures} onChange={(e) => handleSettingChange('betaFeatures', e.target.checked)} />
-                <span>Enable beta features</span>
-              </label>
-            </div>
-          </div>
-        );
-      case 'notifications':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>Notification Settings</h3>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.emailNotifications} onChange={(e) => handleSettingChange('emailNotifications', e.target.checked)} />
-                <span>Email notifications</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.pushNotifications} onChange={(e) => handleSettingChange('pushNotifications', e.target.checked)} />
-                <span>Push notifications</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.chatNotifications} onChange={(e) => handleSettingChange('chatNotifications', e.target.checked)} />
-                <span>Chat notifications</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.taskReminders} onChange={(e) => handleSettingChange('taskReminders', e.target.checked)} />
-                <span>Task reminders</span>
-              </label>
-            </div>
-          </div>
-        );
-      case 'privacy':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>Privacy & Security</h3>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.twoFactor} onChange={(e) => handleSettingChange('twoFactor', e.target.checked)} />
-                <span>Two-factor authentication</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.encryption} onChange={(e) => handleSettingChange('encryption', e.target.checked)} />
-                <span>End-to-end encryption</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.activityLogging} onChange={(e) => handleSettingChange('activityLogging', e.target.checked)} />
-                <span>Activity logging</span>
-              </label>
-              <button style={{ padding: '0.75rem', background: '#ff6b6b', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer', marginTop: '1rem' }}>
-                📥 Download my data
-              </button>
-            </div>
-          </div>
-        );
-      case 'appearance':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>Appearance</h3>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Theme</label>
-                <select style={{ width: '100%', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #d1d5db' }} value={settings.darkMode ? 'Dark' : 'Light'} onChange={(e) => handleSettingChange('darkMode', e.target.value === 'Dark')}>
-                  <option>Light</option>
-                  <option>Dark</option>
-                  <option>Auto</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Font Size</label>
-                <select style={{ width: '100%', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #d1d5db' }}>
-                  <option>Small</option>
-                  <option>Medium</option>
-                  <option>Large</option>
-                </select>
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={settings.compactView} onChange={(e) => handleSettingChange('compactView', e.target.checked)} />
-                <span>Compact mode</span>
-              </label>
-            </div>
-          </div>
-        );
-      case 'business':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>Business Settings</h3>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Business Name</label>
-                <input type="text" placeholder="Your business name" value={settings.businessName} onChange={(e) => handleSettingChange('businessName', e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #d1d5db' }} />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Business Type</label>
-                <select style={{ width: '100%', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #d1d5db' }} value={settings.businessType} onChange={(e) => handleSettingChange('businessType', e.target.value)}>
-                  <option>Retail</option>
-                  <option>Service</option>
-                  <option>Food & Beverage</option>
-                  <option>Professional Services</option>
-                  <option>E-commerce</option>
-                </select>
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                <input type="checkbox" defaultChecked onChange={(e) => handleSettingChange('publicProfile', e.target.checked)} />
-                <span>Public business profile</span>
-              </label>
-            </div>
-          </div>
-        );
-      case 'ai-settings':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>🤖 AI Assistant Settings</h3>
-            <div style={{ display: 'grid', gap: '1.5rem' }}>
-              <div style={{ padding: '1rem', background: '#f0f9ff', borderRadius: '0.5rem', border: '1px solid #bfdbfe' }}>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: '#1e40af' }}>AI Personality</h4>
-                <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: '#64748b' }}>Customize how the AI assistant interacts with you</p>
-                <select style={{ width: '100%', padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #d1d5db' }} value={settings.aiPersonality} onChange={(e) => handleSettingChange('aiPersonality', e.target.value)}>
-                  <option>Professional</option>
-                  <option>Friendly</option>
-                  <option>Direct</option>
-                  <option>Detailed</option>
-                  <option>Concise</option>
-                </select>
-              </div>
-              
-              <div style={{ padding: '1rem', background: '#f0fdf4', borderRadius: '0.5rem', border: '1px solid #bbf7d0' }}>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: '#15803d' }}>Memory & Learning</h4>
-                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                    <input type="checkbox" defaultChecked onChange={(e) => handleSettingChange('rememberPreferences', e.target.checked)} />
-                    <span>Remember my preferences & history</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                    <input type="checkbox" defaultChecked onChange={(e) => handleSettingChange('trackRoutines', e.target.checked)} />
-                    <span>Track my daily routines</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                    <input type="checkbox" defaultChecked onChange={(e) => handleSettingChange('improveRecommendations', e.target.checked)} />
-                    <span>Improve recommendations over time</span>
-                  </label>
-                </div>
-              </div>
-
-              <div style={{ padding: '1rem', background: '#fff7ed', borderRadius: '0.5rem', border: '1px solid #fed7aa' }}>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: '#92400e' }}>Tell AI About Yourself</h4>
-                <textarea 
-                  placeholder="E.g., 'I usually work 9-5, handle email every morning, create quotes for clients on Fridays...'"
-                  value={settings.aiMemory}
-                  onChange={(e) => handleSettingChange('aiMemory', e.target.value)}
-                  style={{ 
-                    width: '100%', 
-                    padding: '0.75rem', 
-                    borderRadius: '0.5rem', 
-                    border: '1px solid #d1d5db',
-                    minHeight: '120px',
-                    fontFamily: 'inherit',
-                    fontSize: '0.95rem'
-                  }} 
-                />
-                <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>The AI will use this to understand your workflow and routines</p>
-              </div>
-            </div>
-          </div>
-        );
-      case 'integrations':
-        return (
-          <div>
-            <h3 style={{ marginTop: 0 }}>Connected Services</h3>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h4 style={{ margin: 0 }}>Gmail</h4>
-                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', color: '#6b7280' }}>Email management</p>
-                </div>
-                <button style={{ padding: '0.5rem 1rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer' }}>✓ Connected</button>
-              </div>
-              <div style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h4 style={{ margin: 0 }}>Slack</h4>
-                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', color: '#6b7280' }}>Team communication</p>
-                </div>
-                <button style={{ padding: '0.5rem 1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer' }}>Connect</button>
-              </div>
-              <div style={{ padding: '1rem', border: '1px solid #e5e7eb', borderRadius: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h4 style={{ margin: 0 }}>Stripe</h4>
-                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', color: '#6b7280' }}>Payment processing</p>
-                </div>
-                <button style={{ padding: '0.5rem 1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer' }}>Connect</button>
-              </div>
-            </div>
-          </div>
-        );
-      default:
-        return null;
+  const save = () => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(prefs));
+      localStorage.setItem('chatbot_name', prefs.assistantName);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1800);
+    } catch {
+      setSaved(false);
     }
   };
 
+  const clearLocal = () => {
+    localStorage.removeItem(storageKey);
+    localStorage.removeItem('chatbot_name');
+    setPrefs(DEFAULTS);
+    setSaved(false);
+  };
+
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '2rem' }}>Settings</h1>
+    <div className="settings-page">
+      <div className="settings-inner">
+        <header>
+          <span className="eyebrow">SETTINGS</span>
+          <h1>Make the assistant yours.</h1>
+          <p>Only settings that actually do something are shown here. Placeholder security badges and fake connected apps have been removed.</p>
+        </header>
 
-      {/* Settings Categories Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
-        {SETTING_CATEGORIES.map((category) => (
-          <button
-            key={category.id}
-            onClick={(e) => {
-              console.log('[SettingsHub] Button clicked:', category.id);
-              e.preventDefault();
-              handleCategoryClick(category.id);
-            }}
-            style={{
-              padding: '1.5rem',
-              background: activeCategory === category.id ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'white',
-              color: activeCategory === category.id ? 'white' : '#1f2937',
-              border: activeCategory === category.id ? 'none' : '2px solid #e5e7eb',
-              borderRadius: '0.75rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.95rem',
-              fontWeight: '600',
-            }}
-            onMouseEnter={(e) => {
-              if (activeCategory !== category.id) {
-                e.currentTarget.style.borderColor = '#3b82f6';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.1)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeCategory !== category.id) {
-                e.currentTarget.style.borderColor = '#e5e7eb';
-                e.currentTarget.style.boxShadow = 'none';
-              }
-            }}
-          >
-            <span style={{ fontSize: '1.75rem' }}>{category.icon}</span>
-            <span>{category.name}</span>
-            <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>{category.description}</span>
-          </button>
-        ))}
+        <div className="settings-grid">
+          <aside className="category-list">
+            {CATEGORIES.map((category) => (
+              <button key={category.id} className={active === category.id ? 'active' : ''} onClick={() => setActive(category.id)}>
+                <span className="category-icon">{category.icon}</span>
+                <span><strong>{category.label}</strong><small>{category.note}</small></span>
+              </button>
+            ))}
+          </aside>
+
+          <section className="settings-card">
+            {active === 'general' && (
+              <div className="section-content">
+                <div className="section-title"><span className="eyebrow">GENERAL</span><h2>Workspace basics</h2></div>
+                <label className="field">
+                  <span>Timezone</span>
+                  <select value={prefs.timezone} onChange={(event) => update('timezone', event.target.value)}>
+                    <option value="America/New_York">Eastern Time</option>
+                    <option value="America/Chicago">Central Time</option>
+                    <option value="America/Denver">Mountain Time</option>
+                    <option value="America/Los_Angeles">Pacific Time</option>
+                  </select>
+                  <small>Used by future scheduling features.</small>
+                </label>
+                <div className="truth-card">
+                  <strong>Account workspace</strong>
+                  <p>Your sign-in is handled by Firebase Authentication. Allen can create a different account so his chat workspace is not your chat workspace.</p>
+                </div>
+              </div>
+            )}
+
+            {active === 'assistant' && (
+              <div className="section-content">
+                <div className="section-title"><span className="eyebrow">ASSISTANT</span><h2>How it should work with you</h2></div>
+                <label className="field">
+                  <span>Assistant name</span>
+                  <input value={prefs.assistantName} maxLength={30} onChange={(event) => update('assistantName', event.target.value)} />
+                  <small>This updates the name used by the chat interface on this device.</small>
+                </label>
+                <label className="field">
+                  <span>Response style</span>
+                  <select value={prefs.tone} onChange={(event) => update('tone', event.target.value as Preferences['tone'])}>
+                    <option value="concise">Concise</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="detailed">Detailed</option>
+                  </select>
+                  <small>Stored as a workspace preference. Model behavior wiring is part of the next assistant pass.</small>
+                </label>
+                <label className="switch-row">
+                  <div><strong>Remember useful context</strong><small>Keep conversation history available for signed-in chat.</small></div>
+                  <input type="checkbox" checked={prefs.memoryEnabled} onChange={(event) => update('memoryEnabled', event.target.checked)} />
+                </label>
+              </div>
+            )}
+
+            {active === 'appearance' && (
+              <div className="section-content">
+                <div className="section-title"><span className="eyebrow">APPEARANCE</span><h2>Clean by default</h2></div>
+                <div className="truth-card"><strong>Dark workspace</strong><p>The beta currently uses one carefully tuned dark theme so every screen can be made consistent before more themes are added.</p></div>
+                <label className="switch-row">
+                  <div><strong>Compact mode</strong><small>Preference is saved now; component density support will roll out screen by screen.</small></div>
+                  <input type="checkbox" checked={prefs.compactMode} onChange={(event) => update('compactMode', event.target.checked)} />
+                </label>
+              </div>
+            )}
+
+            {active === 'privacy' && (
+              <div className="section-content">
+                <div className="section-title"><span className="eyebrow">PRIVACY</span><h2>Clear claims, no security theater</h2></div>
+                <div className="truth-card good"><strong>Account-scoped conversations</strong><p>Firestore chat records are stored under the signed-in Firebase user ID in the current backend structure.</p></div>
+                <div className="truth-card"><strong>Local preferences</strong><p>Some interface preferences and local task-list data are stored in this browser using localStorage.</p></div>
+                <div className="truth-card warning"><strong>Not claiming end-to-end encryption</strong><p>The old mock setting was removed because the app should never advertise protection that has not actually been implemented and verified.</p></div>
+                <button className="danger-button" onClick={clearLocal}>Clear local interface preferences</button>
+              </div>
+            )}
+
+            {active === 'integrations' && (
+              <div className="section-content">
+                <div className="section-title"><span className="eyebrow">INTEGRATIONS</span><h2>Connect real tools, not pretend buttons</h2></div>
+                {['Email', 'Calendar', 'Google Drive'].map((name) => (
+                  <div className="integration-row" key={name}>
+                    <div><strong>{name}</strong><small>Not connected inside this beta yet.</small></div>
+                    <span>Planned</span>
+                  </div>
+                ))}
+                <div className="truth-card"><strong>Why this matters</strong><p>Life&apos;s Assistant should only say it sent, scheduled, uploaded, or changed something after a real connected service confirms the action.</p></div>
+              </div>
+            )}
+
+            <div className="save-row"><span className={`saved ${saved ? 'show' : ''}`}>Saved</span><button onClick={save}>Save preferences</button></div>
+          </section>
+        </div>
       </div>
 
-      {/* Settings Content */}
-      <MinimizablePanel
-        title={`${SETTING_CATEGORIES.find(c => c.id === activeCategory)?.name || 'Settings'}`}
-        icon={SETTING_CATEGORIES.find(c => c.id === activeCategory)?.icon}
-        defaultMinimized={false}
-      >
-        {console.log('[SettingsHub] Rendering content for category:', activeCategory)}
-        {renderSettings()}
-      </MinimizablePanel>
-
-      {/* Save Button */}
-      <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-        <button
-          style={{
-            padding: '0.75rem 2rem',
-            background: '#f3f4f6',
-            border: '1px solid #d1d5db',
-            borderRadius: '0.5rem',
-            cursor: 'pointer',
-            fontWeight: '600',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => alert('✅ Settings saved successfully!')}
-          style={{
-            padding: '0.75rem 2rem',
-            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '0.5rem',
-            cursor: 'pointer',
-            fontWeight: '600',
-          }}
-        >
-          Save Settings
-        </button>
-      </div>
+      <style jsx>{`
+        .settings-page { height: 100%; overflow-y: auto; background: #212121; color: #ececec; }
+        .settings-inner { width: min(1080px, calc(100% - 44px)); margin: 0 auto; padding: 42px 0 70px; }
+        header { margin-bottom: 24px; }
+        .eyebrow { color: #747474; font-size: .64rem; letter-spacing: .14em; font-weight: 750; }
+        h1 { margin: 8px 0; font-size: clamp(1.8rem, 4vw, 3rem); letter-spacing: -.045em; font-weight: 650; }
+        header p { color: #858585; max-width: 720px; line-height: 1.55; font-size: .8rem; margin: 0; }
+        .settings-grid { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
+        .category-list, .settings-card { border: 1px solid #343434; background: #262626; border-radius: 17px; }
+        .category-list { padding: 8px; height: fit-content; }
+        .category-list button { width: 100%; border: 0; background: transparent; color: #aaa; border-radius: 10px; min-height: 54px; display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: center; padding: 7px 9px; text-align: left; cursor: pointer; }
+        .category-list button:hover, .category-list button.active { background: #303030; color: #eee; }
+        .category-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: #343434; font-size: .72rem; }
+        .category-list strong, .category-list small { display: block; }
+        .category-list strong { font-size: .75rem; }
+        .category-list small { color: #696969; font-size: .62rem; margin-top: 2px; }
+        .settings-card { min-height: 520px; padding: 22px; display: flex; flex-direction: column; }
+        .section-content { display: grid; gap: 14px; }
+        .section-title { margin-bottom: 2px; }
+        .section-title h2 { margin: 5px 0 0; font-size: 1.05rem; }
+        .field { display: grid; gap: 7px; padding: 14px; background: #2b2b2b; border: 1px solid #353535; border-radius: 13px; }
+        .field > span, .switch-row strong { font-size: .75rem; font-weight: 650; }
+        .field input, .field select { min-height: 40px; border: 1px solid #414141; border-radius: 9px; background: #222; color: #e8e8e8; padding: 0 10px; outline: none; }
+        .field small, .switch-row small { color: #6f6f6f; font-size: .64rem; line-height: 1.4; }
+        .switch-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; background: #2b2b2b; border: 1px solid #353535; border-radius: 13px; }
+        .switch-row strong, .switch-row small { display: block; }
+        .switch-row small { margin-top: 3px; }
+        .switch-row input { width: 18px; height: 18px; accent-color: #efefef; }
+        .truth-card { padding: 14px; border-radius: 13px; background: #2b2b2b; border: 1px solid #353535; }
+        .truth-card.good { border-color: rgba(99,210,151,.28); }
+        .truth-card.warning { border-color: rgba(225,191,115,.28); }
+        .truth-card strong { font-size: .75rem; }
+        .truth-card p { margin: 5px 0 0; color: #777; font-size: .68rem; line-height: 1.5; }
+        .integration-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border: 1px solid #353535; background: #2b2b2b; border-radius: 13px; }
+        .integration-row strong, .integration-row small { display: block; }
+        .integration-row strong { font-size: .75rem; }
+        .integration-row small { color: #6f6f6f; font-size: .64rem; margin-top: 3px; }
+        .integration-row > span { color: #8c8c8c; background: #343434; border-radius: 999px; padding: 4px 8px; font-size: .62rem; }
+        .danger-button { justify-self: start; min-height: 39px; padding: 0 12px; border-radius: 10px; border: 1px solid #4a3535; color: #cc8b8b; background: #302626; cursor: pointer; }
+        .save-row { margin-top: auto; padding-top: 24px; display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+        .save-row button { min-height: 40px; border: 0; border-radius: 10px; padding: 0 14px; background: #ededed; color: #111; font-weight: 650; cursor: pointer; }
+        .saved { color: #72ce9c; font-size: .68rem; opacity: 0; transition: opacity .15s ease; }
+        .saved.show { opacity: 1; }
+        @media (max-width: 760px) {
+          .settings-inner { width: calc(100% - 28px); padding-top: 24px; }
+          .settings-grid { grid-template-columns: 1fr; }
+          .category-list { display: flex; gap: 5px; overflow-x: auto; }
+          .category-list button { min-width: 128px; grid-template-columns: 26px 1fr; }
+          .settings-card { min-height: 470px; }
+        }
+      `}</style>
     </div>
   );
 };
+
+export default SettingsHub;
