@@ -88,6 +88,16 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
     hydrate();
   }, [hydrate]);
 
+  const handleAuthSuccess = useCallback(async () => {
+    setIsLoading(true);
+    await hydrate();
+  }, [hydrate]);
+
+  const navigate = useCallback((view: string) => {
+    setCurrentView(view as ViewType);
+    setSidebarOpen(false);
+  }, []);
+
   useEffect(() => {
     const openQuote = () => navigate('quotes');
     const openEmail = () => navigate('email');
@@ -103,16 +113,6 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
       window.removeEventListener('open-tasks', openTasks);
     };
   }, [navigate]);
-
-  const handleAuthSuccess = useCallback(async () => {
-    setIsLoading(true);
-    await hydrate();
-  }, [hydrate]);
-
-  const navigate = useCallback((view: string) => {
-    setCurrentView(view as ViewType);
-    setSidebarOpen(false);
-  }, []);
 
   const handleOnboardingComplete = useCallback(
     (data: any) => {
