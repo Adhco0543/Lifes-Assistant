@@ -74,6 +74,7 @@ class FirebaseBackend {
   private auth: Auth | null = null;
   private db: Firestore | null = null;
   private initialized = false;
+  private cloudSyncDisabled = false;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -93,7 +94,7 @@ class FirebaseBackend {
   }
 
   isAvailable(): boolean {
-    return Boolean(this.auth && this.db);
+    return Boolean(this.auth && this.db && !this.cloudSyncDisabled);
   }
 
   getCurrentUser(): User | null {
@@ -132,17 +133,26 @@ class FirebaseBackend {
 
     const now = Date.now();
 
-    await setDoc(
-      doc(db, "users", result.user.uid),
-      {
-        id: result.user.uid,
-        email: result.user.email ?? email,
-        displayName: displayName ?? result.user.displayName ?? "",
-        createdAt: now,
-        updatedAt: now,
-      },
-      { merge: true }
-    );
+    try {
+      await setDoc(
+        doc(db, "users", result.user.uid),
+        {
+          id: result.user.uid,
+          email: result.user.email ?? email,
+          displayName: displayName ?? result.user.displayName ?? "",
+          createdAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    } catch (error: any) {
+      if (error?.code === "permission-denied") {
+        this.cloudSyncDisabled = true;
+        console.warn("Firestore sync is restricted. Continuing in local beta mode.");
+      } else {
+        throw error;
+      }
+    }
 
     return result.user;
   }
