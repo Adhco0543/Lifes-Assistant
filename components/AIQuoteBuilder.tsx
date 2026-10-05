@@ -19,6 +19,20 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
   const [generatedQuote, setGeneratedQuote] = useState('');
   const [newItem, setNewItem] = useState({ item: '', price: 0, quantity: 1 });
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('quote_draft');
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (typeof draft.projectDescription === 'string') {
+        setQuoteData((current) => ({ ...current, projectDescription: draft.projectDescription }));
+      }
+      localStorage.removeItem('quote_draft');
+    } catch {
+      localStorage.removeItem('quote_draft');
+    }
+  }, []);
+
   const addItem = () => {
     if (newItem.item && newItem.price > 0) {
       const updated = [...quoteData.itemsAndPrices, newItem];
