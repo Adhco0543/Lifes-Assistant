@@ -66,22 +66,39 @@ export interface BusinessContext {
 const PROFILE_KEY = "lifes_assistant_business_profile";
 const ONBOARDING_FLAG_KEY = "onboarding_completed";
 
+const profileKey = (userId: string) => `${PROFILE_KEY}:${userId}`;
+const onboardingKey = (userId: string) => `${ONBOARDING_FLAG_KEY}:${userId}`;
+
 export const businessProfileManager = {
   saveProfile(userId: string, profile: any) {
     localStorage.setItem(
-      PROFILE_KEY,
+      profileKey(userId),
       JSON.stringify({
         ...profile,
         userId,
         savedAt: Date.now(),
       })
     );
-    // Mark onboarding as complete
-    localStorage.setItem(ONBOARDING_FLAG_KEY, 'true');
+    localStorage.setItem(onboardingKey(userId), 'true');
   },
 
   loadProfile(userId: string) {
-    const saved = localStorage.getItem(PROFILE_KEY);
+    let saved = localStorage.getItem(profileKey(userId));
+
+    if (!saved) {
+      const legacy = localStorage.getItem(PROFILE_KEY);
+      if (legacy) {
+        try {
+          const legacyProfile = JSON.parse(legacy);
+          if (legacyProfile?.userId === userId) {
+            saved = legacy;
+            localStorage.setItem(profileKey(userId), legacy);
+          }
+        } catch {
+          // Ignore unreadable legacy data.
+        }
+      }
+    }
 
     if (!saved) return null;
 
@@ -97,8 +114,8 @@ export const businessProfileManager = {
     }
   },
 
-  isOnboardingComplete(): boolean {
-    return localStorage.getItem(ONBOARDING_FLAG_KEY) === 'true';
+  isOnboardingComplete(userId = "default-user"): boolean {
+    return localStorage.getItem(onboardingKey(userId)) === 'true';
   },
 
   updateProfile(userId: string, updates: any) {
@@ -143,7 +160,8 @@ export const businessProfileManager = {
     return profile;
   },
 
-  clearProfile() {
-    localStorage.removeItem(PROFILE_KEY);
+  clearProfile(userId = "default-user") {
+    localStorage.removeItem(profileKey(userId));
+    localStorage.removeItem(onboardingKey(userId));
   },
 };
