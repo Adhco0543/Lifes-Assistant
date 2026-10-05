@@ -23,7 +23,29 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      setTasks(saved ? JSON.parse(saved) : []);
+      const existing: LocalTask[] = saved ? JSON.parse(saved) : [];
+      const rawDraft = localStorage.getItem('task_draft');
+
+      if (rawDraft) {
+        try {
+          const draft = JSON.parse(rawDraft);
+          if (typeof draft.title === 'string' && draft.title.trim()) {
+            const handedOff: LocalTask = {
+              id: `task-${Date.now()}`,
+              title: draft.title.trim(),
+              status: 'open',
+              createdAt: Date.now(),
+            };
+            setTasks([handedOff, ...existing]);
+            localStorage.removeItem('task_draft');
+            return;
+          }
+        } catch {
+          localStorage.removeItem('task_draft');
+        }
+      }
+
+      setTasks(existing);
     } catch {
       setTasks([]);
     }
