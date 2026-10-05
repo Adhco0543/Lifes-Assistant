@@ -289,7 +289,10 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           {step.type === 'radio' && (
             <div className="radio-group">
               {step.options?.map((option) => (
-                <label key={option} className="radio-item">
+                <label
+                  key={option}
+                  className={`radio-item ${responses[step.id] === option ? 'selected' : ''}`}
+                >
                   <input
                     type="radio"
                     name={`step-${step.id}`}
@@ -307,7 +310,12 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           {step.type === 'checkbox' && (
             <div className="checkbox-group">
               {step.options?.map((option) => (
-                <label key={option} className="checkbox-item">
+                <label
+                  key={option}
+                  className={`checkbox-item ${
+                    (responses[step.id] || []).includes(option) ? 'selected' : ''
+                  }`}
+                >
                   <input
                     type="checkbox"
                     value={option}
@@ -353,57 +361,56 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
 
       <style jsx>{`
         .progressive-onboarding {
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 2rem;
-          background: linear-gradient(135deg, #ffffff 0%, #f5f7fa 100%);
-          border-radius: 1.5rem;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
-          animation: slideUp 0.5s ease-out;
-        }
-
-        @keyframes slideUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          width: 100%;
+          min-height: 100dvh;
+          height: 100dvh;
+          margin: 0;
+          padding: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          background: #212121;
+          color: #ececec;
+          display: flex;
+          flex-direction: column;
         }
 
         .onboarding-header {
-          margin-bottom: 2rem;
+          width: min(680px, 100%);
+          margin: 0 auto;
+          padding: 1.25rem 1.25rem 0;
+          flex-shrink: 0;
         }
 
         .progress-bar {
           width: 100%;
           height: 4px;
-          background-color: #e0e0e0;
-          border-radius: 2px;
+          background: #3a3a3a;
+          border-radius: 999px;
           overflow: hidden;
-          margin-bottom: 1rem;
+          margin-bottom: 0.75rem;
         }
 
         .progress-fill {
           height: 100%;
-          background: linear-gradient(90deg, #4171ff, #00d4ff);
-          transition: width 0.5s ease;
-          border-radius: 2px;
+          background: #f4f4f4;
+          transition: width 0.35s ease;
+          border-radius: 999px;
         }
 
         .step-counter {
           text-align: right;
-          font-size: 0.85rem;
-          color: #999;
+          font-size: 0.8rem;
+          color: #8f8f8f;
           font-weight: 500;
         }
 
         .onboarding-content {
-          margin: 2rem 0;
+          width: min(680px, 100%);
+          margin: 0 auto;
+          padding: 1.5rem 1.25rem 2rem;
           text-align: center;
-          animation-duration: 0.3s;
+          flex: 1;
+          animation-duration: 0.22s;
           animation-timing-function: ease-out;
         }
 
@@ -416,267 +423,269 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
         }
 
         @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
         @keyframes fadeOut {
-          from {
-            opacity: 1;
-            transform: translateY(0);
-          }
-          to {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
+          from { opacity: 1; transform: translateY(0); }
+          to { opacity: 0; transform: translateY(-8px); }
         }
 
         .step-icon {
-          margin-bottom: 1.5rem;
+          min-height: 50px;
+          margin-bottom: 0.6rem;
           display: flex;
           justify-content: center;
+          opacity: 0.9;
         }
 
         .step-title {
-          font-size: 1.8rem;
+          font-size: clamp(1.55rem, 5vw, 2rem);
           font-weight: 700;
-          color: #1a1a1a;
-          margin-bottom: 0.5rem;
+          color: #f5f5f5;
+          margin-bottom: 0.45rem;
+          letter-spacing: -0.02em;
         }
 
         .step-description {
-          font-size: 1rem;
-          color: #666;
-          margin-bottom: 2rem;
+          font-size: 0.95rem;
+          color: #a7a7a7;
+          margin-bottom: 1.6rem;
         }
 
         .question-container {
           display: flex;
           flex-direction: column;
-          gap: 1rem;
+          gap: 0.85rem;
           text-align: left;
-          margin: 2rem 0;
+          margin: 1rem auto 0;
+          width: min(560px, 100%);
         }
 
         .question {
           font-weight: 600;
-          color: #333;
-          font-size: 1.05rem;
+          color: #f0f0f0;
+          font-size: 1rem;
+          line-height: 1.45;
+          margin-bottom: 0.2rem;
         }
 
         .form-input {
-          padding: 0.75rem;
-          border: 2px solid #e0e0e0;
-          border-radius: 0.5rem;
-          font-size: 1rem;
+          width: 100%;
+          min-height: 50px;
+          padding: 0.8rem 0.9rem;
+          border: 1px solid #4a4a4a;
+          border-radius: 12px;
+          background: #2f2f2f;
+          color: #f3f3f3;
+          font-size: 16px;
           font-family: inherit;
-          transition: all 0.2s ease;
+          transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .form-input::placeholder {
+          color: #858585;
         }
 
         .form-input:focus {
           outline: none;
-          border-color: #4171ff;
-          box-shadow: 0 0 0 3px rgba(65, 113, 255, 0.1);
-        }
-
-        .text-input {
-          padding: 0.875rem;
+          border-color: #777;
+          box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
         }
 
         .select-input {
           cursor: pointer;
+          color-scheme: dark;
         }
 
         .radio-group,
         .checkbox-group {
           display: flex;
           flex-direction: column;
-          gap: 0.75rem;
+          gap: 0.65rem;
         }
 
         .radio-item,
         .checkbox-item {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
-          padding: 0.75rem;
-          border: 2px solid #e0e0e0;
-          border-radius: 0.5rem;
+          gap: 0.8rem;
+          min-height: 54px;
+          padding: 0.85rem 0.95rem;
+          border: 1px solid #474747;
+          border-radius: 12px;
+          background: #2b2b2b;
+          color: #e9e9e9;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
           font-weight: 500;
+          line-height: 1.35;
         }
 
         .radio-item:hover,
         .checkbox-item:hover {
-          background-color: #f5f5f5;
-          border-color: #4171ff;
+          background: #333;
+          border-color: #606060;
+        }
+
+        .radio-item.selected,
+        .checkbox-item.selected {
+          background: #393939;
+          border-color: #8a8a8a;
+          color: #ffffff;
+        }
+
+        .radio-item:active,
+        .checkbox-item:active {
+          transform: scale(0.99);
         }
 
         .radio-item input,
         .checkbox-item input {
+          flex: 0 0 auto;
+          width: 20px;
+          height: 20px;
           cursor: pointer;
-          width: 18px;
-          height: 18px;
-          accent-color: #4171ff;
+          accent-color: #f4f4f4;
         }
 
         .onboarding-footer {
-          display: flex;
-          gap: 1rem;
-          justify-content: space-between;
-          margin-top: 2rem;
-          padding-top: 2rem;
-          border-top: 1px solid #e0e0e0;
+          position: sticky;
+          bottom: 0;
+          z-index: 10;
+          width: 100%;
+          margin-top: auto;
+          padding: 0.85rem max(1rem, env(safe-area-inset-right))
+            calc(0.85rem + env(safe-area-inset-bottom))
+            max(1rem, env(safe-area-inset-left));
+          display: grid;
+          grid-template-columns: auto auto minmax(120px, 1fr);
+          gap: 0.6rem;
+          background: rgba(33,33,33,0.96);
+          border-top: 1px solid #343434;
+          backdrop-filter: blur(14px);
         }
 
         button {
-          flex: 1;
-          padding: 0.875rem 1.5rem;
+          min-height: 48px;
+          padding: 0.75rem 1rem;
           border: none;
-          border-radius: 0.5rem;
-          font-size: 1rem;
+          border-radius: 12px;
+          font-size: 0.95rem;
           font-weight: 600;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: background 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
         }
 
         .btn-primary {
-          background: linear-gradient(135deg, #4171ff 0%, #00d4ff 100%);
-          color: white;
+          background: #f4f4f4;
+          color: #111;
         }
 
         .btn-primary:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(65, 113, 255, 0.4);
+          background: #ffffff;
+        }
+
+        .btn-primary:active:not(:disabled) {
+          transform: scale(0.99);
         }
 
         .btn-primary:disabled {
-          opacity: 0.5;
+          background: #3a3a3a;
+          color: #777;
+          opacity: 1;
           cursor: not-allowed;
         }
 
-        .btn-secondary {
-          background-color: #f0f0f0;
-          color: #333;
+        .btn-secondary,
+        .btn-tertiary {
+          background: #2b2b2b;
+          color: #c8c8c8;
+          border: 1px solid #444;
         }
 
-        .btn-secondary:hover:not(:disabled) {
-          background-color: #e0e0e0;
+        .btn-secondary:hover:not(:disabled),
+        .btn-tertiary:hover {
+          background: #333;
+          color: #fff;
         }
 
         .btn-secondary:disabled {
-          opacity: 0.3;
+          opacity: 0.35;
           cursor: not-allowed;
         }
 
-        .btn-tertiary {
-          background-color: transparent;
-          color: #999;
-          border: 1px solid #e0e0e0;
-        }
-
-        .btn-tertiary:hover {
-          color: #666;
-          border-color: #ccc;
-        }
-
         .onboarding-complete {
+          min-height: 100dvh;
+          display: grid;
+          place-content: center;
           text-align: center;
           padding: 2rem;
+          background: #212121;
+          color: #ececec;
         }
 
         .onboarding-complete h2 {
           font-size: 1.8rem;
-          margin: 1.5rem 0 0.5rem;
-          color: #1a1a1a;
+          margin: 1.25rem 0 0.5rem;
+          color: #f5f5f5;
         }
 
         .onboarding-complete p {
-          color: #666;
-          margin-bottom: 2rem;
+          color: #aaa;
+          margin-bottom: 0.75rem;
         }
 
-        /* Mobile-first responsive design */
         @media (max-width: 640px) {
-          .progressive-onboarding {
-            max-width: 100%;
-            margin: 0;
-            padding: 1rem;
-            border-radius: 0;
+          .onboarding-header {
+            padding: 1rem 1rem 0;
+          }
+
+          .onboarding-content {
+            padding: 1rem 1rem 1.5rem;
           }
 
           .step-icon {
-            margin-bottom: 1rem;
-          }
-
-          .step-title {
-            font-size: 1.4rem;
+            margin-bottom: 0.35rem;
           }
 
           .step-description {
-            font-size: 0.9rem;
-          }
-
-          .onboarding-footer {
-            flex-direction: column;
-            gap: 0.5rem;
-          }
-
-          button {
-            padding: 1rem;
-            font-size: 0.95rem;
+            margin-bottom: 1.1rem;
           }
 
           .question-container {
-            margin: 1.5rem 0;
+            margin-top: 0.7rem;
           }
 
-          .form-input,
-          .select-input {
-            padding: 0.875rem;
-            font-size: 16px;
+          .onboarding-footer {
+            grid-template-columns: 0.8fr 0.8fr 1.4fr;
+            padding-top: 0.7rem;
+          }
+
+          button {
+            padding: 0.7rem 0.55rem;
+            font-size: 0.9rem;
+          }
+        }
+
+        @media (max-height: 680px) {
+          .step-icon {
+            display: none;
+          }
+
+          .onboarding-content {
+            padding-top: 0.75rem;
+          }
+
+          .step-description {
+            margin-bottom: 0.8rem;
           }
 
           .radio-item,
           .checkbox-item {
-            padding: 0.875rem;
-          }
-
-          .onboarding-complete {
-            padding: 1.5rem;
-          }
-
-          .onboarding-complete h2 {
-            font-size: 1.3rem;
-            margin: 1rem 0 0.5rem;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .progressive-onboarding.tablet {
-            padding: 1.5rem;
-          }
-
-          button {
-            padding: 0.875rem 1.25rem;
-            font-size: 0.95rem;
-          }
-
-          .question-container {
-            margin: 1.5rem 0;
-          }
-        }
-
-        @media (max-width: 1024px) {
-          .progressive-onboarding {
-            max-width: 100%;
+            min-height: 48px;
+            padding: 0.65rem 0.8rem;
           }
         }
       `}</style>
