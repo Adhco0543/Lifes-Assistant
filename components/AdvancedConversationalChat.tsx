@@ -39,12 +39,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    const savedName = localStorage.getItem('chatbot_name');
+    const savedName = localStorage.getItem('chatbot_name:' + userId);
     if (savedName) {
       setChatbotName(savedName);
       setNameInput(savedName);
     }
-  }, []);
+  }, [userId]);
 
   const loadConversation = useCallback(async (conversationId: string) => {
     try {
@@ -332,7 +332,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const handleSaveName = () => {
     const trimmedName = nameInput.trim() || "Life's Assistant";
     setChatbotName(trimmedName);
-    localStorage.setItem('chatbot_name', trimmedName);
+    localStorage.setItem('chatbot_name:' + userId, trimmedName);
     setIsEditingName(false);
   };
 
