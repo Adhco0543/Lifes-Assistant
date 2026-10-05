@@ -206,7 +206,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
     }
 
     const subtotal = materials.reduce((sum, m) => sum + m.total, 0);
-    const tax = subtotal * 0.1; // 10% tax
+    const tax = 0; // Tax is intentionally not assumed.
 
     const estimate: Estimate = {
       id: `est-${Date.now()}`,
@@ -267,7 +267,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       });
 
       csv += `\nSubtotal,$${estimate.subtotal.toFixed(2)}\n`;
-      csv += `Tax (10%),$${estimate.tax.toFixed(2)}\n`;
+      csv += `Tax (not included),$${estimate.tax.toFixed(2)}\n`;
       csv += `Total,$${estimate.total.toFixed(2)}\n`;
 
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -557,7 +557,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                 <span>${selectedEstimate.subtotal.toFixed(2)}</span>
               </div>
               <div className="total-row">
-                <span>Tax (10%):</span>
+                <span>Tax (not included):</span>
                 <span>${selectedEstimate.tax.toFixed(2)}</span>
               </div>
               <div className="total-row grand-total">
