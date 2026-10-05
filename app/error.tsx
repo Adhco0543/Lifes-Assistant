@@ -1,8 +1,5 @@
 'use client';
 
-export const revalidate = false;
-export const dynamic = 'force-dynamic';
-
 import { useEffect } from 'react';
 
 export default function Error({
