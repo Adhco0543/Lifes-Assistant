@@ -1,31 +1,47 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import AdvancedConversationalChat from './AdvancedConversationalChat';
+import React, { useEffect, useMemo, useState } from 'react';
 
 interface AIQuoteBuilderProps {
   userId: string;
 }
 
+type LineItem = {
+  id: string;
+  item: string;
+  price: number;
+  quantity: number;
+};
+
+type ChatResponse = {
+  message?: string;
+};
+
 export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
-  const [quoteData, setQuoteData] = useState({
-    clientName: '',
-    projectDescription: '',
-    itemsAndPrices: [] as { item: string; price: number; quantity: number }[],
-    total: 0,
-    notes: '',
-  });
-  const [aiChat, setAiChat] = useState(false);
-  const [generatedQuote, setGeneratedQuote] = useState('');
-  const [newItem, setNewItem] = useState({ item: '', price: 0, quantity: 1 });
+  const storageKey = 'lifes-assistant-quotes:' + userId;
+  const [clientName, setClientName] = useState('');
+  const [projectDescription, setProjectDescription] = useState('');
+  const [notes, setNotes] = useState('');
+  const [items, setItems] = useState<LineItem[]>([]);
+  const [itemName, setItemName] = useState('');
+  const [itemPrice, setItemPrice] = useState('');
+  const [itemQuantity, setItemQuantity] = useState('1');
+  const [draft, setDraft] = useState('');
+  const [status, setStatus] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const total = useMemo(
+    () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+    [items]
+  );
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem('quote_draft');
       if (!raw) return;
-      const draft = JSON.parse(raw);
-      if (typeof draft.projectDescription === 'string') {
-        setQuoteData((current) => ({ ...current, projectDescription: draft.projectDescription }));
+      const handedOff = JSON.parse(raw);
+      if (typeof handedOff.projectDescription === 'string') {
+        setProjectDescription(handedOff.projectDescription);
       }
       localStorage.removeItem('quote_draft');
     } catch {
@@ -34,34 +50,34 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
   }, []);
 
   const addItem = () => {
-    if (newItem.item && newItem.price > 0) {
-      const updated = [...quoteData.itemsAndPrices, newItem];
-      setQuoteData({
-        ...quoteData,
-        itemsAndPrices: updated,
-        total: updated.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-      });
-      setNewItem({ item: '', price: 0, quantity: 1 });
-    }
-  };
+    const price = Number(itemPrice);
+    const quantity = Number(itemQuantity);
 
-  const removeItem = (index: number) => {
-    const updated = quoteData.itemsAndPrices.filter((_, i) => i !== index);
-    setQuoteData({
-      ...quoteData,
-      itemsAndPrices: updated,
-      total: updated.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-    });
-  };
-
-  const handleAIGenerate = async () => {
-    if (!quoteData.clientName || !quoteData.projectDescription) {
-      alert('Please enter client name and project description first');
+    if (!itemName.trim() || !Number.isFinite(price) || price < 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      setStatus('Enter a valid item, price, and quantity.');
       return;
     }
 
-    const lineItems = quoteData.itemsAndPrices.length
-      ? quoteData.itemsAndPrices
+    setItems((current) => current.concat({
+      id: 'item-' + Date.now().toString(),
+      item: itemName.trim(),
+      price,
+      quantity,
+    }));
+    setItemName('');
+    setItemPrice('');
+    setItemQuantity('1');
+    setStatus('');
+  };
+
+  const createBasicDraft = () => {
+    if (!clientName.trim() || !projectDescription.trim()) {
+      setStatus('Enter a client name and project description first.');
+      return;
+    }
+
+    const lines = items.length
+      ? items
           .map((item) =>
             item.item +
             ': $' +
@@ -71,633 +87,44 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
             ' = $' +
             (item.price * item.quantity).toFixed(2)
           )
-          .join('; ')
-      : 'No line items added yet';
+          .join('\n')
+      : 'No line items added yet.';
 
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message:
-            'Create a professional quote draft. Keep every amount exactly as provided. Do not invent prices, taxes, discounts, scope, warranties, or payment terms. Client: ' +
-            quoteData.clientName +
-            '. Project: ' +
-            quoteData.projectDescription +
-            '. Items: ' +
-            lineItems +
-            '. Total: $' +
-            quoteData.total.toFixed(2) +
-            '. Notes: ' +
-            (quoteData.notes || 'none') +
-            '. Return only the quote draft.',
-          businessContext: 'quote-drafting',
-          chatbotName: "Life's Assistant",
-        }),
-      });
+    setDraft(
+      'QUOTE\n' +
+      'Client: ' + clientName.trim() + '\n' +
+      'Date: ' + new Date().toLocaleDateString() + '\n\n' +
+      'Project\n' + projectDescription.trim() + '\n\n' +
+      'Items\n' + lines + '\n\n' +
+      'Total: $' + total.toFixed(2) +
+      (notes.trim() ? '\n\nNotes\n' + notes.trim() : '')
+    );
+    setStatus('Draft created. Verify scope and pricing before sharing.');
+  };
 
-      if (!response.ok) {
-        throw new Error('Quote AI request failed');
-      }
-
-      const data = await response.json();
-      setGeneratedQuote(data.message || '');
-    } catch (error) {
-      console.error('Quote generation failed:', error);
-      alert('I could not generate the AI quote draft. Try again.');
+  const polishWithAI = async () => {
+    if (!clientName.trim() || !projectDescription.trim()) {
+      setStatus('Enter a client name and project description first.');
+      return;
     }
-  };
-  const handleAIComplete = (message: string) => {
-    // AI will generate quote based on message
-    const quote = `
-Quote #${Date.now()}
-Client: ${quoteData.clientName}
-Date: ${new Date().toLocaleDateString()}
 
-Project: ${quoteData.projectDescription}
-
-Items:
-${quoteData.itemsAndPrices.map(item => `  • ${item.item}: $${item.price} x ${item.quantity} = $${item.price * item.quantity}`).join('\n')}
-
-Total: $${quoteData.total}
-
-AI Notes: ${message}
-
-Terms: Payment due within 30 days of invoice.
-    `;
-    setGeneratedQuote(quote);
-    setAiChat(false);
-  };
-
-  return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto', color: '#1f2937', overflowY: 'auto', height: '100%' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '2rem' }}>💰 AI Quote Builder</h1>
-
-      {!aiChat ? (
-        <div style={{ display: 'grid', gap: '2rem' }}>
-          {/* Quote Form */}
-          <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0 }}>Create Quote</h2>
-
-            {/* Client Info */}
-            <div style={{ display: 'grid', gap: '1rem', marginBottom: '2rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-clientName">Client Name</label>
-                <input
-                  id="quote-clientName"
-                  name="quote-clientName"
-                  type="text"
-                  placeholder="Enter client name"
-                  value={quoteData.clientName}
-                  onChange={(e) => setQuoteData({ ...quoteData, clientName: e.target.value })}
-                  style={{ width: '100%', padding: '0.75rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-projectDescription">Project Description</label>
-                <textarea
-                  id="quote-projectDescription"
-                  name="quote-projectDescription"
-                  placeholder="Describe the project or service"
-                  value={quoteData.projectDescription}
-                  onChange={(e) => setQuoteData({ ...quoteData, projectDescription: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    minHeight: '100px',
-                    fontFamily: 'inherit',
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Items */}
-            <div style={{ marginBottom: '2rem' }}>
-              <h3 style={{ marginBottom: '1rem' }}>Items & Pricing</h3>
-
-              {/* Add Item */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '0.75rem', marginBottom: '1rem' }}>
-                <input
-                  id="quote-item-name"
-                  name="quote-item-name"
-                  type="text"
-                  placeholder="Item name"
-                  value={newItem.item}
-                  onChange={(e) => setNewItem({ ...newItem, item: e.target.value })}
-                  style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-price"
-                  name="quote-item-price"
-                  type="number"
-                  placeholder="Price"
-                  value={newItem.price}
-                  onChange={(e) => setNewItem({ ...newItem, price: parseFloat(e.target.value) })}
-                  style={{ width: '120px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-qty"
-                  name="quote-item-qty"
-                  type="number"
-                  placeholder="Qty"
-                  value={newItem.quantity}
-                  onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) })}
-                  style={{ width: '70px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <button
-                  onClick={addItem}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-
-              {/* Items List */}
-              {quoteData.itemsAndPrices.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto auto auto',
-                    gap: '0.75rem',
-                    padding: '1rem',
-                    background: '#f9fafb',
-                    borderRadius: '0.5rem',
-                    marginBottom: '0.5rem',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span>{item.item}</span>
-                  <span>${item.price}</span>
-                  <span>×{item.quantity}</span>
-                  <button
-                    onClick={() => removeItem(idx)}
-                    style={{
-                      padding: '0.25rem 0.75rem',
-                      background: '#ff6b6b',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* Total */}
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '2rem', padding: '1rem', background: '#f3f4f6', borderRadius: '0.5rem' }}>
-              Total: ${quoteData.total.toFixed(2)}
-            </div>
-
-            {/* Notes */}
-            <div style={{ marginBottom: '2rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Additional Notes</label>
-              <textarea
-                placeholder="Add any notes or special terms"
-                value={quoteData.notes}
-                onChange={(e) => setQuoteData({ ...quoteData, notes: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  minHeight: '80px',
-                  fontFamily: 'inherit',
-                }}
-              />
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={handleAIGenerate}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                🤖 Ask AI to Enhance Quote
-              </button>
-              <button
-                onClick={() => {
-                  if (!generatedQuote) {
-                    alert('Generate the quote draft first.');
-                    return;
-                  }
-                  navigator.clipboard.writeText(generatedQuote);
-                }}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                📋 Copy Quote
-              </button>
-            </div>
-          </div>
-
-          {/* Generated Quote Preview */}
-          {generatedQuote && (
-            <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ marginTop: 0 }}>Quote Preview</h2>
-              <pre
-                style={{
-                  background: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                }}
-              >
-                {generatedQuote}
-              </pre>
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                <button
-                  onClick={() => navigator.clipboard.writeText(generatedQuote)}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  📋 Copy to Clipboard
-                </button>
-                <button
-                  onClick={() => setGeneratedQuote('')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#f3f4f6',
-                    color: '#1f2937',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>AI Quote Assistant</h2>
-          <p style={{ color: '#6b7280', marginBottom: '1rem' }}>Tell the AI assistant about this quote. They'll help enhance it with recommendations and professional language.</p>
-          <AdvancedConversationalChat
-            fullScreen={false}
-            businessContext="quote-builder"
-            onClose={() => setAiChat(false)}
-          />
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-            <button
-              onClick={() => setAiChat(false)}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                fontWeight: '600',
-              }}
-            >
-              Done with AI
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
- +
+    const lines = items.length
+      ? items
+          .map((item) =>
+            item.item +
+            ': unit price $' +
             item.price.toFixed(2) +
-            ' x ' +
+            ', quantity ' +
             item.quantity +
-            ' = 
-
-  const handleAIComplete = (message: string) => {
-    // AI will generate quote based on message
-    const quote = `
-Quote #${Date.now()}
-Client: ${quoteData.clientName}
-Date: ${new Date().toLocaleDateString()}
-
-Project: ${quoteData.projectDescription}
-
-Items:
-${quoteData.itemsAndPrices.map(item => `  • ${item.item}: $${item.price} x ${item.quantity} = $${item.price * item.quantity}`).join('\n')}
-
-Total: $${quoteData.total}
-
-AI Notes: ${message}
-
-Terms: Payment due within 30 days of invoice.
-    `;
-    setGeneratedQuote(quote);
-    setAiChat(false);
-  };
-
-  return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '2rem' }}>💰 AI Quote Builder</h1>
-
-      {!aiChat ? (
-        <div style={{ display: 'grid', gap: '2rem' }}>
-          {/* Quote Form */}
-          <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0 }}>Create Quote</h2>
-
-            {/* Client Info */}
-            <div style={{ display: 'grid', gap: '1rem', marginBottom: '2rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-clientName">Client Name</label>
-                <input
-                  id="quote-clientName"
-                  name="quote-clientName"
-                  type="text"
-                  placeholder="Enter client name"
-                  value={quoteData.clientName}
-                  onChange={(e) => setQuoteData({ ...quoteData, clientName: e.target.value })}
-                  style={{ width: '100%', padding: '0.75rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-projectDescription">Project Description</label>
-                <textarea
-                  id="quote-projectDescription"
-                  name="quote-projectDescription"
-                  placeholder="Describe the project or service"
-                  value={quoteData.projectDescription}
-                  onChange={(e) => setQuoteData({ ...quoteData, projectDescription: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    minHeight: '100px',
-                    fontFamily: 'inherit',
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Items */}
-            <div style={{ marginBottom: '2rem' }}>
-              <h3 style={{ marginBottom: '1rem' }}>Items & Pricing</h3>
-
-              {/* Add Item */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '0.75rem', marginBottom: '1rem' }}>
-                <input
-                  id="quote-item-name"
-                  name="quote-item-name"
-                  type="text"
-                  placeholder="Item name"
-                  value={newItem.item}
-                  onChange={(e) => setNewItem({ ...newItem, item: e.target.value })}
-                  style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-price"
-                  name="quote-item-price"
-                  type="number"
-                  placeholder="Price"
-                  value={newItem.price}
-                  onChange={(e) => setNewItem({ ...newItem, price: parseFloat(e.target.value) })}
-                  style={{ width: '120px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-qty"
-                  name="quote-item-qty"
-                  type="number"
-                  placeholder="Qty"
-                  value={newItem.quantity}
-                  onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) })}
-                  style={{ width: '70px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <button
-                  onClick={addItem}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-
-              {/* Items List */}
-              {quoteData.itemsAndPrices.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto auto auto',
-                    gap: '0.75rem',
-                    padding: '1rem',
-                    background: '#f9fafb',
-                    borderRadius: '0.5rem',
-                    marginBottom: '0.5rem',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span>{item.item}</span>
-                  <span>${item.price}</span>
-                  <span>×{item.quantity}</span>
-                  <button
-                    onClick={() => removeItem(idx)}
-                    style={{
-                      padding: '0.25rem 0.75rem',
-                      background: '#ff6b6b',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* Total */}
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '2rem', padding: '1rem', background: '#f3f4f6', borderRadius: '0.5rem' }}>
-              Total: ${quoteData.total.toFixed(2)}
-            </div>
-
-            {/* Notes */}
-            <div style={{ marginBottom: '2rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Additional Notes</label>
-              <textarea
-                placeholder="Add any notes or special terms"
-                value={quoteData.notes}
-                onChange={(e) => setQuoteData({ ...quoteData, notes: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  minHeight: '80px',
-                  fontFamily: 'inherit',
-                }}
-              />
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={handleAIGenerate}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                🤖 Ask AI to Enhance Quote
-              </button>
-              <button
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                📤 Send Quote
-              </button>
-            </div>
-          </div>
-
-          {/* Generated Quote Preview */}
-          {generatedQuote && (
-            <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ marginTop: 0 }}>Quote Preview</h2>
-              <pre
-                style={{
-                  background: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                }}
-              >
-                {generatedQuote}
-              </pre>
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                <button
-                  onClick={() => navigator.clipboard.writeText(generatedQuote)}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  📋 Copy to Clipboard
-                </button>
-                <button
-                  onClick={() => setGeneratedQuote('')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#f3f4f6',
-                    color: '#1f2937',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>AI Quote Assistant</h2>
-          <p style={{ color: '#6b7280', marginBottom: '1rem' }}>Tell the AI assistant about this quote. They'll help enhance it with recommendations and professional language.</p>
-          <AdvancedConversationalChat
-            fullScreen={false}
-            businessContext="quote-builder"
-            onClose={() => setAiChat(false)}
-          />
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-            <button
-              onClick={() => setAiChat(false)}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                fontWeight: '600',
-              }}
-            >
-              Done with AI
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
- +
+            ', line total $' +
             (item.price * item.quantity).toFixed(2)
           )
           .join('; ')
       : 'No line items added yet';
 
+    setIsGenerating(true);
+    setStatus('');
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -705,303 +132,15 @@ Terms: Payment due within 30 days of invoice.
         body: JSON.stringify({
           message:
             'Create a professional quote draft. Keep every amount exactly as provided. Do not invent prices, taxes, discounts, scope, warranties, or payment terms. Client: ' +
-            quoteData.clientName +
+            clientName +
             '. Project: ' +
-            quoteData.projectDescription +
+            projectDescription +
             '. Items: ' +
-            lineItems +
-            '. Total: 
-
-  const handleAIComplete = (message: string) => {
-    // AI will generate quote based on message
-    const quote = `
-Quote #${Date.now()}
-Client: ${quoteData.clientName}
-Date: ${new Date().toLocaleDateString()}
-
-Project: ${quoteData.projectDescription}
-
-Items:
-${quoteData.itemsAndPrices.map(item => `  • ${item.item}: $${item.price} x ${item.quantity} = $${item.price * item.quantity}`).join('\n')}
-
-Total: $${quoteData.total}
-
-AI Notes: ${message}
-
-Terms: Payment due within 30 days of invoice.
-    `;
-    setGeneratedQuote(quote);
-    setAiChat(false);
-  };
-
-  return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '2rem' }}>💰 AI Quote Builder</h1>
-
-      {!aiChat ? (
-        <div style={{ display: 'grid', gap: '2rem' }}>
-          {/* Quote Form */}
-          <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0 }}>Create Quote</h2>
-
-            {/* Client Info */}
-            <div style={{ display: 'grid', gap: '1rem', marginBottom: '2rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-clientName">Client Name</label>
-                <input
-                  id="quote-clientName"
-                  name="quote-clientName"
-                  type="text"
-                  placeholder="Enter client name"
-                  value={quoteData.clientName}
-                  onChange={(e) => setQuoteData({ ...quoteData, clientName: e.target.value })}
-                  style={{ width: '100%', padding: '0.75rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-projectDescription">Project Description</label>
-                <textarea
-                  id="quote-projectDescription"
-                  name="quote-projectDescription"
-                  placeholder="Describe the project or service"
-                  value={quoteData.projectDescription}
-                  onChange={(e) => setQuoteData({ ...quoteData, projectDescription: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    minHeight: '100px',
-                    fontFamily: 'inherit',
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Items */}
-            <div style={{ marginBottom: '2rem' }}>
-              <h3 style={{ marginBottom: '1rem' }}>Items & Pricing</h3>
-
-              {/* Add Item */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '0.75rem', marginBottom: '1rem' }}>
-                <input
-                  id="quote-item-name"
-                  name="quote-item-name"
-                  type="text"
-                  placeholder="Item name"
-                  value={newItem.item}
-                  onChange={(e) => setNewItem({ ...newItem, item: e.target.value })}
-                  style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-price"
-                  name="quote-item-price"
-                  type="number"
-                  placeholder="Price"
-                  value={newItem.price}
-                  onChange={(e) => setNewItem({ ...newItem, price: parseFloat(e.target.value) })}
-                  style={{ width: '120px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-qty"
-                  name="quote-item-qty"
-                  type="number"
-                  placeholder="Qty"
-                  value={newItem.quantity}
-                  onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) })}
-                  style={{ width: '70px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <button
-                  onClick={addItem}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-
-              {/* Items List */}
-              {quoteData.itemsAndPrices.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto auto auto',
-                    gap: '0.75rem',
-                    padding: '1rem',
-                    background: '#f9fafb',
-                    borderRadius: '0.5rem',
-                    marginBottom: '0.5rem',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span>{item.item}</span>
-                  <span>${item.price}</span>
-                  <span>×{item.quantity}</span>
-                  <button
-                    onClick={() => removeItem(idx)}
-                    style={{
-                      padding: '0.25rem 0.75rem',
-                      background: '#ff6b6b',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* Total */}
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '2rem', padding: '1rem', background: '#f3f4f6', borderRadius: '0.5rem' }}>
-              Total: ${quoteData.total.toFixed(2)}
-            </div>
-
-            {/* Notes */}
-            <div style={{ marginBottom: '2rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Additional Notes</label>
-              <textarea
-                placeholder="Add any notes or special terms"
-                value={quoteData.notes}
-                onChange={(e) => setQuoteData({ ...quoteData, notes: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  minHeight: '80px',
-                  fontFamily: 'inherit',
-                }}
-              />
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={handleAIGenerate}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                🤖 Ask AI to Enhance Quote
-              </button>
-              <button
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                📤 Send Quote
-              </button>
-            </div>
-          </div>
-
-          {/* Generated Quote Preview */}
-          {generatedQuote && (
-            <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ marginTop: 0 }}>Quote Preview</h2>
-              <pre
-                style={{
-                  background: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                }}
-              >
-                {generatedQuote}
-              </pre>
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                <button
-                  onClick={() => navigator.clipboard.writeText(generatedQuote)}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  📋 Copy to Clipboard
-                </button>
-                <button
-                  onClick={() => setGeneratedQuote('')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#f3f4f6',
-                    color: '#1f2937',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>AI Quote Assistant</h2>
-          <p style={{ color: '#6b7280', marginBottom: '1rem' }}>Tell the AI assistant about this quote. They'll help enhance it with recommendations and professional language.</p>
-          <AdvancedConversationalChat
-            fullScreen={false}
-            businessContext="quote-builder"
-            onClose={() => setAiChat(false)}
-          />
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-            <button
-              onClick={() => setAiChat(false)}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                fontWeight: '600',
-              }}
-            >
-              Done with AI
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
- +
-            quoteData.total.toFixed(2) +
+            lines +
+            '. Total: $' +
+            total.toFixed(2) +
             '. Notes: ' +
-            (quoteData.notes || 'none') +
+            (notes || 'none') +
             '. Return only the quote draft.',
           businessContext: 'quote-drafting',
           chatbotName: "Life's Assistant",
@@ -1009,300 +148,208 @@ Terms: Payment due within 30 days of invoice.
       });
 
       if (!response.ok) {
-        throw new Error('Quote AI request failed');
+        throw new Error('AI request failed with status ' + response.status);
       }
 
-      const data = await response.json();
-      setGeneratedQuote(data.message || '');
+      const data = (await response.json()) as ChatResponse;
+      setDraft(data.message?.trim() || '');
+      setStatus(data.message ? 'AI draft ready. Verify scope and pricing before sharing.' : 'No quote draft was returned.');
     } catch (error) {
-      console.error('Quote generation failed:', error);
-      alert('I could not generate the AI quote draft. Try again.');
+      setStatus(error instanceof Error ? error.message : 'Could not generate the quote draft.');
+    } finally {
+      setIsGenerating(false);
     }
   };
 
-  const handleAIComplete = (message: string) => {
-    // AI will generate quote based on message
-    const quote = `
-Quote #${Date.now()}
-Client: ${quoteData.clientName}
-Date: ${new Date().toLocaleDateString()}
+  const copyDraft = async () => {
+    if (!draft.trim()) return;
+    try {
+      await navigator.clipboard.writeText(draft);
+      setStatus('Quote copied.');
+    } catch {
+      setStatus('Clipboard access was blocked by the browser.');
+    }
+  };
 
-Project: ${quoteData.projectDescription}
+  const saveDraft = () => {
+    if (!draft.trim()) {
+      setStatus('Create a quote draft first.');
+      return;
+    }
 
-Items:
-${quoteData.itemsAndPrices.map(item => `  • ${item.item}: $${item.price} x ${item.quantity} = $${item.price * item.quantity}`).join('\n')}
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const existing = raw ? JSON.parse(raw) : [];
+      const next = [{
+        id: 'quote-' + Date.now().toString(),
+        clientName,
+        projectDescription,
+        notes,
+        items,
+        total,
+        draft,
+        createdAt: Date.now(),
+      }].concat(Array.isArray(existing) ? existing : []).slice(0, 50);
 
-Total: $${quoteData.total}
+      localStorage.setItem(storageKey, JSON.stringify(next));
+      setStatus('Quote draft saved on this device.');
+    } catch {
+      setStatus('Could not save this quote.');
+    }
+  };
 
-AI Notes: ${message}
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '11px 12px',
+    border: '1px solid #414141',
+    borderRadius: '10px',
+    background: '#1f1f1f',
+    color: '#f2f2f2',
+    outline: 'none',
+  };
 
-Terms: Payment due within 30 days of invoice.
-    `;
-    setGeneratedQuote(quote);
-    setAiChat(false);
+  const buttonStyle: React.CSSProperties = {
+    minHeight: '42px',
+    padding: '0 14px',
+    border: 0,
+    borderRadius: '10px',
+    background: '#ededed',
+    color: '#111',
+    fontWeight: 650,
+    cursor: 'pointer',
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '2rem' }}>💰 AI Quote Builder</h1>
+    <div style={{ height: '100%', overflowY: 'auto', background: '#212121', color: '#ececec' }}>
+      <div style={{ width: 'min(1120px, calc(100% - 44px))', margin: '0 auto', padding: '42px 0 70px' }}>
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ color: '#747474', fontSize: '0.64rem', letterSpacing: '0.14em', fontWeight: 750 }}>QUOTES</div>
+          <h1 style={{ margin: '8px 0', fontSize: 'clamp(1.8rem, 4vw, 3rem)', letterSpacing: '-0.045em', fontWeight: 650 }}>
+            Build the numbers first. Let AI polish the wording second.
+          </h1>
+          <p style={{ margin: 0, color: '#858585', fontSize: '0.8rem' }}>
+            No hidden taxes, invented line items, or pretend send action.
+          </p>
+        </div>
 
-      {!aiChat ? (
-        <div style={{ display: 'grid', gap: '2rem' }}>
-          {/* Quote Form */}
-          <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0 }}>Create Quote</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px' }}>
+          <section style={{ background: '#262626', border: '1px solid #343434', borderRadius: '16px', padding: '20px' }}>
+            <div style={{ display: 'grid', gap: '14px' }}>
+              <label style={{ display: 'grid', gap: '7px', color: '#bdbdbd', fontSize: '0.75rem', fontWeight: 600 }}>
+                Client name
+                <input style={inputStyle} value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" />
+              </label>
 
-            {/* Client Info */}
-            <div style={{ display: 'grid', gap: '1rem', marginBottom: '2rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-clientName">Client Name</label>
-                <input
-                  id="quote-clientName"
-                  name="quote-clientName"
-                  type="text"
-                  placeholder="Enter client name"
-                  value={quoteData.clientName}
-                  onChange={(e) => setQuoteData({ ...quoteData, clientName: e.target.value })}
-                  style={{ width: '100%', padding: '0.75rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }} htmlFor="quote-projectDescription">Project Description</label>
+              <label style={{ display: 'grid', gap: '7px', color: '#bdbdbd', fontSize: '0.75rem', fontWeight: 600 }}>
+                Project description
                 <textarea
-                  id="quote-projectDescription"
-                  name="quote-projectDescription"
-                  placeholder="Describe the project or service"
-                  value={quoteData.projectDescription}
-                  onChange={(e) => setQuoteData({ ...quoteData, projectDescription: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    minHeight: '100px',
-                    fontFamily: 'inherit',
-                  }}
+                  style={{ ...inputStyle, minHeight: '110px', resize: 'vertical' }}
+                  value={projectDescription}
+                  onChange={(event) => setProjectDescription(event.target.value)}
+                  placeholder="Describe exactly what the quote covers."
                 />
-              </div>
-            </div>
+              </label>
 
-            {/* Items */}
-            <div style={{ marginBottom: '2rem' }}>
-              <h3 style={{ marginBottom: '1rem' }}>Items & Pricing</h3>
-
-              {/* Add Item */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '0.75rem', marginBottom: '1rem' }}>
-                <input
-                  id="quote-item-name"
-                  name="quote-item-name"
-                  type="text"
-                  placeholder="Item name"
-                  value={newItem.item}
-                  onChange={(e) => setNewItem({ ...newItem, item: e.target.value })}
-                  style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-price"
-                  name="quote-item-price"
-                  type="number"
-                  placeholder="Price"
-                  value={newItem.price}
-                  onChange={(e) => setNewItem({ ...newItem, price: parseFloat(e.target.value) })}
-                  style={{ width: '120px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <input
-                  id="quote-item-qty"
-                  name="quote-item-qty"
-                  type="number"
-                  placeholder="Qty"
-                  value={newItem.quantity}
-                  onChange={(e) => setNewItem({ ...newItem, quantity: parseInt(e.target.value) })}
-                  style={{ width: '70px', padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '0.5rem' }}
-                />
-                <button
-                  onClick={addItem}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-
-              {/* Items List */}
-              {quoteData.itemsAndPrices.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto auto auto',
-                    gap: '0.75rem',
-                    padding: '1rem',
-                    background: '#f9fafb',
-                    borderRadius: '0.5rem',
-                    marginBottom: '0.5rem',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span>{item.item}</span>
-                  <span>${item.price}</span>
-                  <span>×{item.quantity}</span>
-                  <button
-                    onClick={() => removeItem(idx)}
-                    style={{
-                      padding: '0.25rem 0.75rem',
-                      background: '#ff6b6b',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Remove
-                  </button>
+              <div style={{ border: '1px solid #353535', borderRadius: '12px', padding: '12px', background: '#2b2b2b' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '9px' }}>
+                  <strong style={{ fontSize: '0.75rem' }}>Line items</strong>
+                  <strong style={{ fontSize: '0.75rem' }}>{'Total: $' + total.toFixed(2)}</strong>
                 </div>
-              ))}
-            </div>
 
-            {/* Total */}
-            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '2rem', padding: '1rem', background: '#f3f4f6', borderRadius: '0.5rem' }}>
-              Total: ${quoteData.total.toFixed(2)}
-            </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 95px 70px 58px', gap: '6px' }}>
+                  <input style={inputStyle} value={itemName} onChange={(event) => setItemName(event.target.value)} placeholder="Item" />
+                  <input style={inputStyle} type="number" min="0" step="0.01" value={itemPrice} onChange={(event) => setItemPrice(event.target.value)} placeholder="Price" />
+                  <input style={inputStyle} type="number" min="1" step="1" value={itemQuantity} onChange={(event) => setItemQuantity(event.target.value)} placeholder="Qty" />
+                  <button style={buttonStyle} onClick={addItem}>Add</button>
+                </div>
 
-            {/* Notes */}
-            <div style={{ marginBottom: '2rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Additional Notes</label>
-              <textarea
-                placeholder="Add any notes or special terms"
-                value={quoteData.notes}
-                onChange={(e) => setQuoteData({ ...quoteData, notes: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.5rem',
-                  minHeight: '80px',
-                  fontFamily: 'inherit',
-                }}
-              />
-            </div>
+                {items.length > 0 && (
+                  <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
+                    {items.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto 28px', gap: '8px', alignItems: 'center', padding: '9px 10px', borderRadius: '9px', background: '#242424' }}
+                      >
+                        <div>
+                          <strong style={{ display: 'block', fontSize: '0.7rem' }}>{item.item}</strong>
+                          <small style={{ color: '#686868', fontSize: '0.61rem' }}>{'$' + item.price.toFixed(2) + ' x ' + item.quantity}</small>
+                        </div>
+                        <span style={{ fontSize: '0.7rem' }}>{'$' + (item.price * item.quantity).toFixed(2)}</span>
+                        <button
+                          style={{ minHeight: '28px', height: '28px', border: 0, background: 'transparent', color: '#777', cursor: 'pointer' }}
+                          onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))}
+                          aria-label="Remove line item"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={handleAIGenerate}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                🤖 Ask AI to Enhance Quote
-              </button>
-              <button
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.5rem',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                }}
-              >
-                📤 Send Quote
-              </button>
-            </div>
-          </div>
+              <label style={{ display: 'grid', gap: '7px', color: '#bdbdbd', fontSize: '0.75rem', fontWeight: 600 }}>
+                Additional notes
+                <textarea
+                  style={{ ...inputStyle, minHeight: '80px', resize: 'vertical' }}
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder="Optional exclusions, assumptions, or notes."
+                />
+              </label>
 
-          {/* Generated Quote Preview */}
-          {generatedQuote && (
-            <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-              <h2 style={{ marginTop: 0 }}>Quote Preview</h2>
-              <pre
-                style={{
-                  background: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '0.5rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                }}
-              >
-                {generatedQuote}
-              </pre>
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                <button
-                  onClick={() => navigator.clipboard.writeText(generatedQuote)}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  📋 Copy to Clipboard
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button style={{ ...buttonStyle, background: '#303030', color: '#ededed', border: '1px solid #454545' }} onClick={createBasicDraft}>
+                  Create basic draft
                 </button>
-                <button
-                  onClick={() => setGeneratedQuote('')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#f3f4f6',
-                    color: '#1f2937',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '0.5rem',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  Clear
+                <button style={{ ...buttonStyle, opacity: isGenerating ? 0.5 : 1 }} onClick={polishWithAI} disabled={isGenerating}>
+                  {isGenerating ? 'Polishing…' : 'Polish with AI'}
                 </button>
               </div>
             </div>
-          )}
+          </section>
+
+          <section style={{ background: '#262626', border: '1px solid #343434', borderRadius: '16px', padding: '20px' }}>
+            <div style={{ display: 'grid', gap: '14px' }}>
+              <div>
+                <div style={{ color: '#747474', fontSize: '0.64rem', letterSpacing: '0.14em', fontWeight: 750 }}>PREVIEW</div>
+                <h2 style={{ margin: '5px 0 0', fontSize: '1rem' }}>Review before sharing</h2>
+              </div>
+
+              <textarea
+                style={{ ...inputStyle, minHeight: '470px', resize: 'vertical', lineHeight: 1.5 }}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="Your quote draft will appear here."
+              />
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button style={{ ...buttonStyle, background: '#303030', color: '#ededed', border: '1px solid #454545' }} onClick={copyDraft} disabled={!draft.trim()}>
+                  Copy
+                </button>
+                <button style={buttonStyle} onClick={saveDraft} disabled={!draft.trim()}>
+                  Save draft
+                </button>
+              </div>
+
+              <div style={{ padding: '13px', border: '1px solid rgba(143,196,255,.22)', background: 'rgba(143,196,255,.04)', borderRadius: '12px' }}>
+                <strong style={{ fontSize: '0.73rem' }}>Sending status</strong>
+                <p style={{ margin: '4px 0 0', color: '#748597', fontSize: '0.67rem', lineHeight: 1.45 }}>
+                  Direct delivery is not connected yet. Copying and saving are real actions.
+                </p>
+              </div>
+
+              {status && (
+                <div role="status" style={{ color: '#9b9b9b', background: '#222', border: '1px solid #343434', borderRadius: '10px', padding: '10px 12px', fontSize: '0.7rem' }}>
+                  {status}
+                </div>
+              )}
+            </div>
+          </section>
         </div>
-      ) : (
-        <div style={{ background: 'white', padding: '2rem', borderRadius: '0.75rem', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ marginTop: 0 }}>AI Quote Assistant</h2>
-          <p style={{ color: '#6b7280', marginBottom: '1rem' }}>Tell the AI assistant about this quote. They'll help enhance it with recommendations and professional language.</p>
-          <AdvancedConversationalChat
-            fullScreen={false}
-            businessContext="quote-builder"
-            onClose={() => setAiChat(false)}
-          />
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-            <button
-              onClick={() => setAiChat(false)}
-              style={{
-                padding: '0.75rem 1.5rem',
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                fontWeight: '600',
-              }}
-            >
-              Done with AI
-            </button>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 };
+
+export default AIQuoteBuilder;
