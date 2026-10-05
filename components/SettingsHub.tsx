@@ -55,7 +55,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
   const save = () => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(prefs));
-      localStorage.setItem('chatbot_name', prefs.assistantName);
+      localStorage.setItem('chatbot_name:' + userId, prefs.assistantName);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1800);
     } catch {
@@ -65,7 +65,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
 
   const clearLocal = () => {
     localStorage.removeItem(storageKey);
-    localStorage.removeItem('chatbot_name');
+    localStorage.removeItem('chatbot_name:' + userId);
     setPrefs(DEFAULTS);
     setSaved(false);
   };
