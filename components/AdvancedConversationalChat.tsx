@@ -184,7 +184,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  const createNewConversation = async () => {
+  const createNewConversation = useCallback(async () => {
     try {
       if (!firebaseBackend.isAvailable()) {
         setMessages([]);
@@ -201,7 +201,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     } catch (error) {
       console.error('Error creating conversation:', error);
     }
-  };
+  }, [businessContext]);
 
   useEffect(() => {
     const handleNewConversation = () => {
@@ -210,7 +210,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
     window.addEventListener('new-conversation', handleNewConversation);
     return () => window.removeEventListener('new-conversation', handleNewConversation);
-  });
+  }, [createNewConversation]);
 
   const handleToolHandoff = (data: ChatApiResponse) => {
     if (data.type === 'quote') {
