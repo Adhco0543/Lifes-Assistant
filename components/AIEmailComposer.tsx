@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface AIEmailComposerProps {
   userId: string;
@@ -17,6 +17,21 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
   const [body, setBody] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('email_draft');
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (typeof draft.to === 'string') setRecipient(draft.to);
+      if (typeof draft.subject === 'string' && draft.subject !== 'Draft') setSubject(draft.subject);
+      if (typeof draft.body === 'string') setBody(draft.body);
+      if (typeof draft.request === 'string') setInstructions(draft.request);
+      localStorage.removeItem('email_draft');
+    } catch {
+      localStorage.removeItem('email_draft');
+    }
+  }, []);
 
   const generateDraft = async () => {
     if (!recipient.trim() || !instructions.trim()) {
