@@ -19,6 +19,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
   const storageKey = `lifes-assistant-tasks:${userId}`;
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [draft, setDraft] = useState('');
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     try {
@@ -38,6 +39,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
             };
             setTasks([handedOff, ...existing]);
             localStorage.removeItem('task_draft');
+            setHydrated(true);
             return;
           }
         } catch {
@@ -46,18 +48,22 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
       }
 
       setTasks(existing);
+      setHydrated(true);
     } catch {
       setTasks([]);
+      setHydrated(true);
     }
   }, [storageKey]);
 
   useEffect(() => {
+    if (!hydrated) return;
+
     try {
       localStorage.setItem(storageKey, JSON.stringify(tasks));
     } catch {
       // Local task storage is best-effort in the beta.
     }
-  }, [storageKey, tasks]);
+  }, [hydrated, storageKey, tasks]);
 
   const openCount = useMemo(() => tasks.filter((task) => task.status === 'open').length, [tasks]);
   const doneCount = tasks.length - openCount;
