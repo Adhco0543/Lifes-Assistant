@@ -380,8 +380,9 @@ export function AutonomySettingsForm({ userId, onSave }: AutonomySettingsFormPro
                       setSettings({
                         ...settings,
                         disableDuringHours: {
-                          ...settings.disableDuringHours,
+                          enabled: settings.disableDuringHours?.enabled ?? true,
                           startTime: e.target.value,
+                          endTime: settings.disableDuringHours?.endTime,
                         },
                       })
                     }
@@ -396,7 +397,8 @@ export function AutonomySettingsForm({ userId, onSave }: AutonomySettingsFormPro
                       setSettings({
                         ...settings,
                         disableDuringHours: {
-                          ...settings.disableDuringHours,
+                          enabled: settings.disableDuringHours?.enabled ?? true,
+                          startTime: settings.disableDuringHours?.startTime,
                           endTime: e.target.value,
                         },
                       })
