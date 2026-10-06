@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyFirebaseRequest } from "../../../lib/serverAuth";
 
 type HistoryMessage = {
   role: "user" | "assistant";
@@ -18,6 +19,10 @@ type ResponsesApiResult = {
 
 export async function POST(req: Request) {
   try {
+    if (!(await verifyFirebaseRequest(req))) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
     const body = await req.json();
 
     const message =
