@@ -18,6 +18,7 @@ type RecentItem = {
 };
 
 const QUICK_ACTIONS = [
+  { id: 'brief', icon: '◈', title: 'Build my focus brief', detail: 'Turn your saved workspace into the next three moves.' },
   { id: 'chat', icon: '✦', title: "Ask Life's Assistant", detail: 'Plan, research, write, or think something through.' },
   { id: 'tasks', icon: '✓', title: 'Task center', detail: 'Review work that is queued, waiting, or ready.' },
   { id: 'quotes', icon: '▤', title: 'Build a quote', detail: 'Turn scope, labor, and materials into a clean draft.' },
@@ -501,7 +502,7 @@ export default function LifeAssistantHome({
         .section-note { color: #777; font-size: .74rem; }
         .quick-grid {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           gap: 10px;
         }
         .quick-card {
