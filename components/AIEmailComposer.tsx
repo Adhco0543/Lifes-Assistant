@@ -98,6 +98,7 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
         throw new Error(data?.error || 'Email could not be sent.');
       }
 
+      await firebaseBackend.trackEvent('email.sent');
       setStatus('Email sent successfully.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Email could not be sent.');
