@@ -91,10 +91,25 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         const memories = records
           .filter((record) => record.kind === 'memory')
           .map((record) => String(((record.data || {}) as Record<string, unknown>).text || '').trim())
-          .filter(Boolean)
-          .slice(0, 30);
+          .filter(Boolean);
 
-        setPersistentMemory(memories);
+        const people = records
+          .filter((record) => record.kind === 'person')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            const name = String(data.name || '').trim();
+            if (!name) return '';
+            const relationship = String(data.relationship || '').trim();
+            const notes = String(data.notes || '').trim();
+            return [
+              'Person: ' + name,
+              relationship ? 'Relationship: ' + relationship : '',
+              notes ? 'Context: ' + notes : '',
+            ].filter(Boolean).join(' · ');
+          })
+          .filter(Boolean);
+
+        setPersistentMemory(memories.concat(people).slice(0, 40));
       } catch {
         if (active) setPersistentMemory([]);
       }
