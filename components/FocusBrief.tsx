@@ -22,7 +22,7 @@ export default function FocusBrief() {
       const events = await firebaseBackend.getRecentEvents(30);
 
       const usefulRecords = records
-        .filter((record) => ['task', 'note', 'quote', 'material-estimate'].includes(String(record.kind || '')))
+        .filter((record) => ['project', 'task', 'note', 'quote', 'material-estimate'].includes(String(record.kind || '')))
         .slice(0, 30)
         .map((record) => ({
           kind: record.kind,
