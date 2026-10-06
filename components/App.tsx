@@ -19,6 +19,7 @@ import MemoryCenter from './MemoryCenter';
 import FocusBrief from './FocusBrief';
 import WorkspaceSearch from './WorkspaceSearch';
 import PeopleCenter from './PeopleCenter';
+import ProjectsCenter from './ProjectsCenter';
 
 type ViewType =
   | 'home'
@@ -35,6 +36,7 @@ type ViewType =
   | 'brief'
   | 'search'
   | 'people'
+  | 'projects'
   | 'onboarding';
 
 interface AppProps {
@@ -45,6 +47,7 @@ const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'search', label: 'Search', icon: '⌕' },
   { id: 'people', label: 'People', icon: '◎' },
+  { id: 'projects', label: 'Projects', icon: '▦' },
   { id: 'brief', label: 'Focus Brief', icon: '◈' },
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'memory', label: 'Memory', icon: '◉' },
@@ -369,6 +372,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           {currentView === 'brief' && <FocusBrief />}
           {currentView === 'search' && <WorkspaceSearch onNavigate={navigate} />}
           {currentView === 'people' && <PeopleCenter />}
+          {currentView === 'projects' && <ProjectsCenter />}
         </section>
       </main>
 
