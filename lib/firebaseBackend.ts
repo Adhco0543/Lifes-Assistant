@@ -76,7 +76,6 @@ class FirebaseBackend {
   private auth: Auth | null = null;
   private db: Firestore | null = null;
   private initialized = false;
-  private cloudSyncDisabled = false;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -96,7 +95,7 @@ class FirebaseBackend {
   }
 
   isAvailable(): boolean {
-    return Boolean(this.auth && this.db && !this.cloudSyncDisabled);
+    return Boolean(this.auth && this.db);
   }
 
   getCurrentUser(): User | null {
@@ -155,8 +154,7 @@ class FirebaseBackend {
       );
     } catch (error: any) {
       if (error?.code === "permission-denied") {
-        this.cloudSyncDisabled = true;
-        console.warn("Firestore sync is restricted. Continuing with local fallback.");
+        console.warn("User profile write is restricted. Other account-scoped cloud paths will still be tested independently.");
       } else {
         throw error;
       }
@@ -396,6 +394,38 @@ class FirebaseBackend {
     }
 
     return (snapshot.data().data as Record<string, unknown>) ?? null;
+  }
+
+  async testCloudSync(): Promise<{ ok: boolean; checkedAt: number }> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error("Authentication required for cloud sync.");
+    }
+
+    const checkedAt = Date.now();
+    const probeRef = doc(db, "users", user.uid, "sync", "health");
+
+    await setDoc(
+      probeRef,
+      {
+        userId: user.uid,
+        checkedAt,
+        source: "lifes-assistant",
+      },
+      { merge: true }
+    );
+
+    const snapshot = await getDoc(probeRef);
+
+    if (!snapshot.exists() || Number(snapshot.data().checkedAt || 0) !== checkedAt) {
+      throw new Error("Cloud sync write could not be verified.");
+    }
+
+    await deleteDoc(probeRef);
+
+    return { ok: true, checkedAt };
   }
 
   async saveBusinessRecord(kind: string, data: Record<string, unknown>): Promise<string> {
