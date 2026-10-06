@@ -130,6 +130,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
     if (mode === 'cloud') {
       try {
         const id = await firebaseBackend.saveBusinessRecord('task', { title, status: 'open' });
+        await firebaseBackend.trackEvent('task.created');
         setTasks((current) => [
           { id, title, status: 'open', createdAt: Date.now(), cloud: true },
           ...current,
@@ -161,6 +162,9 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           title: task.title,
           status: nextStatus,
         });
+        if (nextStatus === 'done') {
+          await firebaseBackend.trackEvent('task.completed');
+        }
         setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: nextStatus } : item));
         return;
       } catch (error) {
