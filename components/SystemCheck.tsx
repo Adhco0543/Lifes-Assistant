@@ -184,7 +184,7 @@ export default function SystemCheck() {
         <section style={{ ...card, marginTop: 12, display: 'grid', gridTemplateColumns: 'minmax(220px,.8fr) minmax(0,1.2fr)', gap: 18, alignItems: 'center' }}>
           <div>
             <div style={{ color: '#747474', fontSize: '.64rem', letterSpacing: '.14em', fontWeight: 750 }}>RELEASE-CANDIDATE RULE</div>
-            <h2 style={{ margin: '5px 0 0', fontSize: '1rem' }}>No separate fake beta behavior.</h2>
+            <h2 style={{ margin: '5px 0 0', fontSize: '1rem' }}>No separate test-only behavior.</h2>
           </div>
           <p style={{ color: '#7f7f7f', fontSize: '.72rem', lineHeight: 1.55, margin: 0 }}>
             Every action we test here should be the same action path that ships. Missing provider setup is shown as unavailable instead of replaced with a pretend success.
