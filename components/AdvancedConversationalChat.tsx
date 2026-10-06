@@ -172,6 +172,18 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   }, [messages, isLoading]);
 
   useEffect(() => {
+    if (!isInitialized) return;
+
+    const key = 'assistant_launch_prompt:' + userId;
+    const prompt = localStorage.getItem(key);
+    if (!prompt) return;
+
+    localStorage.removeItem(key);
+    setInput(prompt);
+    window.setTimeout(() => inputRef.current?.focus(), 80);
+  }, [isInitialized, userId]);
+
+  useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
