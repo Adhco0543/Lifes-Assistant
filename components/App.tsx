@@ -59,7 +59,38 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
 
   const currentUser = firebaseBackend.getCurrentUser();
 
-  const loadProfile = useCallback((targetUserId: string) => {
+  const loadProfile = useCallback(async (targetUserId: string) => {
+    try {
+      const cloudProfile = await firebaseBackend.getLatestDraft('workspace-profile');
+      if (cloudProfile?.businessName) {
+        const nextBusinessName = String(cloudProfile.businessName);
+        const nextBusinessType = String(cloudProfile.businessType || 'business');
+
+        setBusinessType(nextBusinessType);
+        setBusinessName(nextBusinessName);
+
+        const localProfile = businessProfileManager.loadProfile(targetUserId);
+        if (localProfile) {
+          businessProfileManager.updateProfile(targetUserId, {
+            businessName: nextBusinessName,
+            businessType: nextBusinessType as any,
+          });
+        } else {
+          businessProfileManager.createProfile(
+            targetUserId,
+            nextBusinessName,
+            nextBusinessType as any,
+            firebaseBackend.getCurrentUser()?.email || 'owner@business.local'
+          );
+        }
+
+        setCurrentView('home');
+        return;
+      }
+    } catch (error) {
+      console.warn('Cloud workspace profile unavailable, checking local fallback:', error);
+    }
+
     const profile = businessProfileManager.loadProfile(targetUserId);
     if (!profile) {
       setCurrentView('onboarding');
@@ -78,7 +109,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
 
       if (user) {
         setIsAuthenticated(true);
-        loadProfile(user.uid);
+        await loadProfile(user.uid);
       } else {
         setIsAuthenticated(false);
       }
@@ -121,7 +152,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   }, [navigate]);
 
   const handleOnboardingComplete = useCallback(
-    (data: any) => {
+    async (data: any) => {
       const targetUserId = firebaseBackend.getCurrentUser()?.uid || userId;
       const nextBusinessName =
         data?.businessName || data?.responses?.businessName || data?.responses?.[1] || 'My Workspace';
@@ -145,6 +176,16 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
         }
       } catch (error) {
         console.error('Error saving local profile:', error);
+      }
+
+      try {
+        await firebaseBackend.saveDraft('workspace-profile', {
+          businessName: nextBusinessName,
+          businessType: nextBusinessType,
+          updatedAt: Date.now(),
+        });
+      } catch (error) {
+        console.warn('Could not sync workspace profile to cloud:', error);
       }
 
       setBusinessType(nextBusinessType);
