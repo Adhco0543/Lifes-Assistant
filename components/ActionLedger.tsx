@@ -19,6 +19,7 @@ const LABELS: Record<string, { title: string; detail: string; icon: string }> = 
   'material.estimate': { title: 'Estimate calculated', detail: 'A material estimate was calculated.', icon: '◇' },
   'memory.saved': { title: 'Memory saved', detail: 'Persistent context was added to the assistant.', icon: '◉' },
   'brief.generated': { title: 'Focus brief generated', detail: 'A brief was generated from saved workspace context.', icon: '◈' },
+  'person.saved': { title: 'Person saved', detail: 'Personal context was added to the workspace.', icon: '◎' },
 };
 
 const receiptProof = (receipt: Receipt): string => {
@@ -57,6 +58,12 @@ const receiptProof = (receipt: Receipt): string => {
   if (receipt.eventName === 'brief.generated') {
     const count = Number(data.sourceRecordCount || 0);
     return count ? 'Grounded in ' + count + ' saved workspace records.' : 'Workspace brief generated.';
+  }
+
+  if (receipt.eventName === 'person.saved') {
+    const name = String(data.name || 'Person');
+    const relationship = String(data.relationship || '').trim();
+    return relationship ? name + ' · ' + relationship : name;
   }
 
   return 'Workspace event confirmed.';
