@@ -20,6 +20,8 @@ const LABELS: Record<string, { title: string; detail: string; icon: string }> = 
   'memory.saved': { title: 'Memory saved', detail: 'Persistent context was added to the assistant.', icon: '◉' },
   'brief.generated': { title: 'Focus brief generated', detail: 'A brief was generated from saved workspace context.', icon: '◈' },
   'person.saved': { title: 'Person saved', detail: 'Personal context was added to the workspace.', icon: '◎' },
+  'project.saved': { title: 'Project saved', detail: 'A project was added to the workspace.', icon: '▦' },
+  'project.status': { title: 'Project status changed', detail: 'A project status was updated.', icon: '▦' },
 };
 
 const receiptProof = (receipt: Receipt): string => {
@@ -64,6 +66,12 @@ const receiptProof = (receipt: Receipt): string => {
     const name = String(data.name || 'Person');
     const relationship = String(data.relationship || '').trim();
     return relationship ? name + ' · ' + relationship : name;
+  }
+
+  if (receipt.eventName === 'project.saved' || receipt.eventName === 'project.status') {
+    const name = String(data.name || 'Project');
+    const status = String(data.status || '').trim();
+    return status ? name + ' · ' + status : name;
   }
 
   return 'Workspace event confirmed.';
