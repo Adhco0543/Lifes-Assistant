@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 interface AIQuoteBuilderProps {
   userId: string;
@@ -171,10 +172,27 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
     }
   };
 
-  const saveDraft = () => {
+  const saveDraft = async () => {
     if (!draft.trim()) {
       setStatus('Create a quote draft first.');
       return;
+    }
+
+    const payload = {
+      clientName,
+      projectDescription,
+      notes,
+      items,
+      total,
+      draft,
+    };
+
+    try {
+      await firebaseBackend.saveBusinessRecord('quote', payload);
+      setStatus('Quote saved to your cloud workspace.');
+      return;
+    } catch (error) {
+      console.warn('Quote cloud save failed, using local fallback:', error);
     }
 
     try {
@@ -182,17 +200,12 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
       const existing = raw ? JSON.parse(raw) : [];
       const next = [{
         id: 'quote-' + Date.now().toString(),
-        clientName,
-        projectDescription,
-        notes,
-        items,
-        total,
-        draft,
+        ...payload,
         createdAt: Date.now(),
       }].concat(Array.isArray(existing) ? existing : []).slice(0, 50);
 
       localStorage.setItem(storageKey, JSON.stringify(next));
-      setStatus('Quote draft saved on this device.');
+      setStatus('Cloud sync is unavailable, so this quote was saved on this device.');
     } catch {
       setStatus('Could not save this quote.');
     }
