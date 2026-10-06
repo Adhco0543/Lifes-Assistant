@@ -18,6 +18,11 @@ type ChatResponse = {
   message?: string;
 };
 
+type ProjectOption = {
+  id: string;
+  name: string;
+};
+
 export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
   const storageKey = 'lifes-assistant-quotes:' + userId;
   const [clientName, setClientName] = useState('');
@@ -28,6 +33,8 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
   const [itemPrice, setItemPrice] = useState('');
   const [itemQuantity, setItemQuantity] = useState('1');
   const [draft, setDraft] = useState('');
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectId, setProjectId] = useState('');
   const [status, setStatus] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -35,6 +42,37 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
     () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
     [items]
   );
+
+  useEffect(() => {
+    let active = true;
+
+    const loadProjects = async () => {
+      try {
+        const records = await firebaseBackend.getRecentBusinessRecords(150);
+        if (!active) return;
+
+        const next = records
+          .filter((record) => record.kind === 'project')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return {
+              id: String(record.id || ''),
+              name: String(data.name || '').trim(),
+            };
+          })
+          .filter((project) => project.id && project.name);
+
+        setProjects(next);
+      } catch {
+        if (active) setProjects([]);
+      }
+    };
+
+    loadProjects();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -180,6 +218,9 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
       return;
     }
 
+    const selectedProject = projects.find((project) => project.id === projectId);
+    const projectName = selectedProject?.name || '';
+
     const payload = {
       clientName,
       projectDescription,
@@ -187,6 +228,8 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
       items,
       total,
       draft,
+      projectId,
+      projectName,
     };
 
     try {
@@ -195,6 +238,8 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
         clientName,
         total,
         recordType: 'quote',
+        projectId,
+        projectName,
       });
       setStatus('Quote saved to your cloud workspace.');
       return;
@@ -258,6 +303,20 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
               <label style={{ display: 'grid', gap: '7px', color: '#bdbdbd', fontSize: '0.75rem', fontWeight: 600 }}>
                 Client name
                 <input style={inputStyle} value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" />
+              </label>
+
+              <label style={{ display: 'grid', gap: '7px', color: '#bdbdbd', fontSize: '0.75rem', fontWeight: 600 }}>
+                Project
+                <select
+                  style={{ ...inputStyle, minHeight: '42px' }}
+                  value={projectId}
+                  onChange={(event) => setProjectId(event.target.value)}
+                >
+                  <option value="">No project</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
               </label>
 
               <label style={{ display: 'grid', gap: '7px', color: '#bdbdbd', fontSize: '0.75rem', fontWeight: 600 }}>
