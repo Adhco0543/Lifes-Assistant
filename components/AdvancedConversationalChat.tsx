@@ -36,6 +36,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed'>('balanced');
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [persistentMemory, setPersistentMemory] = useState<string[]>([]);
+  const [pendingAction, setPendingAction] = useState<ChatApiResponse | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -158,7 +159,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             conversationId: 'local',
             role: 'assistant',
             content:
-              "👋 Hi! I'm Life's Assistant. I can help you create quotes, draft emails, manage customers, write notes, create reminders, estimate materials, and organize business tasks.",
+              "👋 Hi! I'm Life's Assistant. I can help with everyday planning, work, writing, tasks, reminders, memory, projects, estimates, and turning ideas into finished actions.",
             timestamp: Date.now(),
           };
 
@@ -173,7 +174,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           conversationId: 'local',
           role: 'assistant',
           content:
-            "👋 Hi! I'm Life's Assistant. I can help with quotes, emails, reminders, customers, notes, materials, and business tasks.",
+            "👋 Hi! I'm Life's Assistant. I can help organize life and work, remember useful context, draft things, plan projects, and turn conversations into actions.",
           timestamp: Date.now(),
         };
 
@@ -268,6 +269,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setCurrentConversationId(newConvId);
       setMessages([]);
       setInput('');
+      setPendingAction(null);
     } catch (error) {
       console.error('Error creating conversation:', error);
     }
@@ -377,7 +379,11 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         }
       }
 
-      handleToolHandoff(data);
+      if (data.type && data.type !== 'chat') {
+        setPendingAction(data);
+      } else {
+        setPendingAction(null);
+      }
     } catch (error) {
       console.error('Error in handleSendMessage:', error);
 
@@ -542,6 +548,45 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             <div ref={messagesEndRef} />
           </div>
         </div>
+
+        {pendingAction && pendingAction.type && pendingAction.type !== 'chat' && (
+          <div className="action-card">
+            <div className="action-mark">
+              {pendingAction.type === 'quote' ? '▤' : pendingAction.type === 'email' ? '↗' : '✓'}
+            </div>
+            <div className="action-copy">
+              <strong>
+                {pendingAction.type === 'quote'
+                  ? 'Open this as a quote'
+                  : pendingAction.type === 'email'
+                    ? 'Open this as an email draft'
+                    : 'Save this as a task'}
+              </strong>
+              <small>
+                The conversation stays here until you choose to move the draft into the workspace.
+              </small>
+            </div>
+            <div className="action-buttons">
+              <button
+                type="button"
+                className="action-dismiss"
+                onClick={() => setPendingAction(null)}
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                className="action-open"
+                onClick={() => {
+                  handleToolHandoff(pendingAction);
+                  setPendingAction(null);
+                }}
+              >
+                Open
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="input-area">
           <div className="input-wrapper">
@@ -797,6 +842,70 @@ const styles = `
   @keyframes pulse {
     0%, 100% { transform: translateY(0); opacity: 0.4; }
     50% { transform: translateY(-3px); opacity: 1; }
+  }
+
+  .action-card {
+    margin: 0 22px 10px;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 11px;
+    align-items: center;
+    padding: 11px 12px;
+    border: 1px solid #3a3a3a;
+    border-radius: 13px;
+    background: #282828;
+  }
+
+  .action-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: #343434;
+    color: #ddd;
+  }
+
+  .action-copy strong,
+  .action-copy small {
+    display: block;
+  }
+
+  .action-copy strong {
+    font-size: .76rem;
+  }
+
+  .action-copy small {
+    margin-top: 3px;
+    color: #747474;
+    font-size: .63rem;
+    line-height: 1.4;
+  }
+
+  .action-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .action-buttons button {
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 9px;
+    font-size: .66rem;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .action-dismiss {
+    border: 1px solid #414141;
+    background: transparent;
+    color: #999;
+  }
+
+  .action-open {
+    border: 0;
+    background: #ededed;
+    color: #111;
   }
 
   .input-area {
