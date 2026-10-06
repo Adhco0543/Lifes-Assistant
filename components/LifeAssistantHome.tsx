@@ -20,6 +20,7 @@ type RecentItem = {
 const QUICK_ACTIONS = [
   { id: 'search', icon: '⌕', title: 'Search my workspace', detail: 'Find a task, note, person, memory, quote, receipt, or conversation.' },
   { id: 'people', icon: '◎', title: 'People I know', detail: 'Save context about family, coworkers, clients, and friends.' },
+  { id: 'projects', icon: '▦', title: 'My projects', detail: 'Keep goals, context, and status together across conversations.' },
   { id: 'brief', icon: '◈', title: 'Build my focus brief', detail: 'Turn your saved workspace into the next three moves.' },
   { id: 'chat', icon: '✦', title: "Ask Life's Assistant", detail: 'Plan, research, write, or think something through.' },
   { id: 'tasks', icon: '✓', title: 'Task center', detail: 'Review work that is queued, waiting, or ready.' },
@@ -504,7 +505,7 @@ export default function LifeAssistantHome({
         .section-note { color: #777; font-size: .74rem; }
         .quick-grid {
           display: grid;
-          grid-template-columns: repeat(7, minmax(0, 1fr));
+          grid-template-columns: repeat(8, minmax(0, 1fr));
           gap: 10px;
         }
         .quick-card {
