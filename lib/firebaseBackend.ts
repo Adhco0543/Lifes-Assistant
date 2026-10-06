@@ -346,6 +346,24 @@ class FirebaseBackend {
     });
   }
 
+  async getRecentEvents(maxCount = 50): Promise<Array<Record<string, unknown>>> {
+    const { db } = await this.getServices();
+    const userId = this.getUserId();
+
+    const eventsQuery = query(
+      collection(db, "users", userId, "events"),
+      orderBy("createdAt", "desc"),
+      queryLimit(maxCount)
+    );
+
+    const snapshot = await getDocs(eventsQuery);
+
+    return snapshot.docs.map((item) => ({
+      id: item.id,
+      ...item.data(),
+    }));
+  }
+
   async saveDraft(kind: "quote" | "email" | string, data: Record<string, unknown>): Promise<void> {
     const { db } = await this.getServices();
     const userId = this.getUserId();
