@@ -156,7 +156,7 @@ class FirebaseBackend {
     } catch (error: any) {
       if (error?.code === "permission-denied") {
         this.cloudSyncDisabled = true;
-        console.warn("Firestore sync is restricted. Continuing in local beta mode.");
+        console.warn("Firestore sync is restricted. Continuing with local fallback.");
       } else {
         throw error;
       }
