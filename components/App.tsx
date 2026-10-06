@@ -13,6 +13,7 @@ import { AIEmailComposer } from './AIEmailComposer';
 import { SettingsHub } from './SettingsHub';
 import { TasksView } from './TasksView';
 import LifeAssistantHome from './LifeAssistantHome';
+import SystemCheck from './SystemCheck';
 
 type ViewType =
   | 'home'
@@ -23,6 +24,7 @@ type ViewType =
   | 'email'
   | 'materials'
   | 'settings'
+  | 'system'
   | 'onboarding';
 
 interface AppProps {
@@ -33,6 +35,7 @@ const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
+  { id: 'system', label: 'System Check', icon: '◎' },
 ];
 
 const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
@@ -303,6 +306,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           {currentView === 'email' && <AIEmailComposer userId={effectiveUserId} />}
           {currentView === 'materials' && <MaterialEstimator userId={effectiveUserId} />}
           {currentView === 'settings' && <SettingsHub userId={effectiveUserId} />}
+          {currentView === 'system' && <SystemCheck />}
         </section>
       </main>
 
