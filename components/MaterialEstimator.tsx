@@ -254,7 +254,11 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
 
     try {
       const id = await firebaseBackend.saveBusinessRecord('material-estimate', payload);
-      await firebaseBackend.trackEvent('material.estimate');
+      await firebaseBackend.trackEvent('material.estimate', {
+        projectName,
+        total: subtotal + tax,
+        recordId: id,
+      });
       estimate = {
         id,
         ...payload,
