@@ -163,7 +163,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           status: nextStatus,
         });
         if (nextStatus === 'done') {
-          await firebaseBackend.trackEvent('task.completed');
+          await firebaseBackend.trackEvent('task.completed', { title: task.title, recordId: task.id });
         }
         setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: nextStatus } : item));
         return;
