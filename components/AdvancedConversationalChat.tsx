@@ -37,6 +37,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [persistentMemory, setPersistentMemory] = useState<string[]>([]);
   const [pendingAction, setPendingAction] = useState<ChatApiResponse | null>(null);
+  const [queuedLaunch, setQueuedLaunch] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -208,6 +209,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
     localStorage.removeItem(key);
     setInput(prompt);
+    setQueuedLaunch(true);
     window.setTimeout(() => inputRef.current?.focus(), 80);
   }, [isInitialized, userId]);
 
@@ -404,6 +406,13 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       inputRef.current?.focus();
     }
   }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId]);
+
+  useEffect(() => {
+    if (!queuedLaunch || !input.trim() || isLoading) return;
+
+    setQueuedLaunch(false);
+    handleSendMessage();
+  }, [queuedLaunch, input, isLoading, handleSendMessage]);
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
