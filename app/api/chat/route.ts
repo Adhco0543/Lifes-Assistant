@@ -55,12 +55,26 @@ export async function POST(req: Request) {
     const businessContext =
       typeof body.businessContext === "string" ? body.businessContext.trim() : "";
 
-    const history = sanitizeHistory(body.history);
+    const responseStyle =
+      body.responseStyle === "concise" || body.responseStyle === "detailed"
+        ? body.responseStyle
+        : "balanced";
+
+    const memoryEnabled = body.memoryEnabled !== false;
+
+    const history = memoryEnabled ? sanitizeHistory(body.history) : [];
 
     const instructions = [
       "You are " + chatbotName + ", a persistent personal and business assistant.",
-      "Be concise, practical, and truthful.",
-      "Use prior conversation context when relevant.",
+      responseStyle === "concise"
+        ? "Keep responses concise and action-focused."
+        : responseStyle === "detailed"
+          ? "Give detailed, structured responses when useful."
+          : "Use a balanced level of detail.",
+      "Be practical and truthful.",
+      memoryEnabled
+        ? "Use prior conversation context when relevant."
+        : "Do not rely on prior conversation history beyond the current request.",
       "Help with work, planning, quotes, notes, email drafts, reminders, research plans, and everyday organization.",
       "Never claim you sent an email, placed an order, changed a calendar, spent money, contacted someone, or completed another external action unless a connected tool result explicitly confirms it.",
       "For consequential external actions, prepare the action and require the user\'s approval before execution.",
