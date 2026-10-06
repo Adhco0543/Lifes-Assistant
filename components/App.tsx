@@ -14,6 +14,7 @@ import { SettingsHub } from './SettingsHub';
 import { TasksView } from './TasksView';
 import LifeAssistantHome from './LifeAssistantHome';
 import SystemCheck from './SystemCheck';
+import ActionLedger from './ActionLedger';
 
 type ViewType =
   | 'home'
@@ -25,6 +26,7 @@ type ViewType =
   | 'materials'
   | 'settings'
   | 'system'
+  | 'receipts'
   | 'onboarding';
 
 interface AppProps {
@@ -35,7 +37,8 @@ const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
-  { id: 'system', label: 'System Check', icon: '◎' },
+  { id: 'receipts', label: 'Receipts', icon: '◎' },
+  { id: 'system', label: 'System Check', icon: '◇' },
 ];
 
 const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
@@ -307,6 +310,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           {currentView === 'materials' && <MaterialEstimator userId={effectiveUserId} />}
           {currentView === 'settings' && <SettingsHub userId={effectiveUserId} />}
           {currentView === 'system' && <SystemCheck />}
+          {currentView === 'receipts' && <ActionLedger />}
         </section>
       </main>
 
