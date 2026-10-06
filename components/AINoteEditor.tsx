@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 interface AINoteEditorProps {
   userId: string;
@@ -10,6 +11,7 @@ type SavedNote = {
   id: string;
   text: string;
   createdAt: number;
+  cloud?: boolean;
 };
 
 type ChatResponse = {
@@ -23,17 +25,49 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
   const [savedNotes, setSavedNotes] = useState<SavedNote[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState('');
+  const [mode, setMode] = useState<'checking' | 'cloud' | 'local'>('checking');
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(storageKey);
-      setSavedNotes(stored ? JSON.parse(stored) : []);
-    } catch {
-      setSavedNotes([]);
-    }
+    let active = true;
+
+    const hydrate = async () => {
+      try {
+        const records = await firebaseBackend.getRecentBusinessRecords(100);
+        if (!active) return;
+
+        const cloudNotes: SavedNote[] = records
+          .filter((record) => record.kind === 'note')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return {
+              id: String(record.id),
+              text: String(data.text || ''),
+              createdAt: Number(record.createdAt || Date.now()),
+              cloud: true,
+            };
+          })
+          .filter((item) => item.text);
+
+        setSavedNotes(cloudNotes);
+        setMode('cloud');
+      } catch {
+        try {
+          const stored = localStorage.getItem(storageKey);
+          setSavedNotes(stored ? JSON.parse(stored) : []);
+        } catch {
+          setSavedNotes([]);
+        }
+        setMode('local');
+      }
+    };
+
+    hydrate();
+    return () => {
+      active = false;
+    };
   }, [storageKey]);
 
-  const persist = (notes: SavedNote[]) => {
+  const persistLocal = (notes: SavedNote[]) => {
     setSavedNotes(notes);
     localStorage.setItem(storageKey, JSON.stringify(notes));
   };
@@ -74,23 +108,48 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
     }
   };
 
-  const saveNote = () => {
+  const saveNote = async () => {
     const text = note.trim();
     if (!text) {
       setStatus('There is no note to save yet.');
       return;
     }
 
+    if (mode === 'cloud') {
+      try {
+        const id = await firebaseBackend.saveBusinessRecord('note', { text });
+        setSavedNotes((current) => [
+          { id, text, createdAt: Date.now(), cloud: true },
+          ...current,
+        ]);
+        setStatus('Note saved to your cloud workspace.');
+        return;
+      } catch {
+        setMode('local');
+      }
+    }
+
     const next = [
-      { id: `note-${Date.now()}`, text, createdAt: Date.now() },
+      { id: 'local-' + Date.now(), text, createdAt: Date.now(), cloud: false },
       ...savedNotes,
     ];
-    persist(next);
-    setStatus('Note saved on this device.');
+    persistLocal(next);
+    setStatus('Note saved on this device because cloud sync is unavailable.');
   };
 
-  const removeNote = (id: string) => {
-    persist(savedNotes.filter((item) => item.id !== id));
+  const removeNote = async (item: SavedNote) => {
+    if (mode === 'cloud' && item.cloud) {
+      try {
+        await firebaseBackend.deleteBusinessRecord(item.id);
+        setSavedNotes((current) => current.filter((noteItem) => noteItem.id !== item.id));
+        return;
+      } catch {
+        setStatus('Could not delete the cloud note.');
+        return;
+      }
+    }
+
+    persistLocal(savedNotes.filter((noteItem) => noteItem.id !== item.id));
   };
 
   const copyNote = async () => {
@@ -109,7 +168,7 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
         <header>
           <span className="eyebrow">NOTES</span>
           <h1>Capture it before it disappears.</h1>
-          <p>AI can organize your rough note, but this screen will never claim it notified someone unless a real messaging connection confirms it.</p>
+          <p>AI can organize your rough note. Saved notes follow your signed-in workspace when cloud storage is available.</p>
         </header>
 
         <div className="grid">
@@ -176,7 +235,7 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
                     <p>{item.text}</p>
                     <small>{new Date(item.createdAt).toLocaleString()}</small>
                   </div>
-                  <button onClick={() => removeNote(item.id)} aria-label="Delete note">×</button>
+                  <button onClick={() => removeNote(item)} aria-label="Delete note">×</button>
                 </article>
               ))}
             </div>
