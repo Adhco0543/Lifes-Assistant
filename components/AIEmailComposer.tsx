@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 interface AIEmailComposerProps {
   userId: string;
@@ -16,7 +17,10 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
   const [instructions, setInstructions] = useState('');
   const [body, setBody] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState('');
+  const [emailReady, setEmailReady] = useState(false);
+  const [emailDomainStatus, setEmailDomainStatus] = useState('checking');
 
   useEffect(() => {
     try {
@@ -32,6 +36,75 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
       localStorage.removeItem('email_draft');
     }
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const checkStatus = async () => {
+      try {
+        const response = await fetch('/api/system-status', { cache: 'no-store' });
+        const data = await response.json();
+
+        if (!active) return;
+        const verified = Boolean(data?.email?.configured && data?.email?.domainVerified);
+        setEmailReady(verified);
+        setEmailDomainStatus(String(data?.email?.domainStatus || 'unknown'));
+      } catch {
+        if (!active) return;
+        setEmailReady(false);
+        setEmailDomainStatus('check-failed');
+      }
+    };
+
+    checkStatus();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const sendEmail = async () => {
+    if (!recipient.trim() || !subject.trim() || !body.trim()) {
+      setStatus('Recipient, subject, and email body are required before sending.');
+      return;
+    }
+
+    const user = firebaseBackend.getCurrentUser();
+    if (!user) {
+      setStatus('You need to be signed in before sending.');
+      return;
+    }
+
+    setIsSending(true);
+    setStatus('Sending…');
+
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        },
+        body: JSON.stringify({
+          to: recipient.trim(),
+          subject: subject.trim(),
+          text: body.trim(),
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Email could not be sent.');
+      }
+
+      setStatus('Email sent successfully.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Email could not be sent.');
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   const generateDraft = async () => {
     if (!recipient.trim() || !instructions.trim()) {
@@ -91,7 +164,7 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
           <span className="eyebrow">EMAIL DRAFTS</span>
           <h1>Write it clearly. Send it only when sending is truly connected.</h1>
           <p>
-            Drafting is live through the AI. Direct sending is intentionally disabled until a verified sending domain is connected.
+            Drafting and delivery use the same production paths we intend to ship. Sending activates automatically when the dedicated mail domain is verified.
           </p>
         </header>
 
@@ -138,7 +211,11 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
 
             <div className="connection-note">
               <strong>Sending status</strong>
-              <p>No verified sending domain is connected yet, so the app will not pretend an email was sent.</p>
+              <p>
+                {emailReady
+                  ? 'Live email delivery is connected and ready.'
+                  : 'Mail domain status: ' + emailDomainStatus + '. DNS verification must finish before real delivery is enabled.'}
+              </p>
             </div>
           </section>
 
@@ -164,8 +241,14 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
 
             <div className="actions">
               <button className="secondary" onClick={copyDraft} disabled={!body.trim()}>Copy draft</button>
-              <button className="disabled-send" type="button" disabled title="Connect a verified sending domain first">
-                Send email · not connected
+              <button
+                className={emailReady ? 'primary' : 'disabled-send'}
+                type="button"
+                onClick={sendEmail}
+                disabled={!emailReady || isSending || !body.trim() || !recipient.trim() || !subject.trim()}
+                title={emailReady ? 'Send this email now' : 'Email domain verification is still pending'}
+              >
+                {isSending ? 'Sending…' : emailReady ? 'Send email' : 'Send email · verification pending'}
               </button>
             </div>
 
