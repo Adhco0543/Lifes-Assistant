@@ -118,6 +118,7 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
     if (mode === 'cloud') {
       try {
         const id = await firebaseBackend.saveBusinessRecord('note', { text });
+        await firebaseBackend.trackEvent('note.saved');
         setSavedNotes((current) => [
           { id, text, createdAt: Date.now(), cloud: true },
           ...current,
