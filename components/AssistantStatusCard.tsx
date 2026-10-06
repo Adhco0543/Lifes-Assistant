@@ -66,9 +66,7 @@ export function AssistantStatusCard({ userId }: AssistantStatusCardProps) {
         nextCheckIn: new Date(now.getTime() + 45000),
         tasksQueued,
         approvalsNeeded,
-        successRate: stats?.byStatus?.success
-          ? Math.round((stats.byStatus.success / stats.totalExecutions) * 100)
-          : 0,
+        successRate: stats ? Math.round(stats.executionRate || 0) : 0,
       });
 
       setLoading(false);
