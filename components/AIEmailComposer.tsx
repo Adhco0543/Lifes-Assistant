@@ -117,9 +117,11 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
     setStatus('');
 
     try {
+      const token = await firebaseBackend.getIdToken();
+      if (!token) throw new Error('Authentication required');
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
           message:
             `Draft an email for me. Recipient: ${recipient}. Subject: ${subject || 'Create a suitable subject'}. Instructions: ${instructions}. Return only the email body, without To/From/Subject labels.`,
