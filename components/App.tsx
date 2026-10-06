@@ -16,6 +16,7 @@ import LifeAssistantHome from './LifeAssistantHome';
 import SystemCheck from './SystemCheck';
 import ActionLedger from './ActionLedger';
 import MemoryCenter from './MemoryCenter';
+import FocusBrief from './FocusBrief';
 
 type ViewType =
   | 'home'
@@ -29,6 +30,7 @@ type ViewType =
   | 'system'
   | 'receipts'
   | 'memory'
+  | 'brief'
   | 'onboarding';
 
 interface AppProps {
@@ -37,6 +39,7 @@ interface AppProps {
 
 const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
+  { id: 'brief', label: 'Focus Brief', icon: '◈' },
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'memory', label: 'Memory', icon: '◉' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
@@ -357,6 +360,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           {currentView === 'system' && <SystemCheck />}
           {currentView === 'receipts' && <ActionLedger />}
           {currentView === 'memory' && <MemoryCenter />}
+          {currentView === 'brief' && <FocusBrief />}
         </section>
       </main>
 
