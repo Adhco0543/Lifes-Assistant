@@ -22,6 +22,8 @@ export default function SystemCheck() {
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [cloudAccess, setCloudAccess] = useState<boolean | null>(null);
+  const [aiLive, setAiLive] = useState<boolean | null>(null);
+  const [authSession, setAuthSession] = useState<boolean | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -30,11 +32,41 @@ export default function SystemCheck() {
       const next = await response.json();
       setData(next);
 
+      const user = firebaseBackend.getCurrentUser();
+      setAuthSession(Boolean(user));
+
       try {
         await firebaseBackend.getRecentBusinessRecords(1);
         setCloudAccess(true);
       } catch {
         setCloudAccess(false);
+      }
+
+      if (next?.ai?.configured && user) {
+        try {
+          const token = await user.getIdToken();
+          const aiResponse = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + token,
+            },
+            body: JSON.stringify({
+              message: 'Reply with exactly: system check passed',
+              businessContext: 'production system check',
+              chatbotName: "Life's Assistant",
+              memoryEnabled: false,
+              history: [],
+            }),
+          });
+
+          const aiBody = await aiResponse.json().catch(() => ({}));
+          setAiLive(Boolean(aiResponse.ok && typeof aiBody?.message === 'string' && aiBody.message.trim()));
+        } catch {
+          setAiLive(false);
+        }
+      } else {
+        setAiLive(false);
       }
 
       setCheckedAt(new Date());
@@ -59,14 +91,26 @@ export default function SystemCheck() {
     {
       name: 'AI',
       detail: data?.ai?.model ? 'Model: ' + data.ai.model : 'OpenAI configuration',
-      ok: Boolean(data?.ai?.configured),
-      value: data?.ai?.configured ? 'Connected' : 'Not configured',
+      ok: Boolean(data?.ai?.configured && aiLive === true),
+      value: !data?.ai?.configured
+        ? 'Not configured'
+        : aiLive === null
+          ? 'Checking live request'
+          : aiLive
+            ? 'Live request passed'
+            : 'Live request failed',
     },
     {
       name: 'Authentication',
       detail: 'Firebase sign-in configuration',
-      ok: Boolean(data?.firebase?.configured),
-      value: data?.firebase?.configured ? 'Connected' : 'Not configured',
+      ok: Boolean(data?.firebase?.configured && authSession === true),
+      value: !data?.firebase?.configured
+        ? 'Not configured'
+        : authSession === null
+          ? 'Checking session'
+          : authSession
+            ? 'Signed-in session confirmed'
+            : 'No signed-in session',
     },
     {
       name: 'Cloud workspace',
@@ -97,7 +141,7 @@ export default function SystemCheck() {
             Know what is real before you depend on it.
           </h1>
           <p style={{ margin: 0, maxWidth: 760, color: '#858585', lineHeight: 1.55, fontSize: '.8rem' }}>
-            This page reads the same production configuration used by the app. Green means the live path is connected, not simulated.
+            This page exercises the same production paths used by the app. Green means the live path answered successfully, not merely that a setting exists.
           </p>
         </header>
 
