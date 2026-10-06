@@ -23,6 +23,7 @@ const destinationForKind = (kind: string) => {
   if (kind === 'material-estimate') return 'materials';
   if (kind === 'memory') return 'memory';
   if (kind === 'person') return 'people';
+  if (kind === 'project') return 'projects';
   if (kind === 'brief') return 'brief';
   return 'receipts';
 };
