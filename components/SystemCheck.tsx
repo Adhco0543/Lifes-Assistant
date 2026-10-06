@@ -28,12 +28,28 @@ export default function SystemCheck() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/system-status', { cache: 'no-store' });
-      const next = await response.json();
-      setData(next);
-
       const user = firebaseBackend.getCurrentUser();
       setAuthSession(Boolean(user));
+
+      if (!user) {
+        setData(null);
+        setAiLive(false);
+        setCloudAccess(false);
+        return;
+      }
+
+      const token = await user.getIdToken();
+      const response = await fetch('/api/system-status', {
+        cache: 'no-store',
+        headers: { Authorization: 'Bearer ' + token },
+      });
+
+      if (!response.ok) {
+        throw new Error('System status request failed');
+      }
+
+      const next = await response.json();
+      setData(next);
 
       try {
         await firebaseBackend.getRecentBusinessRecords(1);
@@ -44,7 +60,6 @@ export default function SystemCheck() {
 
       if (next?.ai?.configured && user) {
         try {
-          const token = await user.getIdToken();
           const aiResponse = await fetch('/api/chat', {
             method: 'POST',
             headers: {
