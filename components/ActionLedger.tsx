@@ -35,6 +35,7 @@ const receiptProof = (receipt: Receipt): string => {
   'note.saved': { title: 'Note saved', detail: 'A note was saved to the workspace.', icon: '✎' },
   'quote.saved': { title: 'Quote saved', detail: 'A quote draft was saved to the workspace.', icon: '▤' },
   'material.estimate': { title: 'Estimate calculated', detail: 'A material estimate was calculated.', icon: '◇' },
+  'memory.saved': { title: 'Memory saved', detail: 'Persistent context was added to the assistant.', icon: '◉' },
 };
 
 export default function ActionLedger() {
