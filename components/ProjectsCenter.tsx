@@ -16,6 +16,7 @@ type Project = {
 
 export default function ProjectsCenter() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [relatedCounts, setRelatedCounts] = useState<Record<string, { tasks: number; notes: number; quotes: number; estimates: number }>>({});
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [notes, setNotes] = useState('');
@@ -49,6 +50,30 @@ export default function ProjectsCenter() {
         });
 
       setProjects(next);
+
+      const counts: Record<string, { tasks: number; notes: number; quotes: number; estimates: number }> = {};
+      next.forEach((project) => {
+        counts[project.id] = { tasks: 0, notes: 0, quotes: 0, estimates: 0 };
+      });
+
+      records.forEach((record) => {
+        const data = (record.data || {}) as Record<string, unknown>;
+        const linkedProjectId =
+          typeof data.projectId === 'string'
+            ? data.projectId
+            : typeof data.workspaceProjectId === 'string'
+              ? data.workspaceProjectId
+              : '';
+
+        if (!linkedProjectId || !counts[linkedProjectId]) return;
+
+        if (record.kind === 'task') counts[linkedProjectId].tasks += 1;
+        if (record.kind === 'note') counts[linkedProjectId].notes += 1;
+        if (record.kind === 'quote') counts[linkedProjectId].quotes += 1;
+        if (record.kind === 'material-estimate') counts[linkedProjectId].estimates += 1;
+      });
+
+      setRelatedCounts(counts);
       setStatus(next.length ? next.length + ' projects saved.' : 'No projects saved yet.');
     } catch {
       setProjects([]);
@@ -89,6 +114,10 @@ export default function ProjectsCenter() {
         },
         ...current,
       ]);
+      setRelatedCounts((current) => ({
+        ...current,
+        [id]: { tasks: 0, notes: 0, quotes: 0, estimates: 0 },
+      }));
 
       setName('');
       setGoal('');
@@ -133,6 +162,11 @@ export default function ProjectsCenter() {
     try {
       await firebaseBackend.deleteBusinessRecord(project.id);
       setProjects((current) => current.filter((item) => item.id !== project.id));
+      setRelatedCounts((current) => {
+        const next = { ...current };
+        delete next[project.id];
+        return next;
+      });
       setStatus(project.name + ' was removed.');
     } catch {
       setStatus('Could not remove that project.');
@@ -207,6 +241,12 @@ export default function ProjectsCenter() {
                   <h3>{project.name}</h3>
                   {project.goal && <p className="goal">{project.goal}</p>}
                   {project.notes && <p className="notes">{project.notes}</p>}
+                  <div className="related-grid">
+                    <span><strong>{relatedCounts[project.id]?.tasks || 0}</strong><small>Tasks</small></span>
+                    <span><strong>{relatedCounts[project.id]?.notes || 0}</strong><small>Notes</small></span>
+                    <span><strong>{relatedCounts[project.id]?.quotes || 0}</strong><small>Quotes</small></span>
+                    <span><strong>{relatedCounts[project.id]?.estimates || 0}</strong><small>Estimates</small></span>
+                  </div>
                   <div className="status-actions">
                     {(['active', 'paused', 'done'] as ProjectStatus[]).map((value) => (
                       <button
@@ -256,6 +296,21 @@ export default function ProjectsCenter() {
         h3 { margin: 12px 0 0; font-size: .88rem; }
         .goal { margin: 6px 0 0; color: #c0c0c0; font-size: .7rem; line-height: 1.45; }
         .notes { margin: 9px 0 0; color: #777; font-size: .65rem; line-height: 1.45; white-space: pre-wrap; }
+        .related-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 6px;
+          margin-top: 13px;
+        }
+        .related-grid > span {
+          padding: 8px;
+          border-radius: 9px;
+          background: #252525;
+          border: 1px solid #353535;
+        }
+        .related-grid strong, .related-grid small { display: block; }
+        .related-grid strong { font-size: .75rem; }
+        .related-grid small { margin-top: 2px; color: #666; font-size: .56rem; }
         .status-actions { display: flex; gap: 5px; margin-top: 14px; padding-top: 10px; border-top: 1px solid #363636; }
         .status-actions button { min-height: 30px; padding: 0 8px; border: 1px solid #3d3d3d; border-radius: 8px; background: transparent; color: #777; font-size: .59rem; cursor: pointer; text-transform: capitalize; }
         .status-actions button.selected { background: #353535; color: #ddd; }
