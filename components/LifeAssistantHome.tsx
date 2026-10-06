@@ -1,12 +1,21 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 interface LifeAssistantHomeProps {
   displayName?: string;
   businessName?: string;
+  userId: string;
   onNavigate: (view: string) => void;
 }
+
+type RecentItem = {
+  id: string;
+  kind: string;
+  title: string;
+  createdAt: number;
+};
 
 const QUICK_ACTIONS = [
   { id: 'chat', icon: '✦', title: "Ask Life's Assistant", detail: 'Plan, research, write, or think something through.' },
@@ -25,6 +34,7 @@ const TRY_ASKING = [
 export default function LifeAssistantHome({
   displayName,
   businessName,
+  userId,
   onNavigate,
 }: LifeAssistantHomeProps) {
   const greeting = useMemo(() => {
@@ -35,6 +45,62 @@ export default function LifeAssistantHome({
   }, []);
 
   const firstName = (displayName || 'there').split(' ')[0];
+  const [command, setCommand] = useState('');
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
+  const [recentStatus, setRecentStatus] = useState('Loading your workspace…');
+
+  useEffect(() => {
+    let active = true;
+
+    const loadRecent = async () => {
+      try {
+        const records = await firebaseBackend.getRecentBusinessRecords(6);
+        if (!active) return;
+
+        const mapped = records.slice(0, 5).map((record) => {
+          const data = (record.data || {}) as Record<string, unknown>;
+          const kind = String(record.kind || 'workspace');
+          const title =
+            String(
+              data.title ||
+              data.clientName ||
+              data.subject ||
+              data.text ||
+              data.projectDescription ||
+              kind
+            ).slice(0, 90);
+
+          return {
+            id: String(record.id || kind + '-' + record.createdAt),
+            kind,
+            title,
+            createdAt: Number(record.createdAt || record.updatedAt || Date.now()),
+          };
+        });
+
+        setRecentItems(mapped);
+        setRecentStatus(mapped.length ? 'Synced from your workspace.' : 'Your workspace is ready for its first saved item.');
+      } catch {
+        if (!active) return;
+        setRecentItems([]);
+        setRecentStatus('Cloud history is unavailable right now.');
+      }
+    };
+
+    loadRecent();
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const launchCommand = () => {
+    const prompt = command.trim();
+    if (!prompt) return;
+
+    localStorage.setItem('assistant_launch_prompt:' + userId, prompt);
+    setCommand('');
+    onNavigate('chat');
+  };
 
   return (
     <div className="home-page">
@@ -53,7 +119,7 @@ export default function LifeAssistantHome({
             </div>
             <div className="workspace-label">
               <span className="status-dot" />
-              {businessName || 'Your workspace'} · Beta workspace
+              {businessName || 'Your workspace'} · Release candidate
             </div>
           </div>
 
@@ -70,10 +136,59 @@ export default function LifeAssistantHome({
           </div>
         </section>
 
+        <section className="command-center">
+          <div className="command-copy">
+            <span className="section-kicker">DO ANYTHING</span>
+            <h2>Tell Life&apos;s Assistant the outcome you want.</h2>
+            <p>Start with the goal. The assistant can turn it into a conversation, task, quote, note, email draft, or next action.</p>
+          </div>
+          <div className="command-box">
+            <input
+              value={command}
+              onChange={(event) => setCommand(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') launchCommand();
+              }}
+              placeholder="Example: Remind me to call Allen tomorrow and draft what I should say."
+              aria-label="Tell Life's Assistant what you want done"
+            />
+            <button onClick={launchCommand} disabled={!command.trim()}>Go</button>
+          </div>
+        </section>
+
+        <section className="today-section">
+          <div className="section-heading">
+            <div>
+              <span className="section-kicker">CONTINUE</span>
+              <h2>Your workspace, where you left it.</h2>
+            </div>
+            <span className="section-note">{recentStatus}</span>
+          </div>
+          <div className="recent-strip">
+            {recentItems.length === 0 ? (
+              <button className="recent-empty" onClick={() => onNavigate('chat')}>
+                <span className="quick-icon">✦</span>
+                <span><strong>Start with one thought</strong><small>Your saved work will begin appearing here.</small></span>
+                <span className="arrow">→</span>
+              </button>
+            ) : recentItems.map((item) => (
+              <button
+                key={item.id}
+                className="recent-card"
+                onClick={() => onNavigate(item.kind === 'quote' ? 'quotes' : item.kind === 'note' ? 'notes' : item.kind === 'task' ? 'tasks' : 'receipts')}
+              >
+                <span className="recent-kind">{item.kind.toUpperCase()}</span>
+                <strong>{item.title}</strong>
+                <small>{new Date(item.createdAt).toLocaleString()}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
         <section className="quick-section">
           <div className="section-heading">
             <div>
-              <span className="section-kicker">QUICK START</span>
+              <span className="section-kicker">TOOLS</span>
               <h2>What do you want to get done?</h2>
             </div>
             <span className="section-note">Everything stays tied to your account.</span>
@@ -111,7 +226,7 @@ export default function LifeAssistantHome({
 
           <div className="panel status-panel">
             <div className="panel-heading">
-              <span className="section-kicker">BETA STATUS</span>
+              <span className="section-kicker">LIVE STATUS</span>
               <h3>What is real right now</h3>
             </div>
 
@@ -269,7 +384,108 @@ export default function LifeAssistantHome({
           font-size: .62rem;
           text-shadow: 0 1px 5px #000;
         }
-        .quick-section { margin-top: 48px; }
+        .command-center {
+          margin-top: 22px;
+          padding: 18px;
+          display: grid;
+          grid-template-columns: minmax(220px, .75fr) minmax(0, 1.25fr);
+          gap: 18px;
+          align-items: center;
+          background: #181818;
+          border: 1px solid #333;
+          border-radius: 18px;
+          box-shadow: 0 16px 40px rgba(0,0,0,.18);
+        }
+        .command-copy h2 {
+          margin: 5px 0 6px;
+          font-size: 1.05rem;
+          letter-spacing: -.02em;
+        }
+        .command-copy p {
+          margin: 0;
+          color: #777;
+          font-size: .7rem;
+          line-height: 1.5;
+        }
+        .command-box {
+          display: grid;
+          grid-template-columns: minmax(0,1fr) auto;
+          gap: 8px;
+          padding: 7px;
+          border: 1px solid #3b3b3b;
+          border-radius: 14px;
+          background: #242424;
+        }
+        .command-box input {
+          min-width: 0;
+          min-height: 44px;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: #efefef;
+          padding: 0 8px;
+        }
+        .command-box input::placeholder { color: #666; }
+        .command-box button {
+          min-width: 54px;
+          border: 0;
+          border-radius: 10px;
+          background: #ededed;
+          color: #111;
+          font-weight: 700;
+          cursor: pointer;
+        }
+        .command-box button:disabled { opacity: .35; cursor: default; }
+        .today-section { margin-top: 28px; }
+        .recent-strip {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0,1fr));
+          gap: 8px;
+        }
+        .recent-card, .recent-empty {
+          min-height: 116px;
+          padding: 13px;
+          border: 1px solid #343434;
+          border-radius: 14px;
+          background: #272727;
+          color: #ddd;
+          text-align: left;
+          cursor: pointer;
+        }
+        .recent-card { display: flex; flex-direction: column; }
+        .recent-card:hover, .recent-empty:hover { background: #2d2d2d; border-color: #414141; }
+        .recent-kind {
+          color: #707070;
+          font-size: .56rem;
+          letter-spacing: .12em;
+          font-weight: 750;
+        }
+        .recent-card strong {
+          margin-top: 9px;
+          font-size: .72rem;
+          line-height: 1.35;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .recent-card small {
+          margin-top: auto;
+          padding-top: 10px;
+          color: #626262;
+          font-size: .58rem;
+        }
+        .recent-empty {
+          grid-column: 1 / -1;
+          display: grid;
+          grid-template-columns: auto minmax(0,1fr) auto;
+          gap: 12px;
+          align-items: center;
+        }
+        .recent-empty strong, .recent-empty small { display: block; }
+        .recent-empty strong { font-size: .76rem; }
+        .recent-empty small { color: #737373; font-size: .64rem; margin-top: 3px; }
+        .quick-section { margin-top: 36px; }
         .section-heading {
           display: flex;
           align-items: end;
@@ -386,12 +602,16 @@ export default function LifeAssistantHome({
           .hero-copy { padding-bottom: 0; }
           .hero-visual { min-height: 320px; }
           .quick-grid { grid-template-columns: repeat(2, 1fr); }
+          .recent-strip { grid-template-columns: repeat(2, 1fr); }
+          .command-center { grid-template-columns: 1fr; }
         }
         @media (max-width: 680px) {
           .home-inner { width: min(100% - 28px, 1180px); padding-top: 24px; }
           .hero-copy { padding-top: 16px; }
           .hero-visual { min-height: 280px; border-radius: 17px; }
-          .quick-grid, .lower-grid { grid-template-columns: 1fr; }
+          .quick-grid, .lower-grid, .recent-strip { grid-template-columns: 1fr; }
+          .command-box { grid-template-columns: 1fr; }
+          .command-box button { min-height: 42px; }
           .section-heading { align-items: start; flex-direction: column; }
           .section-note { display: none; }
           h1 { font-size: 2.45rem; }
