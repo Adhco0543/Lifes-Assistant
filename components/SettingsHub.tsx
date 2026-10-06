@@ -202,7 +202,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
                 <div className="section-title"><span className="eyebrow">INTEGRATIONS</span><h2>Connect real tools, not pretend buttons</h2></div>
                 {['Email', 'Calendar', 'Google Drive'].map((name) => (
                   <div className="integration-row" key={name}>
-                    <div><strong>{name}</strong><small>Not connected inside this beta yet.</small></div>
+                    <div><strong>{name}</strong><small>Not connected in the release candidate yet.</small></div>
                     <span>Planned</span>
                   </div>
                 ))}
