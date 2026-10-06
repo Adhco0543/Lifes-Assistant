@@ -17,7 +17,14 @@ type LocalTask = {
   createdAt: number;
   dueDate?: string;
   priority?: TaskPriority;
+  projectId?: string;
+  projectName?: string;
   cloud?: boolean;
+};
+
+type ProjectOption = {
+  id: string;
+  name: string;
 };
 
 export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
@@ -26,6 +33,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
   const [draft, setDraft] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('normal');
+  const [projectId, setProjectId] = useState('');
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [mode, setMode] = useState<'checking' | 'cloud' | 'local'>('checking');
   const [status, setStatus] = useState('');
 
@@ -59,6 +68,19 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
         const records = await firebaseBackend.getRecentBusinessRecords(100);
         if (!active) return;
 
+        const projectOptions: ProjectOption[] = records
+          .filter((record) => record.kind === 'project')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return {
+              id: String(record.id || ''),
+              name: String(data.name || '').trim(),
+            };
+          })
+          .filter((project) => project.id && project.name);
+
+        setProjects(projectOptions);
+
         const cloudTasks: LocalTask[] = records
           .filter((record) => record.kind === 'task')
           .map((record) => {
@@ -70,6 +92,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
               createdAt: Number(record.createdAt || Date.now()),
               dueDate: typeof data.dueDate === 'string' ? data.dueDate : '',
               priority: (data.priority === 'high' || data.priority === 'low' ? data.priority : 'normal') as TaskPriority,
+              projectId: typeof data.projectId === 'string' ? data.projectId : '',
+              projectName: typeof data.projectName === 'string' ? data.projectName : '',
               cloud: true,
             };
           })
@@ -160,25 +184,33 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
 
     if (mode === 'cloud') {
       try {
+        const selectedProject = projects.find((project) => project.id === projectId);
+        const projectName = selectedProject?.name || '';
+
         const id = await firebaseBackend.saveBusinessRecord('task', {
           title,
           status: 'open',
           dueDate,
           priority,
+          projectId,
+          projectName,
         });
         await firebaseBackend.trackEvent('task.created', {
           title,
           recordId: id,
           dueDate,
           priority,
+          projectId,
+          projectName,
         });
         setTasks((current) => [
-          { id, title, status: 'open', createdAt: Date.now(), dueDate, priority, cloud: true },
+          { id, title, status: 'open', createdAt: Date.now(), dueDate, priority, projectId, projectName, cloud: true },
           ...current,
         ]);
         setDraft('');
         setDueDate('');
         setPriority('normal');
+        setProjectId('');
         setStatus('Task saved to your cloud workspace.');
         return;
       } catch (error) {
@@ -188,13 +220,24 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
     }
 
     const next = [
-      { id: 'local-' + Date.now(), title, status: 'open' as TaskStatus, createdAt: Date.now(), dueDate, priority, cloud: false },
+      {
+        id: 'local-' + Date.now(),
+        title,
+        status: 'open' as TaskStatus,
+        createdAt: Date.now(),
+        dueDate,
+        priority,
+        projectId,
+        projectName: projects.find((project) => project.id === projectId)?.name || '',
+        cloud: false,
+      },
       ...tasks,
     ];
     saveLocal(next);
     setDraft('');
     setDueDate('');
     setPriority('normal');
+    setProjectId('');
     setStatus('Task saved on this device because cloud sync is unavailable.');
   };
 
@@ -208,6 +251,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           status: nextStatus,
           dueDate: task.dueDate || '',
           priority: task.priority || 'normal',
+          projectId: task.projectId || '',
+          projectName: task.projectName || '',
         });
         if (nextStatus === 'done') {
           await firebaseBackend.trackEvent('task.completed', { title: task.title, recordId: task.id });
@@ -290,6 +335,12 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
                 <option value="normal">Normal</option>
                 <option value="low">Low</option>
               </select>
+              <select value={projectId} onChange={(event) => setProjectId(event.target.value)} aria-label="Project">
+                <option value="">No project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
               <button onClick={addTask} disabled={!draft.trim() || mode === 'checking'}>Add task</button>
             </div>
           </div>
@@ -322,6 +373,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
                       <span>{task.title}</span>
                       <small>
                         {task.priority === 'high' ? 'High priority' : task.priority === 'low' ? 'Low priority' : 'Normal priority'}
+                        {task.projectName ? ' · ' + task.projectName : ''}
                         {task.dueDate ? ' · Due ' + new Date(task.dueDate + 'T12:00:00').toLocaleDateString() : ''}
                       </small>
                     </button>
@@ -369,7 +421,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
         .capture-card { display: grid; grid-template-columns: 38px 1fr; gap: 12px; padding: 16px; border: 1px solid #343434; background: #272727; border-radius: 16px; margin-bottom: 12px; }
         .capture-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #efefef; color: #111; font-size: 1.2rem; }
         .capture-copy label { display: block; font-size: .78rem; font-weight: 650; margin-bottom: 9px; }
-        .capture-row { display: grid; grid-template-columns: minmax(0,1fr) 145px 110px auto; gap: 8px; }
+        .capture-row { display: grid; grid-template-columns: minmax(0,1fr) 140px 105px 150px auto; gap: 8px; }
         .capture-row input, .capture-row select { min-width: 0; min-height: 42px; border-radius: 11px; border: 1px solid #3b3b3b; background: #1f1f1f; color: #ececec; padding: 0 12px; outline: none; }
         .capture-row input:first-child { width: 100%; }
         .capture-row button { border: 0; border-radius: 11px; padding: 0 15px; background: #ededed; color: #111; font-weight: 650; cursor: pointer; }
