@@ -38,9 +38,26 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
   const [active, setActive] = useState<SettingCategory>('general');
   const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
   const [saved, setSaved] = useState(false);
+  const [cloudSync, setCloudSync] = useState<'checking' | 'on' | 'off'>('checking');
+  const [cloudCheckedAt, setCloudCheckedAt] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
+
+    const checkCloudSync = async () => {
+      try {
+        await firebaseBackend.testCloudSync();
+        if (!active) return;
+        setCloudSync('on');
+        setCloudCheckedAt(Date.now());
+      } catch {
+        if (!active) return;
+        setCloudSync('off');
+        setCloudCheckedAt(Date.now());
+      }
+    };
+
+    checkCloudSync();
 
     const load = async () => {
       let localPrefs = DEFAULTS;
@@ -145,6 +162,21 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
                   </select>
                   <small>Used by future scheduling features.</small>
                 </label>
+                <div className={`truth-card ${cloudSync === 'on' ? 'good' : cloudSync === 'off' ? 'warning' : ''}`}>
+                  <strong>Cloud sync: {cloudSync === 'checking' ? 'Checking…' : cloudSync === 'on' ? 'ON' : 'Needs attention'}</strong>
+                  <p>
+                    {cloudSync === 'on'
+                      ? 'Your signed-in workspace can write to, read from, and clean up Firestore successfully. Saved chats, tasks, notes, projects, people, quotes, estimates, memory, and receipts can follow your account across devices.'
+                      : cloudSync === 'off'
+                        ? 'Firebase is configured, but the live account-scoped Firestore write test did not pass. Check Firestore security rules before relying on cross-device sync.'
+                        : 'Running a live Firestore write/read/delete check for this signed-in account.'}
+                  </p>
+                  {cloudCheckedAt && (
+                    <small style={{ display: 'block', marginTop: 7, color: '#646464', fontSize: '.61rem' }}>
+                      Last checked {new Date(cloudCheckedAt).toLocaleTimeString()}
+                    </small>
+                  )}
+                </div>
                 <div className="truth-card">
                   <strong>Account workspace</strong>
                   <p>Your sign-in is handled by Firebase Authentication. Allen can create a different account so his chat workspace is not your chat workspace.</p>
@@ -191,7 +223,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
               <div className="section-content">
                 <div className="section-title"><span className="eyebrow">PRIVACY</span><h2>Clear claims, no security theater</h2></div>
                 <div className="truth-card good"><strong>Account-scoped conversations</strong><p>Firestore chat records are stored under the signed-in Firebase user ID in the current backend structure.</p></div>
-                <div className="truth-card"><strong>Local preferences</strong><p>Some interface preferences and local task-list data are stored in this browser using localStorage.</p></div>
+                <div className="truth-card"><strong>Local fallback</strong><p>Browser storage is used only as a fallback for selected features when cloud access is unavailable. Signed-in cloud paths remain the preferred source.</p></div>
                 <div className="truth-card warning"><strong>Not claiming end-to-end encryption</strong><p>The old mock setting was removed because the app should never advertise protection that has not actually been implemented and verified.</p></div>
                 <button className="danger-button" onClick={clearLocal}>Clear local interface preferences</button>
               </div>
