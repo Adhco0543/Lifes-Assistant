@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 type SettingCategory = 'general' | 'assistant' | 'appearance' | 'privacy' | 'integrations';
 
@@ -39,12 +40,45 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(storageKey);
-      if (stored) setPrefs({ ...DEFAULTS, ...JSON.parse(stored) });
-    } catch {
-      setPrefs(DEFAULTS);
-    }
+    let active = true;
+
+    const load = async () => {
+      let localPrefs = DEFAULTS;
+
+      try {
+        const stored = localStorage.getItem(storageKey);
+        if (stored) {
+          localPrefs = { ...DEFAULTS, ...JSON.parse(stored) };
+        }
+      } catch {
+        localPrefs = DEFAULTS;
+      }
+
+      try {
+        const cloudPrefs = await firebaseBackend.getLatestDraft('assistant-preferences');
+        if (!active) return;
+
+        setPrefs({
+          ...localPrefs,
+          assistantName: String(cloudPrefs?.assistantName || localPrefs.assistantName),
+          tone:
+            cloudPrefs?.tone === 'concise' || cloudPrefs?.tone === 'detailed'
+              ? cloudPrefs.tone
+              : 'balanced',
+          memoryEnabled:
+            typeof cloudPrefs?.memoryEnabled === 'boolean'
+              ? cloudPrefs.memoryEnabled
+              : localPrefs.memoryEnabled,
+        });
+      } catch {
+        if (active) setPrefs(localPrefs);
+      }
+    };
+
+    load();
+    return () => {
+      active = false;
+    };
   }, [storageKey]);
 
   const update = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
@@ -52,10 +86,18 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
     setSaved(false);
   };
 
-  const save = () => {
+  const save = async () => {
     try {
       localStorage.setItem(storageKey, JSON.stringify(prefs));
       localStorage.setItem('chatbot_name:' + userId, prefs.assistantName);
+
+      await firebaseBackend.saveDraft('assistant-preferences', {
+        assistantName: prefs.assistantName,
+        tone: prefs.tone,
+        memoryEnabled: prefs.memoryEnabled,
+        updatedAt: Date.now(),
+      });
+
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1800);
     } catch {
@@ -116,7 +158,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
                 <label className="field">
                   <span>Assistant name</span>
                   <input value={prefs.assistantName} maxLength={30} onChange={(event) => update('assistantName', event.target.value)} />
-                  <small>This updates the name used by the chat interface on this device.</small>
+                  <small>This name follows your signed-in account.</small>
                 </label>
                 <label className="field">
                   <span>Response style</span>
@@ -125,7 +167,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
                     <option value="balanced">Balanced</option>
                     <option value="detailed">Detailed</option>
                   </select>
-                  <small>Stored as a workspace preference. Model behavior wiring is part of the next assistant pass.</small>
+                  <small>Stored with your assistant workspace and used by the production behavior layer.</small>
                 </label>
                 <label className="switch-row">
                   <div><strong>Remember useful context</strong><small>Keep conversation history available for signed-in chat.</small></div>
