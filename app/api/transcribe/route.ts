@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyFirebaseRequest } from "../../../lib/serverAuth";
 
 /**
  * POST /api/transcribe
@@ -9,6 +10,10 @@ import { NextRequest, NextResponse } from "next/server";
  */
 export async function POST(request: NextRequest) {
   try {
+    if (!(await verifyFirebaseRequest(request))) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File;
 
@@ -17,6 +22,14 @@ export async function POST(request: NextRequest) {
         { error: "No audio file provided" },
         { status: 400 }
       );
+    }
+
+    if (audioFile.size > 25 * 1024 * 1024) {
+      return NextResponse.json({ error: "Audio file is too large." }, { status: 413 });
+    }
+
+    if (audioFile.type && !audioFile.type.startsWith("audio/") && !audioFile.type.startsWith("video/")) {
+      return NextResponse.json({ error: "Unsupported audio format." }, { status: 400 });
     }
 
     // Check API key
