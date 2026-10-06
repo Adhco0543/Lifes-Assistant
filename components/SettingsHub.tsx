@@ -179,7 +179,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
             {active === 'appearance' && (
               <div className="section-content">
                 <div className="section-title"><span className="eyebrow">APPEARANCE</span><h2>Clean by default</h2></div>
-                <div className="truth-card"><strong>Dark workspace</strong><p>The beta currently uses one carefully tuned dark theme so every screen can be made consistent before more themes are added.</p></div>
+                <div className="truth-card"><strong>Dark workspace</strong><p>The release candidate uses one carefully tuned dark theme so every screen stays consistent before more themes are added.</p></div>
                 <label className="switch-row">
                   <div><strong>Compact mode</strong><small>Preference is saved now; component density support will roll out screen by screen.</small></div>
                   <input type="checkbox" checked={prefs.compactMode} onChange={(event) => update('compactMode', event.target.checked)} />
