@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 type StatusData = {
   app?: { ready?: boolean };
@@ -20,6 +21,7 @@ export default function SystemCheck() {
   const [data, setData] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  const [cloudAccess, setCloudAccess] = useState<boolean | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -27,6 +29,14 @@ export default function SystemCheck() {
       const response = await fetch('/api/system-status', { cache: 'no-store' });
       const next = await response.json();
       setData(next);
+
+      try {
+        await firebaseBackend.getRecentBusinessRecords(1);
+        setCloudAccess(true);
+      } catch {
+        setCloudAccess(false);
+      }
+
       setCheckedAt(new Date());
     } catch {
       setData(null);
@@ -57,6 +67,12 @@ export default function SystemCheck() {
       detail: 'Firebase sign-in configuration',
       ok: Boolean(data?.firebase?.configured),
       value: data?.firebase?.configured ? 'Connected' : 'Not configured',
+    },
+    {
+      name: 'Cloud workspace',
+      detail: 'Signed-in Firestore access',
+      ok: cloudAccess === true,
+      value: cloudAccess === null ? 'Checking' : cloudAccess ? 'Read access confirmed' : 'Access failed',
     },
     {
       name: 'Email delivery',
