@@ -33,17 +33,48 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("Life's Assistant");
   const [isListening, setIsListening] = useState(false);
+  const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed'>('balanced');
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    const savedName = localStorage.getItem('chatbot_name:' + userId);
-    if (savedName) {
-      setChatbotName(savedName);
-      setNameInput(savedName);
-    }
+    let active = true;
+
+    const loadPreferences = async () => {
+      const savedName = localStorage.getItem('chatbot_name:' + userId);
+      if (savedName) {
+        setChatbotName(savedName);
+        setNameInput(savedName);
+      }
+
+      try {
+        const cloudPrefs = await firebaseBackend.getLatestDraft('assistant-preferences');
+        if (!active || !cloudPrefs) return;
+
+        if (typeof cloudPrefs.assistantName === 'string' && cloudPrefs.assistantName.trim()) {
+          setChatbotName(cloudPrefs.assistantName.trim());
+          setNameInput(cloudPrefs.assistantName.trim());
+        }
+
+        if (cloudPrefs.tone === 'concise' || cloudPrefs.tone === 'balanced' || cloudPrefs.tone === 'detailed') {
+          setResponseStyle(cloudPrefs.tone);
+        }
+
+        if (typeof cloudPrefs.memoryEnabled === 'boolean') {
+          setMemoryEnabled(cloudPrefs.memoryEnabled);
+        }
+      } catch {
+        // Local preferences remain available if cloud preferences cannot load.
+      }
+    };
+
+    loadPreferences();
+    return () => {
+      active = false;
+    };
   }, [userId]);
 
   const loadConversation = useCallback(async (conversationId: string) => {
@@ -265,10 +296,14 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           message: userMessage,
           businessContext,
           chatbotName,
-          history: messages
-            .slice(-12)
-            .filter((item) => item.role === 'user' || item.role === 'assistant')
-            .map((item) => ({ role: item.role, content: item.content })),
+          responseStyle,
+          memoryEnabled,
+          history: memoryEnabled
+            ? messages
+                .slice(-12)
+                .filter((item) => item.role === 'user' || item.role === 'assistant')
+                .map((item) => ({ role: item.role, content: item.content }))
+            : [],
         }),
       });
 
@@ -320,7 +355,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [input, isLoading, currentConversationId, businessContext, chatbotName, userId]);
+  }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, messages, userId]);
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -329,10 +364,24 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  const handleSaveName = () => {
+  const handleSaveName = async () => {
     const trimmedName = nameInput.trim() || "Life's Assistant";
     setChatbotName(trimmedName);
     localStorage.setItem('chatbot_name:' + userId, trimmedName);
+
+    try {
+      const existing = await firebaseBackend.getLatestDraft('assistant-preferences');
+      await firebaseBackend.saveDraft('assistant-preferences', {
+        ...(existing || {}),
+        assistantName: trimmedName,
+        tone: responseStyle,
+        memoryEnabled,
+        updatedAt: Date.now(),
+      });
+    } catch {
+      // The visible name still updates locally if cloud preference sync fails.
+    }
+
     setIsEditingName(false);
   };
 
