@@ -37,13 +37,16 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
         const user = await firebaseBackend.signUp(email, password, displayName);
 
         if (user) {
-          setSuccess('Account created! Redirecting...');
+          setSuccess('Account created. Opening your workspace…');
           setEmail('');
           setPassword('');
           setDisplayName('');
-          setTimeout(() => {
+
+          if (onSuccess) {
+            await onSuccess();
+          } else {
             router.push('/dashboard');
-          }, 1000);
+          }
         } else {
           setError('Sign up failed');
         }
@@ -53,12 +56,15 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
         const user = await firebaseBackend.login(email, password);
 
         if (user) {
-          setSuccess('Logged in successfully!');
+          setSuccess('Signed in. Opening your workspace…');
           setEmail('');
           setPassword('');
-          setTimeout(() => {
+
+          if (onSuccess) {
+            await onSuccess();
+          } else {
             router.push('/dashboard');
-          }, 1000);
+          }
         } else {
           setError('Login failed');
         }
@@ -120,8 +126,8 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
         <h2>{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
         <p className="subtitle">
           {mode === 'login'
-            ? 'Sign in to sync your conversations across devices'
-            : 'Sign up to start using intelligent business AI'}
+            ? 'Sign in to continue your conversations, memory, tasks, and workspace'
+            : 'Create one workspace for life, work, ideas, and everything in between'}
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -219,8 +225,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
 
         <div className="info-box">
           <p>
-            💡 <strong>Tip:</strong> Use the same email on any device to sync your conversations
-            automatically.
+            ✦ <strong>One account:</strong> Your conversations, memory, saved work, and receipts can follow you across devices.
           </p>
         </div>
       </div>
