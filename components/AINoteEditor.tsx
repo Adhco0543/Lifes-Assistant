@@ -11,7 +11,14 @@ type SavedNote = {
   id: string;
   text: string;
   createdAt: number;
+  projectId?: string;
+  projectName?: string;
   cloud?: boolean;
+};
+
+type ProjectOption = {
+  id: string;
+  name: string;
 };
 
 type ChatResponse = {
@@ -23,6 +30,8 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
   const [instructions, setInstructions] = useState('');
   const [note, setNote] = useState('');
   const [savedNotes, setSavedNotes] = useState<SavedNote[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectId, setProjectId] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState('');
   const [mode, setMode] = useState<'checking' | 'cloud' | 'local'>('checking');
@@ -35,6 +44,19 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
         const records = await firebaseBackend.getRecentBusinessRecords(100);
         if (!active) return;
 
+        const projectOptions: ProjectOption[] = records
+          .filter((record) => record.kind === 'project')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return {
+              id: String(record.id || ''),
+              name: String(data.name || '').trim(),
+            };
+          })
+          .filter((project) => project.id && project.name);
+
+        setProjects(projectOptions);
+
         const cloudNotes: SavedNote[] = records
           .filter((record) => record.kind === 'note')
           .map((record) => {
@@ -43,6 +65,8 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
               id: String(record.id),
               text: String(data.text || ''),
               createdAt: Number(record.createdAt || Date.now()),
+              projectId: typeof data.projectId === 'string' ? data.projectId : '',
+              projectName: typeof data.projectName === 'string' ? data.projectName : '',
               cloud: true,
             };
           })
@@ -119,13 +143,22 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
 
     if (mode === 'cloud') {
       try {
-        const id = await firebaseBackend.saveBusinessRecord('note', { text });
+        const selectedProject = projects.find((project) => project.id === projectId);
+        const projectName = selectedProject?.name || '';
+
+        const id = await firebaseBackend.saveBusinessRecord('note', {
+          text,
+          projectId,
+          projectName,
+        });
         await firebaseBackend.trackEvent('note.saved', {
           recordId: id,
           preview: text.slice(0, 120),
+          projectId,
+          projectName,
         });
         setSavedNotes((current) => [
-          { id, text, createdAt: Date.now(), cloud: true },
+          { id, text, createdAt: Date.now(), projectId, projectName, cloud: true },
           ...current,
         ]);
         setStatus('Note saved to your cloud workspace.');
@@ -136,7 +169,14 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
     }
 
     const next = [
-      { id: 'local-' + Date.now(), text, createdAt: Date.now(), cloud: false },
+      {
+        id: 'local-' + Date.now(),
+        text,
+        createdAt: Date.now(),
+        projectId,
+        projectName: projects.find((project) => project.id === projectId)?.name || '',
+        cloud: false,
+      },
       ...savedNotes,
     ];
     persistLocal(next);
@@ -213,6 +253,16 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
               placeholder="Your organized note will appear here."
             />
 
+            <label className="project-field">
+              <span>Project</span>
+              <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+                <option value="">No project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+            </label>
+
             <div className="actions">
               <button className="secondary" onClick={copyNote} disabled={!note.trim()}>Copy</button>
               <button className="primary" onClick={saveNote} disabled={!note.trim()}>Save note</button>
@@ -239,7 +289,10 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
                 <article key={item.id} className="saved-note">
                   <div>
                     <p>{item.text}</p>
-                    <small>{new Date(item.createdAt).toLocaleString()}</small>
+                    <small>
+                      {item.projectName ? item.projectName + ' · ' : ''}
+                      {new Date(item.createdAt).toLocaleString()}
+                    </small>
                   </div>
                   <button onClick={() => removeNote(item)} aria-label="Delete note">×</button>
                 </article>
@@ -264,6 +317,9 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
         textarea::placeholder { color: #676767; }
         textarea:focus { border-color: #666; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
         .note-editor { min-height: 260px; }
+        .project-field { display: grid; gap: 6px; }
+        .project-field span { color: #bdbdbd; font-size: .7rem; font-weight: 650; }
+        .project-field select { min-height: 40px; border: 1px solid #414141; border-radius: 10px; background: #1f1f1f; color: #ededed; padding: 0 10px; }
         button { min-height: 42px; border-radius: 10px; padding: 0 14px; font-weight: 650; cursor: pointer; }
         .primary { border: 0; background: #ededed; color: #111; }
         .secondary { border: 1px solid #454545; background: #303030; color: #ededed; }
