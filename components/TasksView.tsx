@@ -61,7 +61,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
             return {
               id: String(record.id),
               title: String(data.title || ''),
-              status: data.status === 'done' ? 'done' : 'open',
+              status: (data.status === 'done' ? 'done' : 'open') as TaskStatus,
               createdAt: Number(record.createdAt || Date.now()),
               cloud: true,
             };
