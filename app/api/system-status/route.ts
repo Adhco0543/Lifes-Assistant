@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
+import { verifyFirebaseRequest } from '../../../lib/serverAuth';
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!(await verifyFirebaseRequest(request))) {
+    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
+
   const result = {
     app: { ready: true },
     ai: {
