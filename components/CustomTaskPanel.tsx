@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from "react";
 import { customTaskEngine, TaskPlan } from "@/lib/customTaskEngine";
-import { workflowExecutor } from "@/lib/workflowExecutor";
 
 interface CustomTaskPanelProps {
   userId: string;
@@ -65,17 +64,18 @@ export function CustomTaskPanel({
       );
       // Set a default plan so user can still proceed
       setTaskPlan({
+        taskType: "custom_workflow",
         steps: [
           {
             action: "Custom Task",
             description: taskDescription,
-            tool: "custom",
-            parameters: { description: taskDescription },
-          }
+            inputs: [taskDescription],
+            expectedOutput: "A verified result from a connected execution tool",
+          },
         ],
-        reasoning: "Execute custom task",
+        reasoning: "A custom workflow is required because no specific connected executor matched this request.",
         confidence: 50,
-      } as TaskPlan);
+      });
     } finally {
       setIsAnalyzing(false);
     }
@@ -89,18 +89,9 @@ export function CustomTaskPanel({
     setError("");
 
     try {
-      // Simulate execution steps
-      for (let i = 0; i < taskPlan.steps.length; i++) {
-        setExecutionStep(i + 1);
-        await new Promise((resolve) => setTimeout(resolve, 800)); // Simulate work
-      }
-
-      const finalResult = `✅ Task completed successfully!\n\n${taskDescription}\n\nThe AI assistant has completed all steps and the result is ready.`;
-      setResult(finalResult);
-      onTaskComplete?.(finalResult);
-    } catch (err) {
+      onTaskSubmit?.(taskDescription);
       setError(
-        err instanceof Error ? err.message : "Task execution failed"
+        "This task has a plan, but no verified execution connector is attached to this legacy workflow yet. Nothing was executed."
       );
     } finally {
       setIsExecuting(false);
