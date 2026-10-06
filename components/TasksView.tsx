@@ -130,7 +130,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
     if (mode === 'cloud') {
       try {
         const id = await firebaseBackend.saveBusinessRecord('task', { title, status: 'open' });
-        await firebaseBackend.trackEvent('task.created');
+        await firebaseBackend.trackEvent('task.created', { title, recordId: id });
         setTasks((current) => [
           { id, title, status: 'open', createdAt: Date.now(), cloud: true },
           ...current,
