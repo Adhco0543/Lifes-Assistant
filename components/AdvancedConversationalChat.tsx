@@ -35,6 +35,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed'>('balanced');
   const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [persistentMemory, setPersistentMemory] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -72,6 +73,32 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     };
 
     loadPreferences();
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPersistentMemory = async () => {
+      try {
+        const records = await firebaseBackend.getRecentBusinessRecords(100);
+        if (!active) return;
+
+        const memories = records
+          .filter((record) => record.kind === 'memory')
+          .map((record) => String(((record.data || {}) as Record<string, unknown>).text || '').trim())
+          .filter(Boolean)
+          .slice(0, 30);
+
+        setPersistentMemory(memories);
+      } catch {
+        if (active) setPersistentMemory([]);
+      }
+    };
+
+    loadPersistentMemory();
     return () => {
       active = false;
     };
@@ -312,6 +339,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           chatbotName,
           responseStyle,
           memoryEnabled,
+          persistentMemory: memoryEnabled ? persistentMemory : [],
           history: memoryEnabled
             ? messages
                 .slice(-12)
@@ -369,7 +397,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, messages, userId]);
+  }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId]);
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
