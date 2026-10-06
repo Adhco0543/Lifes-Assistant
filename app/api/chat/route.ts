@@ -68,6 +68,7 @@ export async function POST(req: Request) {
     const memoryEnabled = body.memoryEnabled !== false;
 
     const history = memoryEnabled ? sanitizeHistory(body.history) : [];
+    const persistentMemory = memoryEnabled ? sanitizeMemory(body.persistentMemory) : [];
 
     const instructions = [
       "You are " + chatbotName + ", a persistent personal and business assistant.",
@@ -84,6 +85,9 @@ export async function POST(req: Request) {
       "Never claim you sent an email, placed an order, changed a calendar, spent money, contacted someone, or completed another external action unless a connected tool result explicitly confirms it.",
       "For consequential external actions, prepare the action and require the user\'s approval before execution.",
       "If information is uncertain, say so rather than inventing facts.",
+      persistentMemory.length
+        ? "Persistent user-approved memory:\n- " + persistentMemory.join("\n- ")
+        : "",
       businessContext ? "User context: " + businessContext : "",
     ]
       .filter(Boolean)
@@ -146,6 +150,16 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+function sanitizeMemory(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim().slice(0, 500))
+    .filter(Boolean)
+    .slice(0, 30);
 }
 
 function sanitizeHistory(value: unknown): HistoryMessage[] {
