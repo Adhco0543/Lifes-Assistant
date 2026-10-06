@@ -1,19 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { RichMedia } from './Richmedia';
-import { useAppIntegration, useResponsive } from '../lib/hooks';
-
-export interface OnboardingStep {
-  id: number;
-  title: string;
-  description: string;
-  question: string;
-  type: 'text' | 'select' | 'radio' | 'checkbox';
-  options?: string[];
-  placeholder?: string;
-  icon?: string;
-}
+import React, { useMemo, useState } from 'react';
+import { firebaseBackend } from '../lib/firebaseBackend';
 
 interface ProgressiveOnboardingProps {
   userId?: string;
@@ -21,81 +9,49 @@ interface ProgressiveOnboardingProps {
   onStepChange?: (step: number) => void;
 }
 
-const DEFAULT_STEPS: OnboardingStep[] = [
+type StepId = 'workspace' | 'help' | 'style' | 'memory' | 'approval';
+
+const HELP_OPTIONS = [
+  'Everyday planning',
+  'Work & business',
+  'Writing & email',
+  'Tasks & reminders',
+  'Money & estimates',
+  'Learning & research',
+  'Relationships & communication',
+  'Projects & ideas',
+];
+
+const steps: Array<{ id: StepId; title: string; kicker: string; description: string }> = [
   {
-    id: 1,
-    title: 'Welcome',
-    description: 'Let\'s get to know your business',
-    question: 'What is your business name?',
-    type: 'text',
-    placeholder: 'Enter your business name',
-    icon: 'smile',
+    id: 'workspace',
+    title: 'Make it yours.',
+    kicker: 'WELCOME',
+    description: 'Give this workspace a name. It can represent your whole life, your work, or both.',
   },
   {
-    id: 2,
-    title: 'Business Type',
-    description: 'Help us understand what you do',
-    question: 'What type of business are you in?',
-    type: 'select',
-    options: [
-      'Retail',
-      'Service',
-      'Food & Beverage',
-      'Professional Services',
-      'E-commerce',
-      'Other',
-    ],
-    icon: 'briefcase',
+    id: 'help',
+    title: 'What should it help carry?',
+    kicker: 'YOUR WORLD',
+    description: 'Choose the areas where you want Life’s Assistant to be useful most often.',
   },
   {
-    id: 3,
-    title: 'Location',
-    description: 'Where do you operate?',
-    question: 'What is your primary location?',
-    type: 'text',
-    placeholder: 'City, State',
-    icon: 'map',
+    id: 'style',
+    title: 'How should it talk to you?',
+    kicker: 'COMMUNICATION',
+    description: 'You can change this later, but the first conversation should already feel right.',
   },
   {
-    id: 4,
-    title: 'Team Size',
-    description: 'How many people work with you?',
-    question: 'What is your team size?',
-    type: 'select',
-    options: ['Solo', '2-5', '6-10', '11-20', '20+'],
-    icon: 'users',
+    id: 'memory',
+    title: 'Give it one thing worth remembering.',
+    kicker: 'MEMORY',
+    description: 'Optional. Save a person, preference, rule, routine, or fact that should survive future chats.',
   },
   {
-    id: 5,
-    title: 'Goals',
-    description: 'What are your main objectives?',
-    question: 'What are your primary goals? (Select all that apply)',
-    type: 'checkbox',
-    options: [
-      'Increase Revenue',
-      'Improve Customer Experience',
-      'Streamline Operations',
-      'Build Brand Presence',
-    ],
-    icon: 'target',
-  },
-  {
-    id: 6,
-    title: 'Budget',
-    description: 'What\'s your investment range?',
-    question: 'What is your monthly budget for tools?',
-    type: 'radio',
-    options: ['Under $100', '$100-$500', '$500-$1000', '$1000+'],
-    icon: 'dollar',
-  },
-  {
-    id: 7,
-    title: 'Preferences',
-    description: 'Final touches to personalize your experience',
-    question: 'How would you like to be contacted?',
-    type: 'radio',
-    options: ['Email', 'Phone', 'SMS', 'In-app Notifications'],
-    icon: 'bell',
+    id: 'approval',
+    title: 'You stay in control.',
+    kicker: 'ACTIONS',
+    description: 'External actions should be clear, intentional, and verifiable.',
   },
 ];
 
@@ -104,589 +60,475 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   onComplete,
   onStepChange,
 }) => {
-  const { isMobile, isTablet } = useResponsive();
-  const integration = useAppIntegration(userId);
-  
-  const [currentStep, setCurrentStep] = useState(0);
-  const [responses, setResponses] = useState<Record<string, any>>({});
-  const [isComplete, setIsComplete] = useState(false);
-  const [animatingOut, setAnimatingOut] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [workspaceName, setWorkspaceName] = useState('My Life');
+  const [helpAreas, setHelpAreas] = useState<string[]>([]);
+  const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed'>('balanced');
+  const [memory, setMemory] = useState('');
+  const [approvalFirst, setApprovalFirst] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
 
-  const steps = DEFAULT_STEPS;
-  const step = steps[currentStep];
-  const progress = ((currentStep + 1) / steps.length) * 100;
+  const step = steps[stepIndex];
+  const progress = ((stepIndex + 1) / steps.length) * 100;
 
-  // Auto-complete after showing message
-  useEffect(() => {
-    if (isComplete) {
-      const timer = setTimeout(() => {
-        // Format data for the callback with proper structure
-        const completionData = {
-          timestamp: Date.now(),
-          responses,
-          completedSteps: steps.length,
-          // Extract key fields for business profile
-          businessName: responses[1] || 'My Business',
-          businessType: responses[2] || 'other',
-          email: responses.email || 'owner@business.local',
-        };
-        onComplete?.(completionData);
-      }, 2000); // Show completion message for 2 seconds
+  const canContinue = useMemo(() => {
+    if (step.id === 'workspace') return Boolean(workspaceName.trim());
+    if (step.id === 'help') return helpAreas.length > 0;
+    return true;
+  }, [helpAreas.length, step.id, workspaceName]);
 
-      return () => clearTimeout(timer);
-    }
-  }, [isComplete, onComplete, responses, steps.length]);
-
-  /**
-   * Handle response to current question
-   */
-  const handleResponse = useCallback(
-    (value: string | string[]) => {
-      setResponses((prev) => ({
-        ...prev,
-        [step.id]: value,
-      }));
-    },
-    [step.id]
-  );
-
-  /**
-   * Move to next step
-   */
-  const handleNext = useCallback(() => {
-    if (currentStep < steps.length - 1) {
-      // Track step completion
-      integration.trackUserAction(`step_${currentStep + 1}_complete`, 'onboarding', {
-        stepTitle: step.title,
-        hasResponse: !!responses[step.id],
-      });
-
-      setAnimatingOut(true);
-      setTimeout(() => {
-        setCurrentStep((prev) => prev + 1);
-        setAnimatingOut(false);
-        onStepChange?.(currentStep + 2);
-      }, 300);
-    } else {
-      setIsComplete(true);
-      const onboardingData = {
-        timestamp: Date.now(),
-        responses,
-        completedSteps: steps.length,
-      };
-      
-      integration.trackUserAction('onboarding_complete', 'onboarding', onboardingData);
-      integration.personalization.recordInteraction('onboarding_completed', {
-        section: 'onboarding',
-        timeSpent: 0,
-      });
-    }
-  }, [currentStep, steps.length, responses, step, integration, onStepChange]);
-
-  /**
-   * Move to previous step
-   */
-  const handleBack = useCallback(() => {
-    if (currentStep > 0) {
-      integration.trackUserAction('step_back', 'onboarding', {
-        fromStep: currentStep + 1,
-        toStep: currentStep,
-      });
-      
-      setAnimatingOut(true);
-      setTimeout(() => {
-        setCurrentStep((prev) => prev - 1);
-        setAnimatingOut(false);
-        onStepChange?.(currentStep);
-      }, 300);
-    }
-  }, [currentStep, onStepChange, integration]);
-
-  /**
-   * Skip step
-   */
-  const handleSkip = useCallback(() => {
-    integration.trackUserAction('step_skipped', 'onboarding', {
-      step: currentStep + 1,
-      stepTitle: step.title,
-    });
-    handleNext();
-  }, [handleNext, currentStep, step, integration]);
-
-  if (isComplete) {
-    return (
-      <div className="onboarding-complete">
-        <RichMedia type="animation" animation="pulse" size="xl" color="#2ea043" />
-        <h2>Welcome to the family! 🎉</h2>
-        <p>Your business profile is all set up. Let's get started!</p>
-        <p style={{ fontSize: '14px', color: '#999', marginTop: '20px' }}>Loading your dashboard...</p>
-      </div>
+  const toggleHelpArea = (item: string) => {
+    setHelpAreas((current) =>
+      current.includes(item)
+        ? current.filter((value) => value !== item)
+        : current.concat(item)
     );
-  }
+  };
+
+  const next = async () => {
+    if (!canContinue || saving) return;
+
+    if (stepIndex < steps.length - 1) {
+      const nextIndex = stepIndex + 1;
+      setStepIndex(nextIndex);
+      onStepChange?.(nextIndex + 1);
+      return;
+    }
+
+    setSaving(true);
+    setStatus('Saving your workspace…');
+
+    try {
+      const preferences = {
+        assistantName: "Life's Assistant",
+        tone: responseStyle,
+        memoryEnabled: true,
+        approvalFirst,
+        helpAreas,
+        updatedAt: Date.now(),
+      };
+
+      try {
+        await firebaseBackend.saveDraft('assistant-preferences', preferences);
+      } catch {
+        localStorage.setItem(
+          'lifes-assistant-preferences:' + userId,
+          JSON.stringify({
+            assistantName: "Life's Assistant",
+            tone: responseStyle,
+            memoryEnabled: true,
+            compactMode: false,
+            timezone: 'America/New_York',
+          })
+        );
+      }
+
+      if (memory.trim()) {
+        try {
+          const id = await firebaseBackend.saveBusinessRecord('memory', {
+            text: memory.trim(),
+            category: 'General',
+          });
+          await firebaseBackend.trackEvent('memory.saved', {
+            recordId: id,
+            category: 'General',
+            preview: memory.trim().slice(0, 120),
+          });
+        } catch {
+          // Onboarding still completes if optional cloud memory is unavailable.
+        }
+      }
+
+      onComplete?.({
+        timestamp: Date.now(),
+        workspaceName: workspaceName.trim(),
+        businessName: workspaceName.trim(),
+        businessType: helpAreas.includes('Work & business') ? 'life-and-work' : 'personal',
+        helpAreas,
+        responseStyle,
+        approvalFirst,
+      });
+    } catch {
+      setStatus('I could not save the setup. Try again.');
+      setSaving(false);
+    }
+  };
+
+  const back = () => {
+    if (stepIndex === 0 || saving) return;
+    const nextIndex = stepIndex - 1;
+    setStepIndex(nextIndex);
+    onStepChange?.(nextIndex + 1);
+  };
 
   return (
-    <div className={`progressive-onboarding ${isMobile ? 'mobile' : ''} ${isTablet ? 'tablet' : ''}`} data-testid="progressive-onboarding">
-      {/* Header */}
-      <div className="onboarding-header">
-        <div className="progress-bar">
-          <div
-            className="progress-fill"
-            style={{ width: `${progress}%` }}
-          ></div>
-        </div>
-        <div className="step-counter">
-          Step {currentStep + 1} of {steps.length}
-        </div>
-      </div>
+    <div className="onboarding-page">
+      <div className="onboarding-shell">
+        <aside className="story-panel">
+          <div className="brand-mark">✦</div>
+          <span className="brand">Life&apos;s Assistant</span>
+          <h1>One assistant for the parts of life that usually live in separate apps.</h1>
+          <p>
+            Conversations become tasks, notes, quotes, briefs, memories, and verified actions without making you rebuild the context every time.
+          </p>
 
-      {/* Content */}
-      <div
-        className={`onboarding-content ${animatingOut ? 'fade-out' : 'fade-in'}`}
-      >
-        <div className="step-icon">
-          <RichMedia
-            type="visual"
-            size="lg"
-            color={`hsl(${(currentStep * 360) / steps.length}, 70%, 60%)`}
-          />
-        </div>
+          <div className="principles">
+            <div><span>01</span><strong>Remember on purpose</strong><small>You decide what survives.</small></div>
+            <div><span>02</span><strong>Act with approval</strong><small>No pretending an action happened.</small></div>
+            <div><span>03</span><strong>Leave receipts</strong><small>Important actions create proof.</small></div>
+          </div>
+        </aside>
 
-        <h1 className="step-title">{step.title}</h1>
-        <p className="step-description">{step.description}</p>
+        <main className="setup-panel">
+          <div className="progress-row">
+            <span>{step.kicker}</span>
+            <strong>{stepIndex + 1} / {steps.length}</strong>
+          </div>
+          <div className="progress-track"><div style={{ width: progress + '%' }} /></div>
 
-        <div className="question-container">
-          <label className="question">{step.question}</label>
+          <div className="step-copy">
+            <h2>{step.title}</h2>
+            <p>{step.description}</p>
+          </div>
 
-          {/* Text Input */}
-          {step.type === 'text' && (
-            <input
-              type="text"
-              placeholder={step.placeholder}
-              value={responses[step.id] || ''}
-              onChange={(e) => handleResponse(e.target.value)}
-              className="form-input text-input"
-              autoFocus
-            />
+          {step.id === 'workspace' && (
+            <div className="field-block">
+              <label htmlFor="workspace-name">Workspace name</label>
+              <input
+                id="workspace-name"
+                value={workspaceName}
+                onChange={(event) => setWorkspaceName(event.target.value)}
+                placeholder="My Life"
+                autoFocus
+                maxLength={60}
+              />
+              <small>Examples: My Life, TJ&apos;s Workspace, Work + Home.</small>
+            </div>
           )}
 
-          {/* Select Dropdown */}
-          {step.type === 'select' && (
-            <select
-              value={responses[step.id] || ''}
-              onChange={(e) => handleResponse(e.target.value)}
-              className="form-input select-input"
-            >
-              <option value="">Select an option...</option>
-              {step.options?.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Radio Buttons */}
-          {step.type === 'radio' && (
-            <div className="radio-group">
-              {step.options?.map((option) => (
-                <label
-                  key={option}
-                  className={`radio-item ${responses[step.id] === option ? 'selected' : ''}`}
+          {step.id === 'help' && (
+            <div className="option-grid">
+              {HELP_OPTIONS.map((item) => (
+                <button
+                  type="button"
+                  key={item}
+                  className={helpAreas.includes(item) ? 'option selected' : 'option'}
+                  onClick={() => toggleHelpArea(item)}
                 >
-                  <input
-                    type="radio"
-                    name={`step-${step.id}`}
-                    value={option}
-                    checked={responses[step.id] === option}
-                    onChange={(e) => handleResponse(e.target.value)}
-                  />
-                  <span>{option}</span>
-                </label>
+                  <span className="option-mark">{helpAreas.includes(item) ? '✓' : '+'}</span>
+                  <span>{item}</span>
+                </button>
               ))}
             </div>
           )}
 
-          {/* Checkboxes */}
-          {step.type === 'checkbox' && (
-            <div className="checkbox-group">
-              {step.options?.map((option) => (
-                <label
-                  key={option}
-                  className={`checkbox-item ${
-                    (responses[step.id] || []).includes(option) ? 'selected' : ''
-                  }`}
+          {step.id === 'style' && (
+            <div className="style-grid">
+              {[
+                ['concise', 'Concise', 'Short, direct, action-focused.'],
+                ['balanced', 'Balanced', 'Enough detail without burying the answer.'],
+                ['detailed', 'Detailed', 'More explanation, structure, and context.'],
+              ].map(([value, title, detail]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={responseStyle === value ? 'style-option selected' : 'style-option'}
+                  onClick={() => setResponseStyle(value as typeof responseStyle)}
                 >
-                  <input
-                    type="checkbox"
-                    value={option}
-                    checked={(responses[step.id] || []).includes(option)}
-                    onChange={(e) => {
-                      const current = responses[step.id] || [];
-                      const updated = e.target.checked
-                        ? [...current, option]
-                        : current.filter((v: string) => v !== option);
-                      handleResponse(updated);
-                    }}
-                  />
-                  <span>{option}</span>
-                </label>
+                  <strong>{title}</strong>
+                  <small>{detail}</small>
+                </button>
               ))}
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Navigation */}
-      <div className="onboarding-footer">
-        <button
-          className="btn-secondary"
-          onClick={handleBack}
-          disabled={currentStep === 0}
-        >
-          ← Back
-        </button>
+          {step.id === 'memory' && (
+            <div className="field-block">
+              <label htmlFor="memory">Always remember…</label>
+              <textarea
+                id="memory"
+                value={memory}
+                onChange={(event) => setMemory(event.target.value)}
+                placeholder="Example: Allen likes short estimates with labor and materials broken out separately."
+                maxLength={700}
+              />
+              <small>This is optional and can be edited later in Memory.</small>
+            </div>
+          )}
 
-        <button className="btn-tertiary" onClick={handleSkip}>
-          Skip
-        </button>
+          {step.id === 'approval' && (
+            <div className="approval-card">
+              <div className="shield">◇</div>
+              <div>
+                <strong>Approval-first external actions</strong>
+                <p>
+                  Email, purchases, scheduling, account changes, and other external actions should require a clear confirmation before execution.
+                </p>
+              </div>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={approvalFirst}
+                  onChange={(event) => setApprovalFirst(event.target.checked)}
+                />
+                <span />
+              </label>
+            </div>
+          )}
 
-        <button
-          className="btn-primary"
-          onClick={handleNext}
-          disabled={!responses[step.id]}
-        >
-          {currentStep === steps.length - 1 ? 'Complete' : 'Next →'}
-        </button>
+          {status && <div className="status">{status}</div>}
+
+          <footer>
+            <button className="back" type="button" onClick={back} disabled={stepIndex === 0 || saving}>Back</button>
+            <button className="next" type="button" onClick={next} disabled={!canContinue || saving}>
+              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Enter Life’s Assistant' : 'Continue'}
+            </button>
+          </footer>
+        </main>
       </div>
 
       <style jsx>{`
-        .progressive-onboarding {
-          width: 100%;
-          min-height: 100dvh;
-          height: 100dvh;
-          margin: 0;
-          padding: 0;
-          overflow-y: auto;
-          overscroll-behavior: contain;
-          background: #212121;
-          color: #ececec;
-          display: flex;
-          flex-direction: column;
+        .onboarding-page {
+          min-height: 100vh;
+          background: #151515;
+          color: #ededed;
+          display: grid;
+          place-items: center;
+          padding: 24px;
         }
-
-        .onboarding-header {
-          width: min(680px, 100%);
-          margin: 0 auto;
-          padding: 1.25rem 1.25rem 0;
-          flex-shrink: 0;
-        }
-
-        .progress-bar {
-          width: 100%;
-          height: 4px;
-          background: #3a3a3a;
-          border-radius: 999px;
+        .onboarding-shell {
+          width: min(1080px, 100%);
+          min-height: 650px;
+          display: grid;
+          grid-template-columns: .82fr 1.18fr;
           overflow: hidden;
-          margin-bottom: 0.75rem;
+          border-radius: 24px;
+          border: 1px solid #303030;
+          background: #1d1d1d;
+          box-shadow: 0 30px 90px rgba(0,0,0,.35);
         }
-
-        .progress-fill {
-          height: 100%;
-          background: #f4f4f4;
-          transition: width 0.35s ease;
-          border-radius: 999px;
-        }
-
-        .step-counter {
-          text-align: right;
-          font-size: 0.8rem;
-          color: #8f8f8f;
-          font-weight: 500;
-        }
-
-        .onboarding-content {
-          width: min(680px, 100%);
-          margin: 0 auto;
-          padding: 1.5rem 1.25rem 2rem;
-          text-align: center;
-          flex: 1;
-          animation-duration: 0.22s;
-          animation-timing-function: ease-out;
-        }
-
-        .onboarding-content.fade-in {
-          animation-name: fadeIn;
-        }
-
-        .onboarding-content.fade-out {
-          animation-name: fadeOut;
-        }
-
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
-        @keyframes fadeOut {
-          from { opacity: 1; transform: translateY(0); }
-          to { opacity: 0; transform: translateY(-8px); }
-        }
-
-        .step-icon {
-          min-height: 50px;
-          margin-bottom: 0.6rem;
-          display: flex;
-          justify-content: center;
-          opacity: 0.9;
-        }
-
-        .step-title {
-          font-size: clamp(1.55rem, 5vw, 2rem);
-          font-weight: 700;
-          color: #f5f5f5;
-          margin-bottom: 0.45rem;
-          letter-spacing: -0.02em;
-        }
-
-        .step-description {
-          font-size: 0.95rem;
-          color: #a7a7a7;
-          margin-bottom: 1.6rem;
-        }
-
-        .question-container {
+        .story-panel {
+          padding: 42px;
+          background:
+            radial-gradient(circle at 20% 10%, rgba(105,155,255,.12), transparent 30%),
+            #181818;
+          border-right: 1px solid #303030;
           display: flex;
           flex-direction: column;
-          gap: 0.85rem;
-          text-align: left;
-          margin: 1rem auto 0;
-          width: min(560px, 100%);
         }
-
-        .question {
-          font-weight: 600;
-          color: #f0f0f0;
-          font-size: 1rem;
-          line-height: 1.45;
-          margin-bottom: 0.2rem;
+        .brand-mark {
+          width: 42px;
+          height: 42px;
+          border-radius: 13px;
+          display: grid;
+          place-items: center;
+          background: #efefef;
+          color: #111;
+          margin-bottom: 14px;
         }
-
-        .form-input {
-          width: 100%;
-          min-height: 50px;
-          padding: 0.8rem 0.9rem;
-          border: 1px solid #4a4a4a;
-          border-radius: 12px;
-          background: #2f2f2f;
-          color: #f3f3f3;
-          font-size: 16px;
-          font-family: inherit;
-          transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        .brand { color: #969696; font-size: .72rem; letter-spacing: .08em; }
+        .story-panel h1 {
+          margin: 32px 0 14px;
+          max-width: 430px;
+          font-size: clamp(2rem, 4vw, 3.2rem);
+          line-height: 1.02;
+          letter-spacing: -.05em;
+          font-weight: 650;
         }
-
-        .form-input::placeholder {
+        .story-panel > p {
+          margin: 0;
+          max-width: 430px;
           color: #858585;
+          line-height: 1.65;
+          font-size: .82rem;
         }
-
-        .form-input:focus {
-          outline: none;
-          border-color: #777;
-          box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
+        .principles {
+          margin-top: auto;
+          display: grid;
+          gap: 8px;
+          padding-top: 36px;
         }
-
-        .select-input {
-          cursor: pointer;
-          color-scheme: dark;
+        .principles > div {
+          display: grid;
+          grid-template-columns: 28px 1fr;
+          column-gap: 10px;
+          padding: 10px 0;
+          border-top: 1px solid #2a2a2a;
         }
-
-        .radio-group,
-        .checkbox-group {
+        .principles span { color: #5f5f5f; font-size: .6rem; padding-top: 2px; }
+        .principles strong { font-size: .74rem; }
+        .principles small { grid-column: 2; color: #666; font-size: .63rem; margin-top: 2px; }
+        .setup-panel {
+          padding: 42px 48px;
           display: flex;
           flex-direction: column;
-          gap: 0.65rem;
+          min-width: 0;
         }
-
-        .radio-item,
-        .checkbox-item {
+        .progress-row {
+          display: flex;
+          justify-content: space-between;
+          color: #666;
+          font-size: .62rem;
+          letter-spacing: .12em;
+        }
+        .progress-row strong { font-weight: 650; }
+        .progress-track {
+          height: 3px;
+          border-radius: 999px;
+          background: #2a2a2a;
+          overflow: hidden;
+          margin-top: 10px;
+        }
+        .progress-track > div {
+          height: 100%;
+          background: #d9d9d9;
+          transition: width .2s ease;
+        }
+        .step-copy { margin-top: 54px; }
+        .step-copy h2 {
+          margin: 0;
+          font-size: clamp(1.7rem, 3vw, 2.5rem);
+          letter-spacing: -.04em;
+          font-weight: 650;
+        }
+        .step-copy p {
+          margin: 8px 0 0;
+          max-width: 580px;
+          color: #7f7f7f;
+          font-size: .78rem;
+          line-height: 1.55;
+        }
+        .field-block {
+          margin-top: 30px;
+          display: grid;
+          gap: 8px;
+        }
+        .field-block label { font-size: .73rem; color: #c4c4c4; font-weight: 650; }
+        .field-block input, .field-block textarea {
+          width: 100%;
+          border: 1px solid #3b3b3b;
+          border-radius: 12px;
+          background: #232323;
+          color: #ededed;
+          outline: none;
+          padding: 13px;
+          font: inherit;
+        }
+        .field-block textarea { min-height: 130px; resize: vertical; line-height: 1.5; }
+        .field-block input:focus, .field-block textarea:focus { border-color: #606060; }
+        .field-block small { color: #636363; font-size: .62rem; }
+        .option-grid {
+          margin-top: 28px;
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+        }
+        .option {
+          min-height: 58px;
+          border: 1px solid #363636;
+          border-radius: 12px;
+          background: #252525;
+          color: #bcbcbc;
+          padding: 0 12px;
           display: flex;
           align-items: center;
-          gap: 0.8rem;
-          min-height: 54px;
-          padding: 0.85rem 0.95rem;
-          border: 1px solid #474747;
-          border-radius: 12px;
-          background: #2b2b2b;
-          color: #e9e9e9;
+          gap: 9px;
           cursor: pointer;
-          transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
-          font-weight: 500;
-          line-height: 1.35;
+          text-align: left;
         }
-
-        .radio-item:hover,
-        .checkbox-item:hover {
-          background: #333;
-          border-color: #606060;
-        }
-
-        .radio-item.selected,
-        .checkbox-item.selected {
-          background: #393939;
-          border-color: #8a8a8a;
-          color: #ffffff;
-        }
-
-        .radio-item:active,
-        .checkbox-item:active {
-          transform: scale(0.99);
-        }
-
-        .radio-item input,
-        .checkbox-item input {
-          flex: 0 0 auto;
-          width: 20px;
-          height: 20px;
-          cursor: pointer;
-          accent-color: #f4f4f4;
-        }
-
-        .onboarding-footer {
-          position: sticky;
-          bottom: 0;
-          z-index: 10;
-          width: 100%;
-          margin-top: auto;
-          padding: 0.85rem max(1rem, env(safe-area-inset-right))
-            calc(0.85rem + env(safe-area-inset-bottom))
-            max(1rem, env(safe-area-inset-left));
+        .option.selected { border-color: #666; background: #303030; color: #f0f0f0; }
+        .option-mark {
+          width: 25px;
+          height: 25px;
+          border-radius: 8px;
           display: grid;
-          grid-template-columns: auto auto minmax(120px, 1fr);
-          gap: 0.6rem;
-          background: rgba(33,33,33,0.96);
-          border-top: 1px solid #343434;
-          backdrop-filter: blur(14px);
+          place-items: center;
+          background: #303030;
+          font-size: .72rem;
         }
-
-        button {
-          min-height: 48px;
-          padding: 0.75rem 1rem;
-          border: none;
+        .style-grid {
+          margin-top: 28px;
+          display: grid;
+          gap: 8px;
+        }
+        .style-option {
+          min-height: 70px;
+          border: 1px solid #363636;
           border-radius: 12px;
-          font-size: 0.95rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
-        }
-
-        .btn-primary {
-          background: #f4f4f4;
-          color: #111;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-          background: #ffffff;
-        }
-
-        .btn-primary:active:not(:disabled) {
-          transform: scale(0.99);
-        }
-
-        .btn-primary:disabled {
-          background: #3a3a3a;
-          color: #777;
-          opacity: 1;
-          cursor: not-allowed;
-        }
-
-        .btn-secondary,
-        .btn-tertiary {
-          background: #2b2b2b;
+          background: #252525;
           color: #c8c8c8;
-          border: 1px solid #444;
+          padding: 13px 14px;
+          text-align: left;
+          cursor: pointer;
         }
-
-        .btn-secondary:hover:not(:disabled),
-        .btn-tertiary:hover {
-          background: #333;
-          color: #fff;
-        }
-
-        .btn-secondary:disabled {
-          opacity: 0.35;
-          cursor: not-allowed;
-        }
-
-        .onboarding-complete {
-          min-height: 100dvh;
+        .style-option.selected { border-color: #666; background: #303030; }
+        .style-option strong, .style-option small { display: block; }
+        .style-option strong { font-size: .78rem; }
+        .style-option small { color: #707070; font-size: .64rem; margin-top: 4px; }
+        .approval-card {
+          margin-top: 30px;
           display: grid;
-          place-content: center;
-          text-align: center;
-          padding: 2rem;
-          background: #212121;
-          color: #ececec;
+          grid-template-columns: 40px minmax(0,1fr) auto;
+          gap: 12px;
+          align-items: center;
+          padding: 16px;
+          border: 1px solid #3a3a3a;
+          border-radius: 14px;
+          background: #252525;
         }
-
-        .onboarding-complete h2 {
-          font-size: 1.8rem;
-          margin: 1.25rem 0 0.5rem;
-          color: #f5f5f5;
+        .shield {
+          width: 38px;
+          height: 38px;
+          border-radius: 11px;
+          display: grid;
+          place-items: center;
+          background: #303030;
+          color: #8fc4ff;
         }
-
-        .onboarding-complete p {
-          color: #aaa;
-          margin-bottom: 0.75rem;
+        .approval-card strong { font-size: .78rem; }
+        .approval-card p { margin: 4px 0 0; color: #747474; font-size: .65rem; line-height: 1.45; }
+        .switch input { width: 18px; height: 18px; accent-color: #ededed; }
+        .status {
+          margin-top: 16px;
+          padding: 10px 12px;
+          border-radius: 10px;
+          background: #242424;
+          border: 1px solid #343434;
+          color: #888;
+          font-size: .68rem;
         }
-
-        @media (max-width: 640px) {
-          .onboarding-header {
-            padding: 1rem 1rem 0;
-          }
-
-          .onboarding-content {
-            padding: 1rem 1rem 1.5rem;
-          }
-
-          .step-icon {
-            margin-bottom: 0.35rem;
-          }
-
-          .step-description {
-            margin-bottom: 1.1rem;
-          }
-
-          .question-container {
-            margin-top: 0.7rem;
-          }
-
-          .onboarding-footer {
-            grid-template-columns: 0.8fr 0.8fr 1.4fr;
-            padding-top: 0.7rem;
-          }
-
-          button {
-            padding: 0.7rem 0.55rem;
-            font-size: 0.9rem;
-          }
+        footer {
+          margin-top: auto;
+          padding-top: 36px;
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
         }
-
-        @media (max-height: 680px) {
-          .step-icon {
-            display: none;
+        footer button {
+          min-height: 42px;
+          padding: 0 15px;
+          border-radius: 10px;
+          font-weight: 650;
+          cursor: pointer;
+        }
+        .back { border: 1px solid #3d3d3d; background: transparent; color: #aaa; }
+        .next { border: 0; background: #ededed; color: #111; }
+        footer button:disabled { opacity: .35; cursor: default; }
+        @media (max-width: 800px) {
+          .onboarding-page { padding: 0; }
+          .onboarding-shell {
+            min-height: 100vh;
+            grid-template-columns: 1fr;
+            border: 0;
+            border-radius: 0;
           }
-
-          .onboarding-content {
-            padding-top: 0.75rem;
-          }
-
-          .step-description {
-            margin-bottom: 0.8rem;
-          }
-
-          .radio-item,
-          .checkbox-item {
-            min-height: 48px;
-            padding: 0.65rem 0.8rem;
-          }
+          .story-panel { display: none; }
+          .setup-panel { padding: 28px 20px; }
+          .step-copy { margin-top: 42px; }
+        }
+        @media (max-width: 520px) {
+          .option-grid { grid-template-columns: 1fr; }
         }
       `}</style>
     </div>
