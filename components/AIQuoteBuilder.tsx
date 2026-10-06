@@ -127,9 +127,11 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
     setStatus('');
 
     try {
+      const token = await firebaseBackend.getIdToken();
+      if (!token) throw new Error('Authentication required');
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
           message:
             'Create a professional quote draft. Keep every amount exactly as provided. Do not invent prices, taxes, discounts, scope, warranties, or payment terms. Client: ' +
