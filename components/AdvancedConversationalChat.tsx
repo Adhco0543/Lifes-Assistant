@@ -289,9 +289,11 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     setIsLoading(true);
 
     try {
+      const token = await firebaseBackend.getIdToken();
+      if (!token) throw new Error('Authentication required');
       const apiResponse = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
           message: userMessage,
           businessContext,
