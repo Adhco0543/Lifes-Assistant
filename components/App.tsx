@@ -326,7 +326,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
             <div className="topbar-title">{activeLabel}</div>
             <div className="topbar-subtitle">{businessName}</div>
           </div>
-          <div className="beta-pill"><span /> Beta</div>
+          <div className="beta-pill"><span /> Release candidate</div>
         </header>
 
         <section className="content">
@@ -334,6 +334,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
             <LifeAssistantHome
               displayName={currentUser?.displayName || undefined}
               businessName={businessName}
+              userId={effectiveUserId}
               onNavigate={navigate}
             />
           )}
