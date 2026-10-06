@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppIntegration, useResponsive } from '../lib/hooks';
 import { businessProfileManager, BusinessProfile } from '../lib/businessProfile';
+import { firebaseBackend } from '../lib/firebaseBackend';
 import { RichMedia } from './Richmedia';
 
 interface MaterialEstimatorProps {
@@ -27,6 +28,7 @@ interface Estimate {
   tax: number;
   total: number;
   createdAt: number;
+  cloud?: boolean;
 }
 
 interface MeasurementData {
@@ -117,20 +119,52 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
 
   // Initialize
   useEffect(() => {
+    let active = true;
     const profile = businessProfileManager.loadProfile(userId);
     if (profile) {
       setBusinessProfile(profile);
+    }
 
-      // Load saved estimates
-      const saved = localStorage.getItem(`estimates_${userId}`);
-      if (saved) {
-        try {
-          setEstimates(JSON.parse(saved));
-        } catch (e) {
-          console.error('Error loading estimates:', e);
+    const loadEstimates = async () => {
+      try {
+        const records = await firebaseBackend.getRecentBusinessRecords(100);
+        if (!active) return;
+
+        const cloudEstimates: Estimate[] = records
+          .filter((record) => record.kind === 'material-estimate')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return {
+              id: String(record.id),
+              projectName: String(data.projectName || ''),
+              materials: Array.isArray(data.materials) ? (data.materials as Material[]) : [],
+              subtotal: Number(data.subtotal || 0),
+              tax: Number(data.tax || 0),
+              total: Number(data.total || 0),
+              createdAt: Number(record.createdAt || Date.now()),
+              cloud: true,
+            };
+          })
+          .filter((estimate) => estimate.projectName);
+
+        setEstimates(cloudEstimates);
+      } catch (error) {
+        console.warn('Estimate cloud sync unavailable, loading local fallback:', error);
+        const saved = localStorage.getItem(`estimates_${userId}`);
+        if (saved) {
+          try {
+            setEstimates(JSON.parse(saved));
+          } catch (e) {
+            console.error('Error loading estimates:', e);
+          }
         }
       }
-    }
+    };
+
+    loadEstimates();
+    return () => {
+      active = false;
+    };
   }, [userId]);
 
   /**
@@ -199,28 +233,47 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
   /**
    * Generate estimate
    */
-  const handleGenerateEstimate = useCallback(() => {
+  const handleGenerateEstimate = useCallback(async () => {
     if (!projectName.trim() || materials.length === 0) {
       alert('Please enter a project name and add at least one material');
       return;
     }
 
     const subtotal = materials.reduce((sum, m) => sum + m.total, 0);
-    const tax = 0; // Tax is intentionally not assumed.
+    const tax = 0;
 
-    const estimate: Estimate = {
-      id: `est-${Date.now()}`,
+    const payload = {
       projectName,
       materials,
       subtotal,
       tax,
       total: subtotal + tax,
-      createdAt: Date.now(),
     };
 
-    const updated = [estimate, ...estimates];
-    setEstimates(updated);
-    localStorage.setItem(`estimates_${userId}`, JSON.stringify(updated));
+    let estimate: Estimate;
+
+    try {
+      const id = await firebaseBackend.saveBusinessRecord('material-estimate', payload);
+      await firebaseBackend.trackEvent('material.estimate');
+      estimate = {
+        id,
+        ...payload,
+        createdAt: Date.now(),
+        cloud: true,
+      };
+      setEstimates((current) => [estimate, ...current]);
+    } catch (error) {
+      console.warn('Estimate cloud save failed, using local fallback:', error);
+      estimate = {
+        id: `est-${Date.now()}`,
+        ...payload,
+        createdAt: Date.now(),
+        cloud: false,
+      };
+      const updated = [estimate, ...estimates];
+      setEstimates(updated);
+      localStorage.setItem(`estimates_${userId}`, JSON.stringify(updated));
+    }
 
     setSelectedEstimate(estimate);
     setView('estimate');
@@ -236,10 +289,26 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
    * Delete estimate
    */
   const handleDeleteEstimate = useCallback(
-    (estimateId: string) => {
+    async (estimateId: string) => {
+      const target = estimates.find((estimate) => estimate.id === estimateId);
+
+      if (target?.cloud) {
+        try {
+          await firebaseBackend.deleteBusinessRecord(estimateId);
+        } catch (error) {
+          console.warn('Estimate cloud delete failed:', error);
+          alert('Could not delete this cloud estimate.');
+          return;
+        }
+      }
+
       const updated = estimates.filter((e) => e.id !== estimateId);
       setEstimates(updated);
-      localStorage.setItem(`estimates_${userId}`, JSON.stringify(updated));
+
+      if (!target?.cloud) {
+        localStorage.setItem(`estimates_${userId}`, JSON.stringify(updated.filter((item) => !item.cloud)));
+      }
+
       if (selectedEstimate?.id === estimateId) {
         setSelectedEstimate(null);
         setView('history');
