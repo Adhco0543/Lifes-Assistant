@@ -13,6 +13,7 @@ import type { Firestore } from "firebase/firestore";
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -22,6 +23,7 @@ import {
   orderBy,
   query,
   setDoc,
+  updateDoc,
 } from "firebase/firestore";
 import { getFirestore } from "firebase/firestore";
 
@@ -402,6 +404,23 @@ class FirebaseBackend {
       id: item.id,
       ...item.data(),
     }));
+  }
+
+  async updateBusinessRecord(recordId: string, data: Record<string, unknown>): Promise<void> {
+    const { db } = await this.getServices();
+    const userId = this.getUserId();
+
+    await updateDoc(doc(db, "users", userId, "records", recordId), {
+      data,
+      updatedAt: Date.now(),
+    });
+  }
+
+  async deleteBusinessRecord(recordId: string): Promise<void> {
+    const { db } = await this.getServices();
+    const userId = this.getUserId();
+
+    await deleteDoc(doc(db, "users", userId, "records", recordId));
   }
 }
 
