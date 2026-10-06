@@ -189,6 +189,7 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
 
     try {
       await firebaseBackend.saveBusinessRecord('quote', payload);
+      await firebaseBackend.trackEvent('quote.saved');
       setStatus('Quote saved to your cloud workspace.');
       return;
     } catch (error) {
