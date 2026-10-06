@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
 import { verifyFirebaseRequest } from '../../../../lib/serverAuth';
 
 type EmailRequest = {
@@ -18,7 +17,7 @@ export async function POST(request: Request) {
   const emailSubject = String(subject || '').trim();
   const emailText = String(text || '').trim();
 
-  const emailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailPattern.test(recipient)) {
     return NextResponse.json({ error: 'Enter a valid recipient email.' }, { status: 400 });
   }
@@ -33,25 +32,37 @@ export async function POST(request: Request) {
 
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
+  const domainVerified = process.env.EMAIL_DOMAIN_VERIFIED === 'true';
 
-  if (!apiKey || !from) {
-    return NextResponse.json({ error: 'Email service is not configured.' }, { status: 503 });
-  }
-
-  const resend = new Resend(apiKey);
-  const result = await resend.emails.send({
-    from,
-    to: recipient,
-    subject: emailSubject,
-    text: emailText,
-  });
-
-  if (result.error) {
+  if (!apiKey || !from || !domainVerified) {
     return NextResponse.json(
-      { error: result.error.message || 'Email provider rejected the message.' },
-      { status: 400 }
+      { error: "Email delivery is waiting for a dedicated Life's Assistant sending domain." },
+      { status: 503 }
     );
   }
 
-  return NextResponse.json({ ok: true, id: result.data?.id || null });
+  const providerResponse = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: [recipient],
+      subject: emailSubject,
+      text: emailText,
+    }),
+  });
+
+  const result = await providerResponse.json().catch(() => ({}));
+
+  if (!providerResponse.ok) {
+    return NextResponse.json(
+      { error: result?.message || 'Email provider rejected the message.' },
+      { status: providerResponse.status }
+    );
+  }
+
+  return NextResponse.json({ ok: true, id: result?.id || null, provider: 'resend' });
 }
