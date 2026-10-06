@@ -198,27 +198,30 @@ function extractOutputText(result: ResponsesApiResult): string {
 }
 
 function classifyAction(message: string): "chat" | "quote" | "email" | "task" {
-  const lower = message.toLowerCase();
+  const lower = message.toLowerCase().replace(/\s+/g, " ").trim();
 
-  if (lower.includes("quote") || lower.includes("estimate") || lower.includes("bid")) {
+  const quoteIntent =
+    /(create|make|build|write|draft|prepare|put together|generate|start).{0,35}\b(quote|estimate|bid)\b/.test(lower) ||
+    /\b(quote|estimate|bid)\b.{0,35}(for|from|using|with|based on)/.test(lower);
+
+  if (quoteIntent) {
     return "quote";
   }
 
-  if (
-    lower.includes("email") ||
-    lower.includes("follow up") ||
-    lower.includes("follow-up")
-  ) {
+  const emailIntent =
+    /(draft|write|compose|prepare|send|reply|respond|follow up|follow-up).{0,35}\b(email|message|reply)\b/.test(lower) ||
+    /\bemail\b.{0,35}(to|for|about|saying|telling)/.test(lower) ||
+    /\b(follow up|follow-up)\b.{0,35}(with|to|about)/.test(lower);
+
+  if (emailIntent) {
     return "email";
   }
 
-  if (
-    lower.includes("remind") ||
-    lower.includes("reminder") ||
-    lower.includes("task") ||
-    lower.includes("to-do") ||
-    lower.includes("todo")
-  ) {
+  const taskIntent =
+    /\b(remind me|set a reminder|add (a )?task|create (a )?task|make (a )?task|add (a )?to-do|add (a )?todo)\b/.test(lower) ||
+    /\b(task|reminder|to-do|todo)\b.{0,35}(for|about|to)/.test(lower);
+
+  if (taskIntent) {
     return "task";
   }
 
