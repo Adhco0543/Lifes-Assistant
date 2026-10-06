@@ -23,12 +23,19 @@ interface Material {
 interface Estimate {
   id: string;
   projectName: string;
+  workspaceProjectId?: string;
+  workspaceProjectName?: string;
   materials: Material[];
   subtotal: number;
   tax: number;
   total: number;
   createdAt: number;
   cloud?: boolean;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
 }
 
 interface MeasurementData {
@@ -46,6 +53,8 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [view, setView] = useState<'input' | 'estimate' | 'history'>('input');
   const [projectName, setProjectName] = useState('');
+  const [workspaceProjectId, setWorkspaceProjectId] = useState('');
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [measurements, setMeasurements] = useState<MeasurementData>({
     length: 0,
     width: 0,
@@ -130,6 +139,19 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
         const records = await firebaseBackend.getRecentBusinessRecords(100);
         if (!active) return;
 
+        const projectOptions: ProjectOption[] = records
+          .filter((record) => record.kind === 'project')
+          .map((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return {
+              id: String(record.id || ''),
+              name: String(data.name || '').trim(),
+            };
+          })
+          .filter((project) => project.id && project.name);
+
+        setProjects(projectOptions);
+
         const cloudEstimates: Estimate[] = records
           .filter((record) => record.kind === 'material-estimate')
           .map((record) => {
@@ -137,6 +159,8 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
             return {
               id: String(record.id),
               projectName: String(data.projectName || ''),
+              workspaceProjectId: typeof data.workspaceProjectId === 'string' ? data.workspaceProjectId : '',
+              workspaceProjectName: typeof data.workspaceProjectName === 'string' ? data.workspaceProjectName : '',
               materials: Array.isArray(data.materials) ? (data.materials as Material[]) : [],
               subtotal: Number(data.subtotal || 0),
               tax: Number(data.tax || 0),
@@ -242,8 +266,13 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
     const subtotal = materials.reduce((sum, m) => sum + m.total, 0);
     const tax = 0;
 
+    const selectedProject = projects.find((project) => project.id === workspaceProjectId);
+    const workspaceProjectName = selectedProject?.name || '';
+
     const payload = {
       projectName,
+      workspaceProjectId,
+      workspaceProjectName,
       materials,
       subtotal,
       tax,
@@ -256,6 +285,8 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       const id = await firebaseBackend.saveBusinessRecord('material-estimate', payload);
       await firebaseBackend.trackEvent('material.estimate', {
         projectName,
+        workspaceProjectId,
+        workspaceProjectName,
         total: subtotal + tax,
         recordId: id,
       });
@@ -287,7 +318,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       materialCount: materials.length,
       total: estimate.total,
     });
-  }, [projectName, materials, estimates, userId, integration]);
+  }, [projectName, workspaceProjectId, projects, materials, estimates, userId, integration]);
 
   /**
    * Delete estimate
@@ -397,6 +428,18 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                   onChange={(e) => setProjectName(e.target.value)}
                   placeholder="e.g., Deck Project, Bathroom Renovation"
                 />
+              </div>
+              <div className="form-group">
+                <label>Life&apos;s Assistant Project</label>
+                <select
+                  value={workspaceProjectId}
+                  onChange={(e) => setWorkspaceProjectId(e.target.value)}
+                >
+                  <option value="">No linked project</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -597,6 +640,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
             <div className="estimate-header">
               <h3>{selectedEstimate.projectName}</h3>
               <p className="estimate-date">
+                {selectedEstimate.workspaceProjectName ? selectedEstimate.workspaceProjectName + ' · ' : ''}
                 {new Date(selectedEstimate.createdAt).toLocaleDateString()}
               </p>
             </div>
@@ -667,6 +711,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                       <span className="card-total">${est.total.toFixed(2)}</span>
                     </div>
                     <p className="card-date">
+                      {est.workspaceProjectName ? est.workspaceProjectName + ' · ' : ''}
                       {new Date(est.createdAt).toLocaleDateString()}
                     </p>
                     <p className="card-count">{est.materials.length} materials</p>
@@ -703,9 +748,10 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
 
       <style jsx>{`
         .material-estimator {
-          background: white;
-          border-radius: 1rem;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          background: #212121;
+          color: #ececec;
+          border-radius: 0;
+          box-shadow: none;
           overflow: hidden;
           display: flex;
           flex-direction: column;
@@ -713,8 +759,9 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
         }
 
         .estimator-header {
-          background: linear-gradient(135deg, #ff6f00 0%, #f57c00 100%);
-          color: white;
+          background: #1d1d1d;
+          color: #ececec;
+          border-bottom: 1px solid #343434;
           padding: 2rem;
         }
 
@@ -734,8 +781,8 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
 
         .tab-navigation {
           display: flex;
-          border-bottom: 2px solid #f0f0f0;
-          background: #fafafa;
+          border-bottom: 1px solid #343434;
+          background: #252525;
         }
 
         .tab {
@@ -745,7 +792,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
           background: none;
           font-size: 1rem;
           font-weight: 600;
-          color: #999;
+          color: #7f7f7f;
           cursor: pointer;
           border-bottom: 3px solid transparent;
           margin-bottom: -2px;
@@ -753,8 +800,8 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
         }
 
         .tab.active {
-          color: #ff6f00;
-          border-bottom-color: #ff6f00;
+          color: #ededed;
+          border-bottom-color: #ededed;
         }
 
         .estimator-content {
