@@ -17,6 +17,7 @@ import SystemCheck from './SystemCheck';
 import ActionLedger from './ActionLedger';
 import MemoryCenter from './MemoryCenter';
 import FocusBrief from './FocusBrief';
+import WorkspaceSearch from './WorkspaceSearch';
 
 type ViewType =
   | 'home'
@@ -31,6 +32,7 @@ type ViewType =
   | 'receipts'
   | 'memory'
   | 'brief'
+  | 'search'
   | 'onboarding';
 
 interface AppProps {
@@ -39,6 +41,7 @@ interface AppProps {
 
 const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
+  { id: 'search', label: 'Search', icon: '⌕' },
   { id: 'brief', label: 'Focus Brief', icon: '◈' },
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'memory', label: 'Memory', icon: '◉' },
@@ -361,6 +364,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           {currentView === 'receipts' && <ActionLedger />}
           {currentView === 'memory' && <MemoryCenter />}
           {currentView === 'brief' && <FocusBrief />}
+          {currentView === 'search' && <WorkspaceSearch onNavigate={navigate} />}
         </section>
       </main>
 
