@@ -8,12 +8,15 @@ interface TasksViewProps {
 }
 
 type TaskStatus = 'open' | 'done';
+type TaskPriority = 'low' | 'normal' | 'high';
 
 type LocalTask = {
   id: string;
   title: string;
   status: TaskStatus;
   createdAt: number;
+  dueDate?: string;
+  priority?: TaskPriority;
   cloud?: boolean;
 };
 
@@ -21,6 +24,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
   const storageKey = `lifes-assistant-tasks:${userId}`;
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [draft, setDraft] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [priority, setPriority] = useState<TaskPriority>('normal');
   const [mode, setMode] = useState<'checking' | 'cloud' | 'local'>('checking');
   const [status, setStatus] = useState('');
 
@@ -63,6 +68,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
               title: String(data.title || ''),
               status: (data.status === 'done' ? 'done' : 'open') as TaskStatus,
               createdAt: Number(record.createdAt || Date.now()),
+              dueDate: typeof data.dueDate === 'string' ? data.dueDate : '',
+              priority: (data.priority === 'high' || data.priority === 'low' ? data.priority : 'normal') as TaskPriority,
               cloud: true,
             };
           })
@@ -76,7 +83,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
             status: 'open',
           });
           nextTasks = [
-            { id, title: handedOffTitle, status: 'open', createdAt: Date.now(), cloud: true },
+            { id, title: handedOffTitle, status: 'open', createdAt: Date.now(), priority: 'normal', dueDate: '', cloud: true },
             ...cloudTasks,
           ];
         }
@@ -101,6 +108,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
               title: handedOffTitle,
               status: 'open',
               createdAt: Date.now(),
+              priority: 'normal',
+              dueDate: '',
               cloud: false,
             },
             ...existing,
@@ -122,6 +131,28 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
 
   const openCount = useMemo(() => tasks.filter((task) => task.status === 'open').length, [tasks]);
   const doneCount = tasks.length - openCount;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const overdueCount = useMemo(
+    () => tasks.filter((task) => task.status === 'open' && task.dueDate && task.dueDate < todayKey).length,
+    [tasks, todayKey]
+  );
+  const sortedTasks = useMemo(() => {
+    const priorityRank: Record<TaskPriority, number> = { high: 0, normal: 1, low: 2 };
+
+    return [...tasks].sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+
+      const aPriority = priorityRank[a.priority || 'normal'];
+      const bPriority = priorityRank[b.priority || 'normal'];
+      if (aPriority !== bPriority) return aPriority - bPriority;
+
+      const aDue = a.dueDate || '9999-12-31';
+      const bDue = b.dueDate || '9999-12-31';
+      if (aDue !== bDue) return aDue.localeCompare(bDue);
+
+      return b.createdAt - a.createdAt;
+    });
+  }, [tasks]);
 
   const addTask = async () => {
     const title = draft.trim();
@@ -129,13 +160,25 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
 
     if (mode === 'cloud') {
       try {
-        const id = await firebaseBackend.saveBusinessRecord('task', { title, status: 'open' });
-        await firebaseBackend.trackEvent('task.created', { title, recordId: id });
+        const id = await firebaseBackend.saveBusinessRecord('task', {
+          title,
+          status: 'open',
+          dueDate,
+          priority,
+        });
+        await firebaseBackend.trackEvent('task.created', {
+          title,
+          recordId: id,
+          dueDate,
+          priority,
+        });
         setTasks((current) => [
-          { id, title, status: 'open', createdAt: Date.now(), cloud: true },
+          { id, title, status: 'open', createdAt: Date.now(), dueDate, priority, cloud: true },
           ...current,
         ]);
         setDraft('');
+        setDueDate('');
+        setPriority('normal');
         setStatus('Task saved to your cloud workspace.');
         return;
       } catch (error) {
@@ -145,11 +188,13 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
     }
 
     const next = [
-      { id: 'local-' + Date.now(), title, status: 'open' as TaskStatus, createdAt: Date.now(), cloud: false },
+      { id: 'local-' + Date.now(), title, status: 'open' as TaskStatus, createdAt: Date.now(), dueDate, priority, cloud: false },
       ...tasks,
     ];
     saveLocal(next);
     setDraft('');
+    setDueDate('');
+    setPriority('normal');
     setStatus('Task saved on this device because cloud sync is unavailable.');
   };
 
@@ -161,6 +206,8 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
         await firebaseBackend.updateBusinessRecord(task.id, {
           title: task.title,
           status: nextStatus,
+          dueDate: task.dueDate || '',
+          priority: task.priority || 'normal',
         });
         if (nextStatus === 'done') {
           await firebaseBackend.trackEvent('task.completed', { title: task.title, recordId: task.id });
@@ -206,6 +253,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           <div className="stats">
             <div><strong>{openCount}</strong><span>Open</span></div>
             <div><strong>{doneCount}</strong><span>Done</span></div>
+            <div><strong>{overdueCount}</strong><span>Overdue</span></div>
           </div>
         </header>
 
@@ -230,6 +278,18 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
                 placeholder="Example: Follow up with Allen about the estimate"
                 maxLength={240}
               />
+              <input
+                className="date-input"
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+                aria-label="Due date"
+              />
+              <select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)} aria-label="Priority">
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
               <button onClick={addTask} disabled={!draft.trim() || mode === 'checking'}>Add task</button>
             </div>
           </div>
@@ -253,13 +313,21 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
               </div>
             ) : (
               <div className="task-list">
-                {tasks.map((task) => (
+                {sortedTasks.map((task) => (
                   <div key={task.id} className={`task-row ${task.status === 'done' ? 'done' : ''}`}>
                     <button className="check" onClick={() => toggleTask(task)} aria-label="Toggle task">
                       {task.status === 'done' ? '✓' : ''}
                     </button>
-                    <button className="task-title" onClick={() => toggleTask(task)}>{task.title}</button>
-                    <span className="task-date">{new Date(task.createdAt).toLocaleDateString()}</span>
+                    <button className="task-title" onClick={() => toggleTask(task)}>
+                      <span>{task.title}</span>
+                      <small>
+                        {task.priority === 'high' ? 'High priority' : task.priority === 'low' ? 'Low priority' : 'Normal priority'}
+                        {task.dueDate ? ' · Due ' + new Date(task.dueDate + 'T12:00:00').toLocaleDateString() : ''}
+                      </small>
+                    </button>
+                    <span className={`task-date ${task.status === 'open' && task.dueDate && task.dueDate < todayKey ? 'overdue' : ''}`}>
+                      {task.status === 'open' && task.dueDate && task.dueDate < todayKey ? 'Overdue' : task.dueDate || ''}
+                    </span>
                     <button className="remove" onClick={() => removeTask(task)} aria-label="Delete task">×</button>
                   </div>
                 ))}
@@ -301,8 +369,9 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
         .capture-card { display: grid; grid-template-columns: 38px 1fr; gap: 12px; padding: 16px; border: 1px solid #343434; background: #272727; border-radius: 16px; margin-bottom: 12px; }
         .capture-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #efefef; color: #111; font-size: 1.2rem; }
         .capture-copy label { display: block; font-size: .78rem; font-weight: 650; margin-bottom: 9px; }
-        .capture-row { display: flex; gap: 8px; }
-        .capture-row input { min-width: 0; flex: 1; min-height: 42px; border-radius: 11px; border: 1px solid #3b3b3b; background: #1f1f1f; color: #ececec; padding: 0 12px; outline: none; }
+        .capture-row { display: grid; grid-template-columns: minmax(0,1fr) 145px 110px auto; gap: 8px; }
+        .capture-row input, .capture-row select { min-width: 0; min-height: 42px; border-radius: 11px; border: 1px solid #3b3b3b; background: #1f1f1f; color: #ececec; padding: 0 12px; outline: none; }
+        .capture-row input:first-child { width: 100%; }
         .capture-row button { border: 0; border-radius: 11px; padding: 0 15px; background: #ededed; color: #111; font-weight: 650; cursor: pointer; }
         .capture-row button:disabled { opacity: .35; cursor: default; }
         .grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 12px; }
@@ -319,7 +388,10 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
         .task-row { display: grid; grid-template-columns: 29px minmax(0, 1fr) auto 26px; gap: 8px; align-items: center; min-height: 48px; padding: 7px 8px; border-radius: 11px; background: #2c2c2c; border: 1px solid transparent; }
         .check { width: 27px; height: 27px; border-radius: 8px; border: 1px solid #484848; background: #232323; color: #6ed49d; cursor: pointer; }
         .task-title { border: 0; background: transparent; color: #d9d9d9; text-align: left; cursor: pointer; font-size: .78rem; }
+        .task-title span, .task-title small { display: block; }
+        .task-title small { margin-top: 3px; color: #686868; font-size: .59rem; }
         .task-date { color: #686868; font-size: .62rem; }
+        .task-date.overdue { color: #d88c8c; }
         .remove { border: 0; background: transparent; color: #626262; cursor: pointer; font-size: 1rem; }
         .task-row.done .task-title { text-decoration: line-through; color: #666; }
         .agent-card { padding: 20px; }
@@ -336,7 +408,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
         @media (max-width: 620px) {
           .tasks-inner { width: calc(100% - 28px); padding-top: 24px; }
           .page-header { align-items: start; flex-direction: column; }
-          .capture-row { flex-direction: column; }
+          .capture-row { grid-template-columns: 1fr; }
           .capture-row button { min-height: 42px; }
           .task-row { grid-template-columns: 29px minmax(0, 1fr) 26px; }
           .task-date { display: none; }
