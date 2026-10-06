@@ -107,6 +107,12 @@ class FirebaseBackend {
     return this.auth;
   }
 
+  async getIdToken(): Promise<string | null> {
+    await this.initialize();
+    const user = this.auth?.currentUser;
+    return user ? user.getIdToken() : null;
+  }
+
   private async getServices(): Promise<{ auth: Auth; db: Firestore }> {
     await this.initialize();
 
