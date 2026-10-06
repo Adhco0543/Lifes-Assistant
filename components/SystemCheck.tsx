@@ -52,7 +52,7 @@ export default function SystemCheck() {
       setData(next);
 
       try {
-        await firebaseBackend.getRecentBusinessRecords(1);
+        await firebaseBackend.testCloudSync();
         setCloudAccess(true);
       } catch {
         setCloudAccess(false);
@@ -129,9 +129,9 @@ export default function SystemCheck() {
     },
     {
       name: 'Cloud workspace',
-      detail: 'Signed-in Firestore access',
+      detail: 'Signed-in Firestore read/write/delete verification',
       ok: cloudAccess === true,
-      value: cloudAccess === null ? 'Checking' : cloudAccess ? 'Read access confirmed' : 'Access failed',
+      value: cloudAccess === null ? 'Checking' : cloudAccess ? 'Cloud sync verified' : 'Cloud sync failed',
     },
     {
       name: 'Email delivery',
