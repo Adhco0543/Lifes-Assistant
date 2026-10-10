@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import LifeRadarPanel from './LifeRadarPanel';
 
 interface LifeAssistantHomeProps {
   displayName?: string;
@@ -159,6 +160,8 @@ export default function LifeAssistantHome({
             <button onClick={launchCommand} disabled={!command.trim()}>Go</button>
           </div>
         </section>
+
+        <LifeRadarPanel userId={userId} onNavigate={onNavigate} />
 
         <section className="today-section">
           <div className="section-heading">
