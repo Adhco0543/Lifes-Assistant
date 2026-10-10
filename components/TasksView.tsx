@@ -51,17 +51,37 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
     let active = true;
 
     const hydrate = async () => {
-      const rawDraft = localStorage.getItem('task_draft');
       let handedOffTitle = '';
 
-      if (rawDraft) {
-        try {
-          const parsed = JSON.parse(rawDraft);
-          handedOffTitle = typeof parsed.title === 'string' ? parsed.title.trim() : '';
-        } catch {
-          handedOffTitle = '';
+      try {
+        const cloudHandoff = await firebaseBackend.getLatestDraft('handoff-task');
+        if (
+          cloudHandoff &&
+          typeof cloudHandoff.title === 'string' &&
+          cloudHandoff.title.trim()
+        ) {
+          handedOffTitle = cloudHandoff.title.trim();
+          await firebaseBackend.saveDraft('handoff-task', {
+            consumedAt: Date.now(),
+          });
         }
-        localStorage.removeItem('task_draft');
+      } catch {
+        // Fall through to the device-local handoff if cloud sync is unavailable.
+      }
+
+      if (!handedOffTitle) {
+        const rawDraft = localStorage.getItem('task_draft');
+
+        if (rawDraft) {
+          try {
+            const parsed = JSON.parse(rawDraft);
+            handedOffTitle =
+              typeof parsed.title === 'string' ? parsed.title.trim() : '';
+          } catch {
+            handedOffTitle = '';
+          }
+          localStorage.removeItem('task_draft');
+        }
       }
 
       try {
