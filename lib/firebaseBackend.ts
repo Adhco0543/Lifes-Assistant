@@ -103,6 +103,15 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "",
 };
 
+function notifyWorkspaceChanged(detail?: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("life-workspace-changed", {
+      detail: detail || {},
+    })
+  );
+}
+
 class FirebaseBackend {
   private app: FirebaseApp | null = null;
   private auth: Auth | null = null;
@@ -413,6 +422,10 @@ class FirebaseBackend {
       },
       { merge: true }
     );
+
+    if (kind === "work-quote" || kind === "work-email") {
+      notifyWorkspaceChanged({ type: "draft", kind });
+    }
   }
 
   async getLatestDraft(kind: "quote" | "email" | string): Promise<Record<string, unknown> | null> {
@@ -471,6 +484,7 @@ class FirebaseBackend {
       updatedAt: Date.now(),
     });
 
+    notifyWorkspaceChanged({ type: "record-created", kind, recordId: recordRef.id });
     return recordRef.id;
   }
 
@@ -500,6 +514,8 @@ class FirebaseBackend {
       data,
       updatedAt: Date.now(),
     });
+
+    notifyWorkspaceChanged({ type: "record-updated", recordId });
   }
 
   async deleteBusinessRecord(recordId: string): Promise<void> {
@@ -507,6 +523,7 @@ class FirebaseBackend {
     const userId = this.getUserId();
 
     await deleteDoc(doc(db, "users", userId, "records", recordId));
+    notifyWorkspaceChanged({ type: "record-deleted", recordId });
   }
 
   async saveContinuityState(
