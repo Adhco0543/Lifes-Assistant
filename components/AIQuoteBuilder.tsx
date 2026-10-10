@@ -321,6 +321,10 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
         projectId,
         projectName,
       });
+      await firebaseBackend.saveDraft('work-quote', {
+        completedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
       setStatus('Quote saved to your cloud workspace.');
       return;
     } catch (error) {
