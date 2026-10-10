@@ -14,11 +14,18 @@ export async function GET() {
       callbackUrl: appUrl + '/api/integrations/google/callback',
       services: ['drive', 'gmail', 'calendar', 'photos'],
     },
+    github: {
+      configured: Boolean(
+        process.env.GITHUB_CLIENT_ID?.trim() &&
+        process.env.GITHUB_CLIENT_SECRET?.trim()
+      ),
+      callbackUrl: appUrl + '/api/integrations/github/callback',
+      supportsPrivateRepositories: true,
+    },
     providers: {
       microsoft: 'planned',
       dropbox: 'planned',
       apple: 'native-app-path',
-      github: 'planned',
     },
   });
 }
