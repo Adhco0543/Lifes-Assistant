@@ -54,28 +54,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ openLoops: [] });
     }
 
-    const gatewayToken =
-      process.env.AI_GATEWAY_API_KEY?.trim() ||
-      (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
-
-    if (!gatewayToken) {
-      return NextResponse.json({ openLoops: [] });
-    }
-
     const configuredModel = process.env.OPENAI_MODEL || "gpt-6-luna";
-    const model = configuredModel.includes("/")
-      ? configuredModel
-      : "openai/" + configuredModel;
-
-    const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + gatewayToken,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        instructions: [
+    const directModel = configuredModel.replace(/^openai\//, "");
+    const gatewayModel = "openai/" + directModel;
+    const instructions = [
           "You are Life Radar, an unresolved-commitment detector inside Life's Assistant.",
           "Extract only unfinished obligations, promises, dependencies, deadlines, follow-ups, or waiting states that the user explicitly states or very strongly implies.",
           "Do not create an open loop from a generic question, hypothetical, completed action, joke, or vague wish.",
@@ -88,29 +70,85 @@ export async function POST(req: Request) {
           "Do not resolve a loop from ambiguity, optimism, or a merely related statement.",
           "Return strict JSON only in this exact shape: {\"openLoops\":[{\"title\":\"...\",\"summary\":\"...\",\"status\":\"open|waiting\",\"priority\":\"low|medium|high\",\"waitingOn\":\"...\",\"nextAction\":\"...\",\"linkedView\":\"tasks|projects|quotes|notes|email|chat\",\"dueDate\":\"YYYY-MM-DD\"}],\"resolveLoopIds\":[\"existing-loop-id\"]}",
           "Keep titles under 80 characters and summaries under 180 characters.",
-        ].join("\n"),
-        input: [
-          {
-            role: "user",
-            content: JSON.stringify({
-              currentLocalDate: localDate || undefined,
-              timeZone: timeZone || undefined,
-              message,
-              activeLoops,
-            }),
-          },
-        ],
-        max_output_tokens: 450,
-      }),
-    });
+    ].join("\n");
+    const input = [
+      {
+        role: "user",
+        content: JSON.stringify({
+          currentLocalDate: localDate || undefined,
+          timeZone: timeZone || undefined,
+          message,
+          activeLoops,
+        }),
+      },
+    ];
 
-    if (!response.ok) {
+    let response: Response | null = null;
+
+    try {
+      const gatewayToken =
+        process.env.AI_GATEWAY_API_KEY?.trim() ||
+        (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
+
+      if (gatewayToken) {
+        response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + gatewayToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: gatewayModel,
+            instructions,
+            input,
+            max_output_tokens: 450,
+          }),
+        });
+      }
+    } catch (error) {
+      console.warn("Life Radar AI Gateway request could not start:", error);
+    }
+
+    if (response && !response.ok) {
       const detail = await response.text();
       console.error(
         "Life Radar AI Gateway error:",
         response.status,
         detail.slice(0, 500)
       );
+      response = null;
+    }
+
+    if (!response) {
+      const openAIKey = process.env.OPENAI_API_KEY?.trim();
+
+      if (openAIKey) {
+        response = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + openAIKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: directModel,
+            instructions,
+            input,
+            max_output_tokens: 450,
+          }),
+        });
+
+        if (!response.ok) {
+          const detail = await response.text();
+          console.error(
+            "Life Radar direct OpenAI error:",
+            response.status,
+            detail.slice(0, 500)
+          );
+        }
+      }
+    }
+
+    if (!response || !response.ok) {
       return NextResponse.json({ openLoops: [] });
     }
 
