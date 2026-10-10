@@ -18,10 +18,30 @@ type GoogleConnection = {
   checks?: Record<string, boolean>;
 };
 
+type GitHubConnection = {
+  connected?: boolean;
+  provider?: 'github';
+  login?: string;
+  name?: string;
+  avatarUrl?: string;
+  repositoryAccess?: boolean;
+  scope?: string;
+  sealedBundle?: string;
+  connectedAt?: number;
+  lastVerifiedAt?: number;
+  repositoryCount?: number;
+  repositoryNames?: string[];
+};
+
 type IntegrationStatus = {
   google?: {
     configured?: boolean;
     callbackUrl?: string;
+  };
+  github?: {
+    configured?: boolean;
+    callbackUrl?: string;
+    supportsPrivateRepositories?: boolean;
   };
 };
 
@@ -39,6 +59,8 @@ const GOOGLE_SERVICES: Array<{
 export default function ConnectionsHub({ userId }: { userId: string }) {
   const [status, setStatus] = useState<IntegrationStatus>({});
   const [google, setGoogle] = useState<GoogleConnection>({});
+  const [github, setGitHub] = useState<GitHubConnection>({});
+  const [githubRepositoryAccess, setGitHubRepositoryAccess] = useState(false);
   const [selected, setSelected] = useState<Record<GoogleService, boolean>>({
     drive: true,
     gmail: false,
@@ -85,14 +107,82 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     }
   };
 
+  const verifyGitHub = async (connection: GitHubConnection) => {
+    if (!connection.sealedBundle) return;
+
+    setBusy('github-test');
+    try {
+      const token = await firebaseBackend.getIdToken();
+      const response = await fetch('/api/integrations/github/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        },
+        body: JSON.stringify({ sealedBundle: connection.sealedBundle }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        setMessage(data.error || 'GitHub connection needs attention.');
+        return;
+      }
+
+      let next: GitHubConnection = {
+        ...connection,
+        login: data.login || connection.login,
+        name: data.name || connection.name,
+        avatarUrl: data.avatarUrl || connection.avatarUrl,
+        repositoryAccess: Boolean(data.repositoryAccess),
+        sealedBundle: data.sealedBundle || connection.sealedBundle,
+        lastVerifiedAt: Number(data.checkedAt || Date.now()),
+      };
+
+      const repoResponse = await fetch('/api/integrations/github/repos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        },
+        body: JSON.stringify({ sealedBundle: next.sealedBundle }),
+      });
+      const repoData = await repoResponse.json();
+
+      if (repoResponse.ok && repoData.ok) {
+        const repositories = Array.isArray(repoData.repositories)
+          ? repoData.repositories
+          : [];
+        next = {
+          ...next,
+          sealedBundle: repoData.sealedBundle || next.sealedBundle,
+          repositoryCount: repositories.length,
+          repositoryNames: repositories
+            .slice(0, 6)
+            .map((repo: any) => String(repo.fullName || ''))
+            .filter(Boolean),
+        };
+      }
+
+      await firebaseBackend.saveDraft('integration-github', next);
+      setGitHub(next);
+      setGitHubRepositoryAccess(Boolean(next.repositoryAccess));
+      setMessage('GitHub connection verified.');
+    } catch {
+      setMessage('GitHub connection test failed.');
+    } finally {
+      setBusy('');
+    }
+  };
+
   useEffect(() => {
     let active = true;
 
     const load = async () => {
       try {
-        const [configResponse, saved] = await Promise.all([
+        const [configResponse, savedGoogle, savedGitHub] = await Promise.all([
           fetch('/api/integrations/status', { cache: 'no-store' }),
           firebaseBackend.getLatestDraft('integration-google'),
+          firebaseBackend.getLatestDraft('integration-github'),
         ]);
 
         if (!active) return;
@@ -101,8 +191,8 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
           setStatus(await configResponse.json());
         }
 
-        if (saved?.connected) {
-          const next = saved as GoogleConnection;
+        if (savedGoogle?.connected) {
+          const next = savedGoogle as GoogleConnection;
           setGoogle(next);
           const services = Array.isArray(next.services) ? next.services : [];
           setSelected({
@@ -111,9 +201,18 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
             calendar: services.includes('calendar'),
             photos: services.includes('photos'),
           });
-          setMessage('Google is connected to this signed-in workspace.');
+        }
+
+        if (savedGitHub?.connected) {
+          const next = savedGitHub as GitHubConnection;
+          setGitHub(next);
+          setGitHubRepositoryAccess(Boolean(next.repositoryAccess));
+        }
+
+        if (savedGoogle?.connected || savedGitHub?.connected) {
+          setMessage('Connected services are available to this signed-in workspace.');
         } else {
-          setMessage('Choose what Google services Life\'s Assistant may access.');
+          setMessage('Choose the services Life\'s Assistant may access.');
         }
       } catch {
         if (active) setMessage('Could not load connection status.');
@@ -130,30 +229,59 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     const receive = async (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const data = event.data || {};
-      if (data.type !== 'life-assistant-google-oauth') return;
 
-      setBusy('');
+      if (data.type === 'life-assistant-google-oauth') {
+        setBusy('');
 
-      if (!data.ok) {
-        setMessage(data.error || 'Google connection was not completed.');
+        if (!data.ok) {
+          setMessage(data.error || 'Google connection was not completed.');
+          return;
+        }
+
+        const next: GoogleConnection = {
+          connected: true,
+          provider: 'google',
+          email: String(data.email || ''),
+          name: String(data.name || ''),
+          services: Array.isArray(data.services) ? data.services : [],
+          scope: String(data.scope || ''),
+          sealedBundle: String(data.sealedBundle || ''),
+          connectedAt: Number(data.connectedAt || Date.now()),
+        };
+
+        await firebaseBackend.saveDraft('integration-google', next);
+        setGoogle(next);
+        setMessage('Google connected. Running a live permission check…');
+        await verify(next);
         return;
       }
 
-      const next: GoogleConnection = {
-        connected: true,
-        provider: 'google',
-        email: String(data.email || ''),
-        name: String(data.name || ''),
-        services: Array.isArray(data.services) ? data.services : [],
-        scope: String(data.scope || ''),
-        sealedBundle: String(data.sealedBundle || ''),
-        connectedAt: Number(data.connectedAt || Date.now()),
-      };
+      if (data.type === 'life-assistant-github-oauth') {
+        setBusy('');
 
-      await firebaseBackend.saveDraft('integration-google', next);
-      setGoogle(next);
-      setMessage('Google connected. Running a live permission check…');
-      await verify(next);
+        if (!data.ok) {
+          setMessage(data.error || 'GitHub connection was not completed.');
+          return;
+        }
+
+        const next: GitHubConnection = {
+          connected: true,
+          provider: 'github',
+          login: String(data.login || ''),
+          name: String(data.name || ''),
+          avatarUrl: String(data.avatarUrl || ''),
+          repositoryAccess: Boolean(data.repositoryAccess),
+          scope: String(data.scope || ''),
+          sealedBundle: String(data.sealedBundle || ''),
+          connectedAt: Number(data.connectedAt || Date.now()),
+        };
+
+        await firebaseBackend.saveDraft('integration-github', next);
+        setGitHub(next);
+        setGitHubRepositoryAccess(Boolean(next.repositoryAccess));
+        setMessage('GitHub connected. Checking account and repositories…');
+        await verifyGitHub(next);
+      }
     };
 
     window.addEventListener('message', receive);
@@ -164,6 +292,85 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     () => GOOGLE_SERVICES.filter((item) => selected[item.id]).map((item) => item.id),
     [selected]
   );
+
+  const connectGitHub = async () => {
+    if (!status.github?.configured) {
+      setMessage(
+        'GitHub connection code is installed, but the GitHub OAuth client ID and secret still need to be added.'
+      );
+      return;
+    }
+
+    const popup = window.open(
+      'about:blank',
+      'life-assistant-github-oauth',
+      'width=720,height=780'
+    );
+
+    if (!popup) {
+      setMessage('Your browser blocked the GitHub sign-in popup.');
+      return;
+    }
+
+    setBusy('github-connect');
+    setMessage('Opening GitHub authorization…');
+
+    try {
+      const token = await firebaseBackend.getIdToken();
+      const response = await fetch('/api/integrations/github/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        },
+        body: JSON.stringify({ repositoryAccess: githubRepositoryAccess }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.url) {
+        popup.close();
+        setBusy('');
+        setMessage(data.error || 'Could not start GitHub connection.');
+        return;
+      }
+
+      popup.location.href = data.url;
+    } catch {
+      popup.close();
+      setBusy('');
+      setMessage('Could not start GitHub connection.');
+    }
+  };
+
+  const disconnectGitHub = async () => {
+    setBusy('github-disconnect');
+    try {
+      if (github.sealedBundle) {
+        const token = await firebaseBackend.getIdToken();
+        await fetch('/api/integrations/github/revoke', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token,
+          },
+          body: JSON.stringify({ sealedBundle: github.sealedBundle }),
+        });
+      }
+
+      const cleared: GitHubConnection = {
+        connected: false,
+        provider: 'github',
+        repositoryAccess: false,
+        sealedBundle: '',
+      };
+      await firebaseBackend.saveDraft('integration-github', cleared);
+      setGitHub(cleared);
+      setGitHubRepositoryAccess(false);
+      setMessage('GitHub disconnected.');
+    } finally {
+      setBusy('');
+    }
+  };
 
   const connect = async () => {
     if (!status.google?.configured) {
@@ -252,7 +459,6 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     { name: 'Microsoft 365', note: 'Outlook, Calendar, OneDrive', state: 'Next' },
     { name: 'Dropbox', note: 'Files and shared folders', state: 'Next' },
     { name: 'Apple / iCloud', note: 'Native Apple access requires the iPhone/Mac app path.', state: 'Native' },
-    { name: 'GitHub', note: 'Repositories, issues and development work', state: 'Planned' },
   ];
 
   return (
@@ -367,6 +573,115 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
           </div>
         </section>
 
+        <section className="provider github-provider">
+          <div className="provider-head">
+            <div className="provider-mark github-mark">GH</div>
+            <div>
+              <h2>GitHub</h2>
+              <p>Connect your account and let Life&apos;s Assistant see development work you authorize.</p>
+            </div>
+            <span className={github.connected ? 'state connected' : 'state'}>
+              {github.connected
+                ? 'Connected'
+                : status.github?.configured
+                  ? 'Ready'
+                  : 'Setup required'}
+            </span>
+          </div>
+
+          {github.connected && (
+            <div className="account-line">
+              <strong>{github.login ? '@' + github.login : github.name || 'GitHub account'}</strong>
+              <span>
+                {github.lastVerifiedAt
+                  ? 'Verified ' + new Date(github.lastVerifiedAt).toLocaleString()
+                  : 'Connected, not yet verified'}
+              </span>
+            </div>
+          )}
+
+          <div className="service-grid github-services">
+            <label className="service live">
+              <div>
+                <strong>GitHub identity</strong>
+                <small>Profile and account identity used to verify whose GitHub is connected.</small>
+              </div>
+              <span>ON</span>
+            </label>
+
+            <label className={'service ' + (githubRepositoryAccess ? 'live' : '')}>
+              <div>
+                <strong>Private repository access</strong>
+                <small>
+                  Optional. GitHub OAuth cannot make private source-code access read-only, so this permission is deliberately separate.
+                </small>
+              </div>
+              {github.connected ? (
+                <span>{github.repositoryAccess ? 'ON' : 'OFF'}</span>
+              ) : (
+                <input
+                  type="checkbox"
+                  checked={githubRepositoryAccess}
+                  onChange={(event) => setGitHubRepositoryAccess(event.target.checked)}
+                />
+              )}
+            </label>
+          </div>
+
+          {github.connected && typeof github.repositoryCount === 'number' && (
+            <div className="repo-summary">
+              <strong>{github.repositoryCount} repositories visible</strong>
+              {github.repositoryNames?.length ? (
+                <p>{github.repositoryNames.join(' · ')}</p>
+              ) : (
+                <p>No repositories were returned with the current permission set.</p>
+              )}
+            </div>
+          )}
+
+          {!status.github?.configured && (
+            <div className="setup-box">
+              <strong>GitHub developer setup still needed</strong>
+              <p>
+                Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in Vercel, and use this authorization callback URL:
+              </p>
+              <code>{status.github?.callbackUrl || 'https://lifes-assistant.vercel.app/api/integrations/github/callback'}</code>
+            </div>
+          )}
+
+          <div className="provider-actions">
+            {github.connected ? (
+              <>
+                <button
+                  className="primary"
+                  disabled={Boolean(busy)}
+                  onClick={() => verifyGitHub(github)}
+                >
+                  {busy === 'github-test' ? 'Checking…' : 'Test connection'}
+                </button>
+                <button disabled={Boolean(busy)} onClick={connectGitHub}>
+                  Change access
+                </button>
+                <button
+                  className="danger"
+                  disabled={Boolean(busy)}
+                  onClick={disconnectGitHub}
+                >
+                  {busy === 'github-disconnect' ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </>
+            ) : (
+              <button
+                className="primary"
+                disabled={Boolean(busy)}
+                onClick={connectGitHub}
+              >
+                {busy === 'github-connect' ? 'Opening GitHub…' : 'Connect GitHub'}
+              </button>
+            )}
+          </div>
+        </section>
+
         <section className="message">{message}</section>
 
         <div className="coming-grid">
@@ -398,6 +713,8 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
         h1 { margin: 7px 0; font-size: clamp(1.8rem, 4vw, 2.8rem); letter-spacing: -.045em; }
         header p { margin: 0; max-width: 700px; color: #828282; font-size: .78rem; line-height: 1.5; }
         .provider { border: 1px solid #383838; background: #252525; border-radius: 18px; padding: 17px; }
+        .github-provider { margin-top: 14px; }
+        .github-mark { font-size: .68rem; letter-spacing: -.03em; }
         .provider-head { display: grid; grid-template-columns: 42px minmax(0,1fr) auto; gap: 11px; align-items: center; }
         .provider-mark { width: 42px; height: 42px; border-radius: 12px; background: #eee; color: #171717; display: grid; place-items: center; font-weight: 850; }
         h2 { margin: 0; font-size: 1rem; }
@@ -415,6 +732,9 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
         .service small { color: #727272; font-size: .61rem; line-height: 1.4; margin-top: 3px; }
         .service input { width: 18px; height: 18px; accent-color: #eee; }
         .service > span { font-size: .58rem; color: #8fc7a2; }
+        .repo-summary { margin-top: 10px; padding: 10px 12px; background: #202020; border: 1px solid #333; border-radius: 11px; }
+        .repo-summary strong { font-size: .68rem; }
+        .repo-summary p { margin: 4px 0 0; color: #747474; font-size: .6rem; line-height: 1.45; overflow-wrap: anywhere; }
         .setup-box { margin-top: 12px; padding: 12px; border: 1px solid rgba(218,179,91,.26); border-radius: 12px; background: rgba(68,55,29,.2); }
         .setup-box strong { font-size: .7rem; }
         .setup-box p { margin: 4px 0 7px; color: #887d67; font-size: .63rem; }
