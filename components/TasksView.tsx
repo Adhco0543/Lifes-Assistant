@@ -119,7 +119,32 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           })
           .filter((task) => task.title);
 
-        let nextTasks = cloudTasks;
+        let migratedLocal: LocalTask[] = [];
+        try {
+          const rawLocal = localStorage.getItem(storageKey);
+          const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
+          if (Array.isArray(parsedLocal)) {
+            for (const localTask of parsedLocal as LocalTask[]) {
+              if (!localTask?.title || localTask.cloud) continue;
+              const id = await firebaseBackend.saveBusinessRecord('task', {
+                title: localTask.title,
+                status: localTask.status === 'done' ? 'done' : 'open',
+                dueDate: localTask.dueDate || '',
+                priority: localTask.priority || 'normal',
+                projectId: localTask.projectId || '',
+                projectName: localTask.projectName || '',
+              });
+              migratedLocal.push({ ...localTask, id, cloud: true });
+            }
+            if (migratedLocal.length) {
+              localStorage.removeItem(storageKey);
+            }
+          }
+        } catch (error) {
+          console.warn('Could not migrate local tasks to cloud:', error);
+        }
+
+        let nextTasks = [...migratedLocal, ...cloudTasks];
 
         if (handedOffTitle) {
           const id = await firebaseBackend.saveBusinessRecord('task', {
@@ -128,13 +153,17 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           });
           nextTasks = [
             { id, title: handedOffTitle, status: 'open', createdAt: Date.now(), priority: 'normal', dueDate: '', cloud: true },
-            ...cloudTasks,
+            ...nextTasks,
           ];
         }
 
         setTasks(nextTasks);
         setMode('cloud');
-        setStatus('Cloud sync active.');
+        setStatus(
+          migratedLocal.length
+            ? `Cloud sync active. Recovered ${migratedLocal.length} local task${migratedLocal.length === 1 ? '' : 's'}.`
+            : 'Cloud sync active.'
+        );
       } catch (error) {
         console.warn('Task cloud sync unavailable, using local fallback:', error);
 
