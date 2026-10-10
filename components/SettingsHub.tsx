@@ -79,13 +79,23 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
           ...localPrefs,
           assistantName: String(cloudPrefs?.assistantName || localPrefs.assistantName),
           tone:
-            cloudPrefs?.tone === 'concise' || cloudPrefs?.tone === 'detailed'
+            cloudPrefs?.tone === 'concise' ||
+            cloudPrefs?.tone === 'balanced' ||
+            cloudPrefs?.tone === 'detailed'
               ? cloudPrefs.tone
-              : 'balanced',
+              : localPrefs.tone,
           memoryEnabled:
             typeof cloudPrefs?.memoryEnabled === 'boolean'
               ? cloudPrefs.memoryEnabled
               : localPrefs.memoryEnabled,
+          compactMode:
+            typeof cloudPrefs?.compactMode === 'boolean'
+              ? cloudPrefs.compactMode
+              : localPrefs.compactMode,
+          timezone:
+            typeof cloudPrefs?.timezone === 'string' && cloudPrefs.timezone.trim()
+              ? cloudPrefs.timezone
+              : localPrefs.timezone,
         });
       } catch {
         if (active) setPrefs(localPrefs);
@@ -112,6 +122,8 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
         assistantName: prefs.assistantName,
         tone: prefs.tone,
         memoryEnabled: prefs.memoryEnabled,
+        compactMode: prefs.compactMode,
+        timezone: prefs.timezone,
         updatedAt: Date.now(),
       });
 
