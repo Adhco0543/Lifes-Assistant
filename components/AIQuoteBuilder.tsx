@@ -64,6 +64,28 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
           .filter((project) => project.id && project.name);
 
         setProjects(next);
+
+        try {
+          const rawLocal = localStorage.getItem(storageKey);
+          const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
+          if (Array.isArray(parsedLocal) && parsedLocal.length) {
+            let recovered = 0;
+            for (const localQuote of parsedLocal) {
+              if (!localQuote || typeof localQuote !== 'object') continue;
+              const payload = { ...(localQuote as Record<string, unknown>) };
+              delete payload.id;
+              delete payload.createdAt;
+              await firebaseBackend.saveBusinessRecord('quote', payload);
+              recovered += 1;
+            }
+            if (recovered) {
+              localStorage.removeItem(storageKey);
+              setStatus(`Recovered ${recovered} local quote${recovered === 1 ? '' : 's'} into your cloud workspace.`);
+            }
+          }
+        } catch (error) {
+          console.warn('Could not migrate local quotes to cloud:', error);
+        }
       } catch {
         if (active) setProjects([]);
       }
