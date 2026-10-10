@@ -243,14 +243,22 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
 
             {active === 'integrations' && (
               <div className="section-content">
-                <div className="section-title"><span className="eyebrow">INTEGRATIONS</span><h2>Connect real tools, not pretend buttons</h2></div>
-                {['Email', 'Calendar', 'Google Drive'].map((name) => (
-                  <div className="integration-row" key={name}>
-                    <div><strong>{name}</strong><small>Not connected in the release candidate yet.</small></div>
-                    <span>Planned</span>
-                  </div>
-                ))}
-                <div className="truth-card"><strong>Why this matters</strong><p>Life&apos;s Assistant should only say it sent, scheduled, uploaded, or changed something after a real connected service confirms the action.</p></div>
+                <div className="section-title"><span className="eyebrow">INTEGRATIONS</span><h2>Connections have their own control center</h2></div>
+                <div className="truth-card good">
+                  <strong>Google connection foundation is installed</strong>
+                  <p>Drive, Gmail, Calendar, and Google Photos permissions are managed from the Connections screen. Tokens are sealed server-side before the encrypted bundle is saved with your workspace.</p>
+                </div>
+                <button
+                  className="danger-button"
+                  style={{ borderColor: '#3d4a43', color: '#9bc8aa', background: '#253029' }}
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-connections'))}
+                >
+                  Open Connections
+                </button>
+                <div className="truth-card">
+                  <strong>Permission rule</strong>
+                  <p>Life&apos;s Assistant requests only the Google services you select. More providers can plug into the same connection layer later.</p>
+                </div>
               </div>
             )}
 
