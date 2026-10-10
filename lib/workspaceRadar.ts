@@ -322,19 +322,32 @@ export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<num
     }
 
     if (existing.status !== 'resolved') {
+      const snoozeIsActive =
+        existing.status === 'snoozed' &&
+        Boolean(existing.snoozedUntil && existing.snoozedUntil > now);
+
+      const nextPayload = snoozeIsActive
+        ? {
+            ...payload,
+            status: 'snoozed' as const,
+            snoozedUntil: existing.snoozedUntil,
+          }
+        : payload;
+
       const changed =
-        existing.title !== payload.title ||
-        existing.summary !== payload.summary ||
-        existing.priority !== payload.priority ||
-        existing.status !== payload.status ||
-        existing.waitingOn !== payload.waitingOn ||
-        existing.nextAction !== payload.nextAction ||
-        (existing.dueAt || null) !== (payload.dueAt || null) ||
-        existing.sourceExcerpt !== payload.sourceExcerpt ||
-        existing.linkedView !== payload.linkedView;
+        existing.title !== nextPayload.title ||
+        existing.summary !== nextPayload.summary ||
+        existing.priority !== nextPayload.priority ||
+        existing.status !== nextPayload.status ||
+        existing.waitingOn !== nextPayload.waitingOn ||
+        existing.nextAction !== nextPayload.nextAction ||
+        (existing.dueAt || null) !== (nextPayload.dueAt || null) ||
+        existing.sourceExcerpt !== nextPayload.sourceExcerpt ||
+        existing.linkedView !== nextPayload.linkedView ||
+        (existing.snoozedUntil || null) !== (nextPayload.snoozedUntil || null);
 
       if (changed) {
-        await firebaseBackend.updateOpenLoop(existing.id, payload);
+        await firebaseBackend.updateOpenLoop(existing.id, nextPayload);
         changes += 1;
       }
     }
