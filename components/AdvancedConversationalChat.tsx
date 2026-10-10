@@ -402,19 +402,33 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   }, [businessContext, currentConversationId]);
 
-  const handleToolHandoff = (data: ChatApiResponse) => {
+  const handleToolHandoff = async (data: ChatApiResponse) => {
+    const payload = (data.data || {}) as Record<string, unknown>;
+
     if (data.type === 'quote') {
-      localStorage.setItem('quote_draft', JSON.stringify(data.data || {}));
+      try {
+        await firebaseBackend.saveDraft('handoff-quote', payload);
+      } catch {
+        localStorage.setItem('quote_draft', JSON.stringify(payload));
+      }
       window.dispatchEvent(new CustomEvent('open-quote-builder'));
     }
 
     if (data.type === 'email') {
-      localStorage.setItem('email_draft', JSON.stringify(data.data || {}));
+      try {
+        await firebaseBackend.saveDraft('handoff-email', payload);
+      } catch {
+        localStorage.setItem('email_draft', JSON.stringify(payload));
+      }
       window.dispatchEvent(new CustomEvent('open-email'));
     }
 
     if (data.type === 'task') {
-      localStorage.setItem('task_draft', JSON.stringify(data.data || {}));
+      try {
+        await firebaseBackend.saveDraft('handoff-task', payload);
+      } catch {
+        localStorage.setItem('task_draft', JSON.stringify(payload));
+      }
       window.dispatchEvent(new CustomEvent('open-tasks'));
     }
   };
