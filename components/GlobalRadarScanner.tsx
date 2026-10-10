@@ -16,9 +16,14 @@ export default function GlobalRadarScanner({
     let timer: number | undefined;
     let changeTimer: number | undefined;
     let scanRunning = false;
+    let rerunRequested = false;
 
     const scan = async () => {
-      if (cancelled || scanRunning) return;
+      if (cancelled) return;
+      if (scanRunning) {
+        rerunRequested = true;
+        return;
+      }
       scanRunning = true;
 
       try {
@@ -37,6 +42,10 @@ export default function GlobalRadarScanner({
         console.warn('Background Life Radar scan skipped:', error);
       } finally {
         scanRunning = false;
+        if (rerunRequested && !cancelled) {
+          rerunRequested = false;
+          void scan();
+        }
       }
     };
 
