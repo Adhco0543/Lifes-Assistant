@@ -53,7 +53,7 @@ type WorkspaceRadarLoop = {
   waitingOn?: string;
   nextAction?: string;
   dueAt?: number | null;
-  source: 'workspace-task' | 'workspace-quote' | 'workspace-draft';
+  source: 'workspace-task' | 'workspace-quote' | 'workspace-draft' | 'workspace-project';
   sourceId: string;
   sourceExcerpt?: string;
   linkedView: string;
@@ -64,6 +64,8 @@ type WorkspaceRadarLoop = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STALE_QUOTE_MS = 7 * DAY_MS;
 const ABANDONED_DRAFT_MS = 30 * 60 * 1000;
+const STALLED_PROJECT_MS = 14 * DAY_MS;
+const VERY_STALLED_PROJECT_MS = 30 * DAY_MS;
 
 function recordUpdatedAt(record: Record<string, unknown>): number {
   return Number(record.updatedAt || record.createdAt || Date.now());
@@ -103,6 +105,36 @@ async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
     firebaseBackend.getLatestDraft('work-quote'),
     firebaseBackend.getLatestDraft('work-email'),
   ]);
+
+  const projectActivity = new Map<string, number>();
+
+  for (const rawRecord of records) {
+    const record = rawRecord as Record<string, unknown>;
+    const data = ((record.data || {}) as Record<string, unknown>);
+    const recordId = String(record.id || '');
+    const updatedAt = recordUpdatedAt(record);
+
+    if (record.kind === 'project' && recordId) {
+      projectActivity.set(
+        recordId,
+        Math.max(projectActivity.get(recordId) || 0, updatedAt)
+      );
+    }
+
+    const linkedProjectId =
+      typeof data.projectId === 'string'
+        ? data.projectId
+        : typeof data.workspaceProjectId === 'string'
+          ? data.workspaceProjectId
+          : '';
+
+    if (linkedProjectId) {
+      projectActivity.set(
+        linkedProjectId,
+        Math.max(projectActivity.get(linkedProjectId) || 0, updatedAt)
+      );
+    }
+  }
 
   for (const rawRecord of records) {
     const record = rawRecord as Record<string, unknown>;
@@ -171,6 +203,39 @@ async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
         });
       }
     }
+
+    if (record.kind === 'project') {
+      const name = String(data.name || '').trim();
+      const projectStatus =
+        data.status === 'paused' || data.status === 'done' ? data.status : 'active';
+      const lastActivity = projectActivity.get(id) || recordUpdatedAt(record);
+      const age = now - lastActivity;
+
+      if (name && projectStatus === 'active' && age >= STALLED_PROJECT_MS) {
+        const daysQuiet = Math.max(14, Math.floor(age / DAY_MS));
+
+        desired.push({
+          title: 'Project may be stalled: ' + name.slice(0, 52),
+          summary:
+            'No saved activity has touched this active project for ' +
+            daysQuiet +
+            ' days.',
+          status: 'open',
+          priority: age >= VERY_STALLED_PROJECT_MS ? 'high' : 'medium',
+          nextAction: 'Review the project, add the next step, pause it, or mark it done.',
+          dueAt: null,
+          source: 'workspace-project',
+          sourceId: id,
+          sourceExcerpt:
+            'Active project: ' +
+            name +
+            (data.goal ? ' · Goal: ' + String(data.goal).slice(0, 150) : ''),
+          linkedView: 'projects',
+          snoozedUntil: null,
+          sourceUpdatedAt: lastActivity,
+        });
+      }
+    }
   }
 
   if (
@@ -229,7 +294,12 @@ async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
     });
   }
 
-  const managedSources = new Set(['workspace-task', 'workspace-quote', 'workspace-draft']);
+  const managedSources = new Set([
+    'workspace-task',
+    'workspace-quote',
+    'workspace-draft',
+    'workspace-project',
+  ]);
   const desiredByKey = new Map(
     desired.map((item) => [item.source + ':' + item.sourceId, item])
   );
@@ -387,17 +457,31 @@ export default function LifeRadarPanel({
         return true;
       })
       .sort((a, b) => {
-        const priorityDiff =
-          priorityWeight(b.priority) - priorityWeight(a.priority);
-        if (priorityDiff) return priorityDiff;
+        const attentionWeight = (loop: OpenLoop) => {
+          let weight = priorityWeight(loop.priority);
+
+          if (loop.status === 'waiting') {
+            const waitingAge = now - loop.createdAt;
+            if (waitingAge >= 14 * DAY_MS) weight += 2;
+            else if (waitingAge >= 7 * DAY_MS) weight += 1;
+          }
+
+          if (loop.dueAt && loop.dueAt < now) weight += 1;
+          return weight;
+        };
+
+        const attentionDiff = attentionWeight(b) - attentionWeight(a);
+        if (attentionDiff) return attentionDiff;
         return b.updatedAt - a.updatedAt;
       })
       .slice(0, 5);
   }, [loops]);
 
-  const riskyCount = activeLoops.filter(
-    (loop) => loop.priority === 'high'
-  ).length;
+  const riskyCount = activeLoops.filter((loop) => {
+    if (loop.priority === 'high') return true;
+    if (loop.dueAt && loop.dueAt < Date.now()) return true;
+    return loop.status === 'waiting' && Date.now() - loop.createdAt >= 7 * DAY_MS;
+  }).length;
 
   const resolve = async (id: string) => {
     try {
@@ -469,7 +553,7 @@ export default function LifeRadarPanel({
               <strong>Radar is clear.</strong>
               <p>
                 Radar scans Chat plus your workspace for unfinished commitments,
-                overdue tasks, stale quotes, and abandoned drafts.
+                overdue tasks, stale quotes, stalled projects, and abandoned drafts.
               </p>
             </div>
             <button onClick={() => onNavigate('chat')}>
@@ -479,13 +563,19 @@ export default function LifeRadarPanel({
         ) : (
           activeLoops.map((loop) => {
             const sourceOpen = expandedSourceId === loop.id;
+            const waitingDays =
+              loop.status === 'waiting'
+                ? Math.max(0, Math.floor((Date.now() - loop.createdAt) / DAY_MS))
+                : 0;
 
             return (
               <article key={loop.id} className={'loop-card ' + loop.priority}>
                 <div className="loop-main">
                   <div className="loop-state">
                     <span className={'priority-dot ' + loop.priority} />
-                    {loop.status === 'waiting' ? 'WAITING' : 'OPEN'}
+                    {loop.status === 'waiting'
+                      ? 'WAITING' + (waitingDays >= 1 ? ' · ' + waitingDays + 'D' : '')
+                      : 'OPEN'}
                   </div>
                   <h3>{loop.title}</h3>
                   {loop.summary && (
