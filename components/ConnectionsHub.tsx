@@ -70,6 +70,9 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('Loading connection status…');
 
+  const googleBusy = busy.startsWith('google-');
+  const githubBusy = busy.startsWith('github-');
+
   const verify = async (connection: GoogleConnection) => {
     if (!connection.sealedBundle) return;
 
@@ -335,6 +338,13 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
       }
 
       popup.location.href = data.url;
+
+      const closeWatch = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(closeWatch);
+          setBusy((current) => current === 'github-connect' ? '' : current);
+        }
+      }, 500);
     } catch {
       popup.close();
       setBusy('');
@@ -419,6 +429,13 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
       }
 
       popup.location.href = data.url;
+
+      const closeWatch = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(closeWatch);
+          setBusy((current) => current === 'google-connect' ? '' : current);
+        }
+      }, 500);
     } catch {
       popup.close();
       setBusy('');
@@ -532,9 +549,9 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
 
           {!status.google?.configured && (
             <div className="setup-box">
-              <strong>Google Cloud setup still needed</strong>
+              <strong>Google connection is not configured yet</strong>
               <p>
-                Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel, then register this callback:
+                The button is disabled until GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are added in Vercel. Then register this callback:
               </p>
               <code>{status.google?.callbackUrl || 'https://lifes-assistant.vercel.app/api/integrations/google/callback'}</code>
             </div>
@@ -545,17 +562,17 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
               <>
                 <button
                   className="primary"
-                  disabled={Boolean(busy)}
+                  disabled={googleBusy}
                   onClick={() => verify(google)}
                 >
                   {busy === 'google-test' ? 'Checking…' : 'Test connection'}
                 </button>
-                <button disabled={Boolean(busy)} onClick={connect}>
+                <button disabled={googleBusy} onClick={connect}>
                   Change permissions
                 </button>
                 <button
                   className="danger"
-                  disabled={Boolean(busy)}
+                  disabled={googleBusy}
                   onClick={disconnect}
                 >
                   {busy === 'google-disconnect' ? 'Disconnecting…' : 'Disconnect'}
@@ -564,7 +581,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
             ) : (
               <button
                 className="primary"
-                disabled={Boolean(busy)}
+                disabled={googleBusy || !status.google?.configured}
                 onClick={connect}
               >
                 {busy === 'google-connect' ? 'Opening Google…' : 'Connect Google'}
@@ -616,17 +633,21 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
                   Optional. GitHub OAuth cannot make private source-code access read-only, so this permission is deliberately separate.
                 </small>
               </div>
-              {github.connected ? (
-                <span>{github.repositoryAccess ? 'ON' : 'OFF'}</span>
-              ) : (
-                <input
-                  type="checkbox"
-                  checked={githubRepositoryAccess}
-                  onChange={(event) => setGitHubRepositoryAccess(event.target.checked)}
-                />
-              )}
+              <input
+                type="checkbox"
+                checked={githubRepositoryAccess}
+                disabled={githubBusy}
+                onChange={(event) => setGitHubRepositoryAccess(event.target.checked)}
+              />
             </label>
           </div>
+
+          {github.connected && (
+            <div className="repo-summary">
+              <strong>Change GitHub access</strong>
+              <p>Toggle private repository access above, then press Change access to re-authorize GitHub with the new permission.</p>
+            </div>
+          )}
 
           {github.connected && typeof github.repositoryCount === 'number' && (
             <div className="repo-summary">
@@ -654,17 +675,17 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
               <>
                 <button
                   className="primary"
-                  disabled={Boolean(busy)}
+                  disabled={githubBusy}
                   onClick={() => verifyGitHub(github)}
                 >
                   {busy === 'github-test' ? 'Checking…' : 'Test connection'}
                 </button>
-                <button disabled={Boolean(busy)} onClick={connectGitHub}>
+                <button disabled={githubBusy} onClick={connectGitHub}>
                   Change access
                 </button>
                 <button
                   className="danger"
-                  disabled={Boolean(busy)}
+                  disabled={githubBusy}
                   onClick={disconnectGitHub}
                 >
                   {busy === 'github-disconnect' ? 'Disconnecting…' : 'Disconnect'}
@@ -673,7 +694,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
             ) : (
               <button
                 className="primary"
-                disabled={Boolean(busy)}
+                disabled={githubBusy}
                 onClick={connectGitHub}
               >
                 {busy === 'github-connect' ? 'Opening GitHub…' : 'Connect GitHub'}
