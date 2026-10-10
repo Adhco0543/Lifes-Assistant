@@ -9,7 +9,8 @@ export async function GET(request: Request) {
   const result = {
     app: { ready: true },
     ai: {
-      configured: Boolean(process.env.OPENAI_API_KEY),
+      configured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
+      provider: 'Vercel AI Gateway',
       model: process.env.OPENAI_MODEL || 'gpt-6-luna',
     },
     firebase: {
