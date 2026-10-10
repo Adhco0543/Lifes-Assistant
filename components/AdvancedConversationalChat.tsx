@@ -17,6 +17,27 @@ type ChatApiResponse = {
   data?: any;
 };
 
+type RadarApiLoop = {
+  title: string;
+  summary?: string;
+  status: 'open' | 'waiting';
+  priority: 'low' | 'medium' | 'high';
+  waitingOn?: string;
+  nextAction?: string;
+  linkedView?: string;
+};
+
+type RadarApiResponse = {
+  openLoops?: RadarApiLoop[];
+};
+
+function normalizeLoopKey(title: string, waitingOn?: string): string {
+  return (title + '|' + (waitingOn || ''))
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   userId = 'default-user',
   businessContext,
@@ -319,6 +340,68 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     return () => window.removeEventListener('new-conversation', handleNewConversation);
   }, [createNewConversation]);
 
+  const captureLifeRadar = useCallback(async (message: string) => {
+    try {
+      const token = await firebaseBackend.getIdToken();
+      if (!token) return;
+
+      const response = await fetch('/api/life-radar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        },
+        body: JSON.stringify({
+          message,
+          conversationId: currentConversationId || undefined,
+          businessContext,
+        }),
+      });
+
+      if (!response.ok) return;
+
+      const data = (await response.json()) as RadarApiResponse;
+      const detected = Array.isArray(data.openLoops) ? data.openLoops : [];
+      if (!detected.length) return;
+
+      const existing = await firebaseBackend.getOpenLoops(50);
+      const knownKeys = new Set(
+        existing
+          .filter((loop) => loop.status !== 'resolved')
+          .map((loop) => normalizeLoopKey(loop.title, loop.waitingOn))
+      );
+
+      for (const loop of detected) {
+        const key = normalizeLoopKey(loop.title, loop.waitingOn);
+        if (!key || knownKeys.has(key)) continue;
+
+        await firebaseBackend.createOpenLoop({
+          title: loop.title,
+          summary: loop.summary,
+          status: loop.status,
+          priority: loop.priority,
+          waitingOn: loop.waitingOn,
+          nextAction: loop.nextAction,
+          dueAt: null,
+          source: 'conversation',
+          sourceId: currentConversationId || undefined,
+          sourceExcerpt: message.slice(0, 280),
+          linkedView: loop.linkedView || 'tasks',
+          snoozedUntil: null,
+        });
+
+        knownKeys.add(key);
+      }
+
+      await firebaseBackend.trackEvent('life_radar.captured', {
+        count: detected.length,
+        conversationId: currentConversationId || null,
+      });
+    } catch (error) {
+      console.warn('Life Radar capture skipped:', error);
+    }
+  }, [businessContext, currentConversationId]);
+
   const handleToolHandoff = (data: ChatApiResponse) => {
     if (data.type === 'quote') {
       localStorage.setItem('quote_draft', JSON.stringify(data.data || {}));
@@ -361,6 +444,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         console.warn('Error saving user message:', error);
       }
     }
+
+    void captureLifeRadar(userMessage);
 
     setIsLoading(true);
 
@@ -438,7 +523,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId]);
+  }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId, captureLifeRadar]);
 
   useEffect(() => {
     if (!queuedLaunch || !input.trim() || isLoading) return;
