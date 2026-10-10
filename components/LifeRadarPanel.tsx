@@ -70,6 +70,18 @@ const VERY_STALLED_PROJECT_MS = 30 * DAY_MS;
 function recordUpdatedAt(record: Record<string, unknown>): number {
   return Number(record.updatedAt || record.createdAt || Date.now());
 }
+function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return year + '-' + month + '-' + day;
+}
+
+function localNoonFromDateKey(dateKey: string): number {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
+}
+
 
 function quoteIsClosed(data: Record<string, unknown>): boolean {
   const status = String(data.status || '').toLowerCase();
@@ -97,7 +109,10 @@ function hasEmailDraft(data: Record<string, unknown>): boolean {
 
 async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
   const now = Date.now();
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = localDateKey();
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowKey = localDateKey(tomorrow);
   const desired: WorkspaceRadarLoop[] = [];
 
   const [records, quoteDraft, emailDraft] = await Promise.all([
@@ -147,20 +162,33 @@ async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
       const dueDate = typeof data.dueDate === 'string' ? data.dueDate : '';
       const done = data.status === 'done';
 
-      if (title && dueDate && !done && dueDate < todayKey) {
-        const dueAt = new Date(dueDate + 'T12:00:00').getTime();
-        const daysOverdue = Math.max(1, Math.floor((now - dueAt) / DAY_MS) + 1);
+      if (title && dueDate && !done && dueDate <= tomorrowKey) {
+        const dueAt = localNoonFromDateKey(dueDate);
+        const isOverdue = dueDate < todayKey;
+        const isToday = dueDate === todayKey;
+        const daysOverdue = isOverdue
+          ? Math.max(1, Math.floor((now - dueAt) / DAY_MS) + 1)
+          : 0;
 
         desired.push({
-          title: 'Overdue: ' + title,
-          summary:
-            'This task is ' +
-            daysOverdue +
-            (daysOverdue === 1 ? ' day' : ' days') +
-            ' overdue.',
+          title: isOverdue
+            ? 'Overdue: ' + title
+            : isToday
+              ? 'Due today: ' + title
+              : 'Due tomorrow: ' + title,
+          summary: isOverdue
+            ? 'This task is ' +
+              daysOverdue +
+              (daysOverdue === 1 ? ' day' : ' days') +
+              ' overdue.'
+            : isToday
+              ? 'This task is due today.'
+              : 'This task is due tomorrow.',
           status: 'open',
-          priority: 'high',
-          nextAction: 'Complete it, reschedule it, or update the task.',
+          priority: isOverdue || isToday ? 'high' : 'medium',
+          nextAction: isOverdue
+            ? 'Complete it, reschedule it, or update the task.'
+            : 'Plan the next step before the due date arrives.',
           dueAt,
           source: 'workspace-task',
           sourceId: id,
@@ -335,6 +363,25 @@ async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
         snoozedUntil: null,
       });
       changes += 1;
+      continue;
+    }
+
+    if (existing.status !== 'resolved') {
+      const changed =
+        existing.title !== payload.title ||
+        existing.summary !== payload.summary ||
+        existing.priority !== payload.priority ||
+        existing.status !== payload.status ||
+        existing.waitingOn !== payload.waitingOn ||
+        existing.nextAction !== payload.nextAction ||
+        (existing.dueAt || null) !== (payload.dueAt || null) ||
+        existing.sourceExcerpt !== payload.sourceExcerpt ||
+        existing.linkedView !== payload.linkedView;
+
+      if (changed) {
+        await firebaseBackend.updateOpenLoop(existing.id, payload);
+        changes += 1;
+      }
     }
   }
 
@@ -482,6 +529,7 @@ export default function LifeRadarPanel({
     if (loop.dueAt && loop.dueAt < Date.now()) return true;
     return loop.status === 'waiting' && Date.now() - loop.createdAt >= 7 * DAY_MS;
   }).length;
+  const topPriority = activeLoops[0] || null;
 
   const resolve = async (id: string) => {
     try {
@@ -564,6 +612,22 @@ export default function LifeRadarPanel({
         </div>
       </div>
 
+      {topPriority && (
+        <button
+          className="top-priority-card"
+          onClick={() => onNavigate(topPriority.linkedView || 'tasks')}
+        >
+          <div>
+            <span>TOP PRIORITY</span>
+            <strong>{topPriority.title}</strong>
+            <small>
+              {topPriority.nextAction || topPriority.summary || 'Handle this next.'}
+            </small>
+          </div>
+          <b>Handle now →</b>
+        </button>
+      )}
+
       {continuity && continuity.view !== 'home' && (
         <button className="continuity-card" onClick={resume}>
           <div className="continuity-icon">↻</div>
@@ -590,7 +654,7 @@ export default function LifeRadarPanel({
               <strong>Radar is clear.</strong>
               <p>
                 Radar scans Chat plus your workspace for unfinished commitments,
-                overdue tasks, stale quotes, stalled projects, and abandoned drafts.
+                due-soon tasks, stale quotes, stalled projects, and abandoned drafts.
               </p>
             </div>
             <button onClick={() => onNavigate('chat')}>
@@ -721,6 +785,47 @@ export default function LifeRadarPanel({
           margin-top: 4px;
         }
         .radar-score small { color: #d0a56b; }
+        .top-priority-card {
+          width: 100%;
+          margin-top: 15px;
+          padding: 13px 14px;
+          border: 1px solid #4a4130;
+          border-radius: 14px;
+          background: rgba(72, 58, 34, .34);
+          color: #eee;
+          display: flex;
+          justify-content: space-between;
+          gap: 14px;
+          align-items: center;
+          text-align: left;
+          cursor: pointer;
+        }
+        .top-priority-card:hover { background: rgba(82, 67, 40, .45); }
+        .top-priority-card span,
+        .top-priority-card strong,
+        .top-priority-card small { display: block; }
+        .top-priority-card span {
+          color: #a99369;
+          font-size: .55rem;
+          letter-spacing: .13em;
+          font-weight: 800;
+        }
+        .top-priority-card strong {
+          margin-top: 4px;
+          font-size: .8rem;
+        }
+        .top-priority-card small {
+          margin-top: 4px;
+          color: #8f8778;
+          font-size: .62rem;
+          line-height: 1.4;
+        }
+        .top-priority-card b {
+          flex: 0 0 auto;
+          color: #d7c59f;
+          font-size: .64rem;
+          white-space: nowrap;
+        }
         .continuity-card {
           width: 100%;
           margin-top: 15px;
