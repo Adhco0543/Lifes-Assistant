@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getVercelOidcToken } from "@vercel/oidc";
 import { verifyFirebaseRequest } from "../../../lib/serverAuth";
 
 type HistoryMessage = {
@@ -41,7 +42,8 @@ export async function POST(req: Request) {
 
     const action = classifyAction(message);
     const gatewayToken =
-      process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+      process.env.AI_GATEWAY_API_KEY?.trim() ||
+      (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
 
     if (!gatewayToken) {
       return NextResponse.json({
