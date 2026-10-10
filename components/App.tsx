@@ -20,6 +20,7 @@ import FocusBrief from './FocusBrief';
 import WorkspaceSearch from './WorkspaceSearch';
 import PeopleCenter from './PeopleCenter';
 import ProjectsCenter from './ProjectsCenter';
+import GlobalRadarScanner from './GlobalRadarScanner';
 
 type ViewType =
   | 'home'
@@ -286,7 +287,9 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   const effectiveUserId = firebaseBackend.getCurrentUser()?.uid || userId;
 
   return (
-    <div className="shell">
+    <>
+      <GlobalRadarScanner userId={effectiveUserId} />
+      <div className="shell">
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <button className="brand" onClick={() => navigate('home')} aria-label="Life's Assistant home">
           <div className="brand-mark">✦</div>
@@ -626,7 +629,8 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           }
         }
       `}</style>
-    </div>
+      </div>
+    </>
   );
 };
 
