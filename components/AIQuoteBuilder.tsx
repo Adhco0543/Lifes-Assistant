@@ -37,6 +37,7 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
   const [projectId, setProjectId] = useState('');
   const [status, setStatus] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
 
   const total = useMemo(
     () => items.reduce((sum, item) => sum + item.price * item.quantity, 0),
@@ -75,18 +76,75 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('quote_draft');
-      if (!raw) return;
-      const handedOff = JSON.parse(raw);
-      if (typeof handedOff.projectDescription === 'string') {
-        setProjectDescription(handedOff.projectDescription);
+    let active = true;
+
+    const hydrateDraft = async () => {
+      try {
+        const handoff = await firebaseBackend.getLatestDraft('handoff-quote');
+        const working = await firebaseBackend.getLatestDraft('work-quote');
+        const source =
+          handoff && Object.keys(handoff).some((key) => key !== 'consumedAt')
+            ? handoff
+            : working;
+
+        if (!active) return;
+
+        if (source) {
+          if (typeof source.clientName === 'string') setClientName(source.clientName);
+          if (typeof source.projectDescription === 'string') setProjectDescription(source.projectDescription);
+          if (typeof source.notes === 'string') setNotes(source.notes);
+          if (Array.isArray(source.items)) setItems(source.items as LineItem[]);
+          if (typeof source.projectId === 'string') setProjectId(source.projectId);
+          if (typeof source.draft === 'string') setDraft(source.draft);
+        }
+
+        if (handoff && Object.keys(handoff).some((key) => key !== 'consumedAt')) {
+          await firebaseBackend.saveDraft('handoff-quote', { consumedAt: Date.now() });
+        }
+      } catch {
+        try {
+          const raw = localStorage.getItem('quote_draft');
+          if (raw) {
+            const handedOff = JSON.parse(raw);
+            if (typeof handedOff.projectDescription === 'string') {
+              setProjectDescription(handedOff.projectDescription);
+            }
+          }
+        } catch {
+          // Local fallback is best-effort.
+        } finally {
+          localStorage.removeItem('quote_draft');
+        }
+      } finally {
+        if (active) setHydrated(true);
       }
-      localStorage.removeItem('quote_draft');
-    } catch {
-      localStorage.removeItem('quote_draft');
-    }
+    };
+
+    hydrateDraft();
+    return () => {
+      active = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const timer = window.setTimeout(() => {
+      void firebaseBackend.saveDraft('work-quote', {
+        clientName,
+        projectDescription,
+        notes,
+        items,
+        projectId,
+        draft,
+        updatedAt: Date.now(),
+      }).catch(() => {
+        // Cloud draft autosave is best-effort; explicit save still has local fallback.
+      });
+    }, 650);
+
+    return () => window.clearTimeout(timer);
+  }, [hydrated, clientName, projectDescription, notes, items, projectId, draft]);
 
   const addItem = () => {
     const price = Number(itemPrice);
