@@ -22,11 +22,13 @@ import PeopleCenter from './PeopleCenter';
 import ProjectsCenter from './ProjectsCenter';
 import GlobalRadarScanner from './GlobalRadarScanner';
 import RadarCenter from './RadarCenter';
+import ConnectionsHub from './ConnectionsHub';
 import type { OpenLoop } from '../lib/firebaseBackend';
 
 type ViewType =
   | 'home'
   | 'radar'
+  | 'connections'
   | 'chat'
   | 'tasks'
   | 'quotes'
@@ -50,6 +52,7 @@ interface AppProps {
 const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'radar', label: 'Life Radar', icon: '◌' },
+  { id: 'connections', label: 'Connections', icon: '⌘' },
   { id: 'search', label: 'Search', icon: '⌕' },
   { id: 'people', label: 'People', icon: '◎' },
   { id: 'projects', label: 'Projects', icon: '▦' },
@@ -70,6 +73,7 @@ const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
 
 const VIEW_LABELS: Partial<Record<ViewType, string>> = {
   radar: 'Life Radar',
+  connections: 'Connections',
   chat: 'Conversation',
   tasks: 'Task center',
   quotes: 'Quote builder',
@@ -244,15 +248,18 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
     const openQuote = () => navigate('quotes');
     const openEmail = () => navigate('email');
     const openTasks = () => navigate('tasks');
+    const openConnections = () => navigate('connections');
 
     window.addEventListener('open-quote-builder', openQuote);
     window.addEventListener('open-email', openEmail);
     window.addEventListener('open-tasks', openTasks);
+    window.addEventListener('open-connections', openConnections);
 
     return () => {
       window.removeEventListener('open-quote-builder', openQuote);
       window.removeEventListener('open-email', openEmail);
       window.removeEventListener('open-tasks', openTasks);
+      window.removeEventListener('open-connections', openConnections);
     };
   }, [navigate]);
 
@@ -450,6 +457,9 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           )}
           {currentView === 'radar' && (
             <RadarCenter userId={effectiveUserId} onNavigate={navigate} />
+          )}
+          {currentView === 'connections' && (
+            <ConnectionsHub userId={effectiveUserId} />
           )}
           {currentView === 'chat' && (
             <AdvancedConversationalChat
