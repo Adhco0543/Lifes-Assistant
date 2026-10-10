@@ -14,6 +14,7 @@ export default function GlobalRadarScanner({
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+    let changeTimer: number | undefined;
     let scanRunning = false;
 
     const scan = async () => {
@@ -23,12 +24,32 @@ export default function GlobalRadarScanner({
       try {
         await firebaseBackend.initialize();
         const current = await firebaseBackend.getOpenLoops(50);
-        await syncWorkspaceRadar(current);
+        const changes = await syncWorkspaceRadar(current);
+
+        if (!cancelled) {
+          window.dispatchEvent(
+            new CustomEvent('life-radar-scanned', {
+              detail: { changes, scannedAt: Date.now() },
+            })
+          );
+        }
       } catch (error) {
         console.warn('Background Life Radar scan skipped:', error);
       } finally {
         scanRunning = false;
       }
+    };
+
+    const scheduleWorkspaceScan = () => {
+      if (changeTimer) window.clearTimeout(changeTimer);
+      changeTimer = window.setTimeout(() => {
+        void scan();
+      }, 900);
+    };
+
+    const scanNow = () => {
+      if (changeTimer) window.clearTimeout(changeTimer);
+      void scan();
     };
 
     const onFocus = () => {
@@ -47,12 +68,17 @@ export default function GlobalRadarScanner({
     }, 5 * 60 * 1000);
 
     window.addEventListener('focus', onFocus);
+    window.addEventListener('life-workspace-changed', scheduleWorkspaceScan);
+    window.addEventListener('life-radar-scan', scanNow);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       cancelled = true;
       if (timer) window.clearInterval(timer);
+      if (changeTimer) window.clearTimeout(changeTimer);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('life-workspace-changed', scheduleWorkspaceScan);
+      window.removeEventListener('life-radar-scan', scanNow);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [userId]);
