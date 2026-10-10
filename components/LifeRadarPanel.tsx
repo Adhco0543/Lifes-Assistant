@@ -502,6 +502,43 @@ export default function LifeRadarPanel({
     }
   };
 
+  const makeTask = async (loop: OpenLoop) => {
+    try {
+      const taskTitle = (loop.nextAction || loop.title).trim();
+      if (!taskTitle) return;
+
+      const dueDate = loop.dueAt
+        ? new Date(loop.dueAt).toISOString().slice(0, 10)
+        : '';
+
+      const id = await firebaseBackend.saveBusinessRecord('task', {
+        title: taskTitle,
+        status: 'open',
+        dueDate,
+        priority:
+          loop.priority === 'high'
+            ? 'high'
+            : loop.priority === 'low'
+              ? 'low'
+              : 'normal',
+        projectId: '',
+        projectName: '',
+        source: 'life-radar',
+        sourceOpenLoopId: loop.id,
+      });
+
+      await firebaseBackend.trackEvent('life_radar.task_created', {
+        openLoopId: loop.id,
+        recordId: id,
+        title: taskTitle,
+      });
+
+      await firebaseBackend.resolveOpenLoop(loop.id);
+    } catch (error) {
+      console.warn('Could not turn Life Radar item into a task:', error);
+    }
+  };
+
   const resume = () => {
     if (!continuity?.view) return;
     onNavigate(continuity.view);
@@ -607,6 +644,9 @@ export default function LifeRadarPanel({
                   >
                     Handle it
                   </button>
+                  {loop.source !== 'workspace-task' && (
+                    <button onClick={() => makeTask(loop)}>Make task</button>
+                  )}
                   <button onClick={() => snooze(loop.id)}>Tomorrow</button>
                   <button onClick={() => resolve(loop.id)}>Resolve</button>
                   {loop.sourceExcerpt && (
