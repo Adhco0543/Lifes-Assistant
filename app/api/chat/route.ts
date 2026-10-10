@@ -41,19 +41,6 @@ export async function POST(req: Request) {
     }
 
     const action = classifyAction(message);
-    const gatewayToken =
-      process.env.AI_GATEWAY_API_KEY?.trim() ||
-      (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
-
-    if (!gatewayToken) {
-      return NextResponse.json({
-        type: action,
-        message:
-          "My AI connection is not available right now. I can still organize drafts and tasks while the gateway reconnects.",
-        data: buildDraft(action, message),
-        model: "setup-required",
-      });
-    }
 
     const chatbotName =
       typeof body.chatbotName === "string" && body.chatbotName.trim()
@@ -102,32 +89,86 @@ export async function POST(req: Request) {
     ];
 
     const configuredModel = process.env.OPENAI_MODEL || "gpt-6-luna";
-    const model = configuredModel.includes("/")
-      ? configuredModel
-      : "openai/" + configuredModel;
+    const directModel = configuredModel.replace(/^openai\//, "");
+    const gatewayModel = "openai/" + directModel;
+    const requestBody = {
+      instructions,
+      input,
+      max_output_tokens: 900,
+    };
 
-    const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + gatewayToken,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        instructions,
-        input,
-        max_output_tokens: 900,
-      }),
-    });
+    let response: Response | null = null;
+    let model = gatewayModel;
+    let provider = "vercel-ai-gateway";
 
-    if (!response.ok) {
+    try {
+      const gatewayToken =
+        process.env.AI_GATEWAY_API_KEY?.trim() ||
+        (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
+
+      if (gatewayToken) {
+        response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + gatewayToken,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...requestBody,
+            model: gatewayModel,
+          }),
+        });
+      }
+    } catch (error) {
+      console.warn("AI Gateway request could not start:", error);
+    }
+
+    if (response && !response.ok) {
       const detail = await response.text();
-      console.error("AI Gateway Responses API error:", response.status, detail.slice(0, 600));
+      console.error(
+        "AI Gateway Responses API error:",
+        response.status,
+        detail.slice(0, 600)
+      );
+      response = null;
+    }
 
+    if (!response) {
+      const openAIKey = process.env.OPENAI_API_KEY?.trim();
+
+      if (openAIKey) {
+        provider = "openai-direct";
+        model = directModel;
+
+        response = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + openAIKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...requestBody,
+            model: directModel,
+          }),
+        });
+
+        if (!response.ok) {
+          const detail = await response.text();
+          console.error(
+            "Direct OpenAI Responses API error:",
+            response.status,
+            detail.slice(0, 600)
+          );
+        }
+      }
+    }
+
+    if (!response || !response.ok) {
       return NextResponse.json(
         {
           type: action,
-          message: "The AI service is temporarily unavailable. Try again in a moment.",
+          message:
+            "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
           data: buildDraft(action, message),
         },
         { status: 502 }
@@ -144,6 +185,7 @@ export async function POST(req: Request) {
         "I received your request, but I could not produce a useful response. Please try again.",
       data: buildDraft(action, message),
       model,
+      provider,
     });
   } catch (error) {
     console.error("Chat route error:", error);
