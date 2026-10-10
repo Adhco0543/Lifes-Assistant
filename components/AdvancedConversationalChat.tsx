@@ -25,10 +25,12 @@ type RadarApiLoop = {
   waitingOn?: string;
   nextAction?: string;
   linkedView?: string;
+  dueDate?: string;
 };
 
 type RadarApiResponse = {
   openLoops?: RadarApiLoop[];
+  resolveLoopIds?: string[];
 };
 
 function normalizeLoopKey(title: string, waitingOn?: string): string {
@@ -36,6 +38,20 @@ function normalizeLoopKey(title: string, waitingOn?: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return year + '-' + month + '-' + day;
+}
+
+function localNoonFromDateKey(dateKey?: string): number | null {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const value = new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
+  return Number.isFinite(value) ? value : null;
 }
 
 export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
@@ -345,6 +361,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       const token = await firebaseBackend.getIdToken();
       if (!token) return;
 
+      const existing = await firebaseBackend.getOpenLoops(50);
+      const activeConversationLoops = existing
+        .filter(
+          (loop) =>
+            loop.status !== 'resolved' &&
+            loop.source === 'conversation'
+        )
+        .slice(0, 20);
+
       const response = await fetch('/api/life-radar', {
         method: 'POST',
         headers: {
@@ -355,6 +380,14 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           message,
           conversationId: currentConversationId || undefined,
           businessContext,
+          localDate: localDateKey(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+          activeLoops: activeConversationLoops.map((loop) => ({
+            id: loop.id,
+            title: loop.title,
+            summary: loop.summary,
+            waitingOn: loop.waitingOn,
+          })),
         }),
       });
 
@@ -362,14 +395,26 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       const data = (await response.json()) as RadarApiResponse;
       const detected = Array.isArray(data.openLoops) ? data.openLoops : [];
-      if (!detected.length) return;
+      const resolvedIds = new Set(
+        Array.isArray(data.resolveLoopIds) ? data.resolveLoopIds : []
+      );
 
-      const existing = await firebaseBackend.getOpenLoops(50);
+      for (const loop of activeConversationLoops) {
+        if (resolvedIds.has(loop.id)) {
+          await firebaseBackend.resolveOpenLoop(loop.id);
+        }
+      }
+
       const knownKeys = new Set(
         existing
-          .filter((loop) => loop.status !== 'resolved')
+          .filter(
+            (loop) =>
+              loop.status !== 'resolved' && !resolvedIds.has(loop.id)
+          )
           .map((loop) => normalizeLoopKey(loop.title, loop.waitingOn))
       );
+
+      let createdCount = 0;
 
       for (const loop of detected) {
         const key = normalizeLoopKey(loop.title, loop.waitingOn);
@@ -382,7 +427,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           priority: loop.priority,
           waitingOn: loop.waitingOn,
           nextAction: loop.nextAction,
-          dueAt: null,
+          dueAt: localNoonFromDateKey(loop.dueDate),
           source: 'conversation',
           sourceId: currentConversationId || undefined,
           sourceExcerpt: message.slice(0, 280),
@@ -391,12 +436,16 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         });
 
         knownKeys.add(key);
+        createdCount += 1;
       }
 
-      await firebaseBackend.trackEvent('life_radar.captured', {
-        count: detected.length,
-        conversationId: currentConversationId || null,
-      });
+      if (createdCount || resolvedIds.size) {
+        await firebaseBackend.trackEvent('life_radar.captured', {
+          createdCount,
+          resolvedCount: resolvedIds.size,
+          conversationId: currentConversationId || null,
+        });
+      }
     } catch (error) {
       console.warn('Life Radar capture skipped:', error);
     }
