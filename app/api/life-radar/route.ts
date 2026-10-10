@@ -10,6 +10,7 @@ type RadarLoop = {
   waitingOn?: string;
   nextAction?: string;
   linkedView?: string;
+  dueDate?: string;
 };
 
 type ResponsesApiResult = {
@@ -30,6 +31,24 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     const message = typeof body?.message === "string" ? body.message.trim() : "";
+    const localDate =
+      typeof body?.localDate === "string" ? body.localDate.slice(0, 10) : "";
+    const timeZone =
+      typeof body?.timeZone === "string" ? body.timeZone.slice(0, 80) : "";
+    const activeLoops = Array.isArray(body?.activeLoops)
+      ? body.activeLoops
+          .slice(0, 20)
+          .filter((item: any) => item && typeof item === "object")
+          .map((item: any) => ({
+            id: typeof item.id === "string" ? item.id.slice(0, 120) : "",
+            title: typeof item.title === "string" ? item.title.slice(0, 120) : "",
+            summary:
+              typeof item.summary === "string" ? item.summary.slice(0, 220) : "",
+            waitingOn:
+              typeof item.waitingOn === "string" ? item.waitingOn.slice(0, 100) : "",
+          }))
+          .filter((item: any) => item.id && item.title)
+      : [];
 
     if (!message) {
       return NextResponse.json({ openLoops: [] });
@@ -64,13 +83,21 @@ export async function POST(req: Request) {
           "Use status waiting only when progress depends on another person, reply, approval, delivery, information, or outside event. Otherwise use open.",
           "Priority high means the user stated urgency, a deadline, money/customer risk, or a near-term consequence. Low means optional or distant. Otherwise medium.",
           "linkedView must be one of: tasks, projects, quotes, notes, email, chat.",
-          "Return strict JSON only in this exact shape: {\"openLoops\":[{\"title\":\"...\",\"summary\":\"...\",\"status\":\"open|waiting\",\"priority\":\"low|medium|high\",\"waitingOn\":\"...\",\"nextAction\":\"...\",\"linkedView\":\"tasks|projects|quotes|notes|email|chat\"}]}",
+          "If an unfinished item has an explicit or clearly relative deadline, return dueDate as YYYY-MM-DD. Use the supplied local date to resolve words such as today and tomorrow. Otherwise omit dueDate.",
+          "You are also given current unresolved conversation loops. If the new user message clearly says one of those items was completed, canceled, received, answered, or is no longer needed, put that loop's exact id in resolveLoopIds.",
+          "Do not resolve a loop from ambiguity, optimism, or a merely related statement.",
+          "Return strict JSON only in this exact shape: {\"openLoops\":[{\"title\":\"...\",\"summary\":\"...\",\"status\":\"open|waiting\",\"priority\":\"low|medium|high\",\"waitingOn\":\"...\",\"nextAction\":\"...\",\"linkedView\":\"tasks|projects|quotes|notes|email|chat\",\"dueDate\":\"YYYY-MM-DD\"}],\"resolveLoopIds\":[\"existing-loop-id\"]}",
           "Keep titles under 80 characters and summaries under 180 characters.",
         ].join("\n"),
         input: [
           {
             role: "user",
-            content: message,
+            content: JSON.stringify({
+              currentLocalDate: localDate || undefined,
+              timeZone: timeZone || undefined,
+              message,
+              activeLoops,
+            }),
           },
         ],
         max_output_tokens: 450,
@@ -93,6 +120,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       openLoops: sanitizeLoops(parsed?.openLoops),
+      resolveLoopIds: sanitizeResolveIds(parsed?.resolveLoopIds, activeLoops),
     });
   } catch (error) {
     console.error("Life Radar route error:", error);
@@ -191,8 +219,26 @@ function sanitizeLoops(value: unknown): RadarLoop[] {
             ? item.nextAction.trim().slice(0, 160)
             : undefined,
         linkedView,
+        dueDate:
+          typeof item.dueDate === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate.trim())
+            ? item.dueDate.trim()
+            : undefined,
       } as RadarLoop;
     })
     .filter((item): item is RadarLoop => Boolean(item))
     .slice(0, 3);
+}
+
+
+function sanitizeResolveIds(
+  value: unknown,
+  activeLoops: Array<{ id: string }>
+): string[] {
+  if (!Array.isArray(value) || !activeLoops.length) return [];
+
+  const allowed = new Set(activeLoops.map((loop) => loop.id));
+  return value
+    .filter((id): id is string => typeof id === "string" && allowed.has(id))
+    .slice(0, 10);
 }
