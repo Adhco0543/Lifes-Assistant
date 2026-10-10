@@ -21,21 +21,77 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
   const [status, setStatus] = useState('');
   const [emailReady, setEmailReady] = useState(false);
   const [emailDomainStatus, setEmailDomainStatus] = useState('checking');
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('email_draft');
-      if (!raw) return;
-      const draft = JSON.parse(raw);
-      if (typeof draft.to === 'string') setRecipient(draft.to);
-      if (typeof draft.subject === 'string' && draft.subject !== 'Draft') setSubject(draft.subject);
-      if (typeof draft.body === 'string') setBody(draft.body);
-      if (typeof draft.request === 'string') setInstructions(draft.request);
-      localStorage.removeItem('email_draft');
-    } catch {
-      localStorage.removeItem('email_draft');
-    }
+    let active = true;
+
+    const hydrateDraft = async () => {
+      try {
+        const handoff = await firebaseBackend.getLatestDraft('handoff-email');
+        const working = await firebaseBackend.getLatestDraft('work-email');
+        const source =
+          handoff && Object.keys(handoff).some((key) => key !== 'consumedAt')
+            ? handoff
+            : working;
+
+        if (!active) return;
+
+        if (source) {
+          if (typeof source.to === 'string') setRecipient(source.to);
+          if (typeof source.recipient === 'string') setRecipient(source.recipient);
+          if (typeof source.subject === 'string' && source.subject !== 'Draft') setSubject(source.subject);
+          if (typeof source.body === 'string') setBody(source.body);
+          if (typeof source.request === 'string') setInstructions(source.request);
+          if (typeof source.instructions === 'string') setInstructions(source.instructions);
+        }
+
+        if (handoff && Object.keys(handoff).some((key) => key !== 'consumedAt')) {
+          await firebaseBackend.saveDraft('handoff-email', { consumedAt: Date.now() });
+        }
+      } catch {
+        try {
+          const raw = localStorage.getItem('email_draft');
+          if (raw) {
+            const localDraft = JSON.parse(raw);
+            if (typeof localDraft.to === 'string') setRecipient(localDraft.to);
+            if (typeof localDraft.subject === 'string' && localDraft.subject !== 'Draft') setSubject(localDraft.subject);
+            if (typeof localDraft.body === 'string') setBody(localDraft.body);
+            if (typeof localDraft.request === 'string') setInstructions(localDraft.request);
+          }
+        } catch {
+          // Local fallback is best-effort.
+        } finally {
+          localStorage.removeItem('email_draft');
+        }
+      } finally {
+        if (active) setHydrated(true);
+      }
+    };
+
+    hydrateDraft();
+    return () => {
+      active = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const timer = window.setTimeout(() => {
+      void firebaseBackend.saveDraft('work-email', {
+        to: recipient,
+        subject,
+        request: instructions,
+        body,
+        updatedAt: Date.now(),
+      }).catch(() => {
+        // Cloud draft autosave is best-effort.
+      });
+    }, 650);
+
+    return () => window.clearTimeout(timer);
+  }, [hydrated, recipient, subject, instructions, body]);
 
   useEffect(() => {
     let active = true;
