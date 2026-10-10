@@ -40,13 +40,14 @@ export async function POST(req: Request) {
     }
 
     const action = classifyAction(message);
-    const apiKey = process.env.OPENAI_API_KEY;
+    const gatewayToken =
+      process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
 
-    if (!apiKey) {
+    if (!gatewayToken) {
       return NextResponse.json({
         type: action,
         message:
-          "My AI brain is not connected yet. I can still organize drafts and tasks, but the OpenAI API key must be added before full AI chat is live.",
+          "My AI connection is not available right now. I can still organize drafts and tasks while the gateway reconnects.",
         data: buildDraft(action, message),
         model: "setup-required",
       });
@@ -98,12 +99,15 @@ export async function POST(req: Request) {
       { role: "user" as const, content: message },
     ];
 
-    const model = process.env.OPENAI_MODEL || "gpt-6-luna";
+    const configuredModel = process.env.OPENAI_MODEL || "gpt-6-luna";
+    const model = configuredModel.includes("/")
+      ? configuredModel
+      : "openai/" + configuredModel;
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: "Bearer " + apiKey,
+        Authorization: "Bearer " + gatewayToken,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -116,7 +120,7 @@ export async function POST(req: Request) {
 
     if (!response.ok) {
       const detail = await response.text();
-      console.error("OpenAI Responses API error:", response.status, detail.slice(0, 600));
+      console.error("AI Gateway Responses API error:", response.status, detail.slice(0, 600));
 
       return NextResponse.json(
         {
