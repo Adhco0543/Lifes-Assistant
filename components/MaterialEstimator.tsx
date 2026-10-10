@@ -171,7 +171,33 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
           })
           .filter((estimate) => estimate.projectName);
 
-        setEstimates(cloudEstimates);
+        const recovered: Estimate[] = [];
+        try {
+          const rawLocal = localStorage.getItem(`estimates_${userId}`);
+          const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
+          if (Array.isArray(parsedLocal)) {
+            for (const localEstimate of parsedLocal as Estimate[]) {
+              if (!localEstimate?.projectName || localEstimate.cloud) continue;
+              const id = await firebaseBackend.saveBusinessRecord('material-estimate', {
+                projectName: localEstimate.projectName,
+                workspaceProjectId: localEstimate.workspaceProjectId || '',
+                workspaceProjectName: localEstimate.workspaceProjectName || '',
+                materials: localEstimate.materials || [],
+                subtotal: Number(localEstimate.subtotal || 0),
+                tax: Number(localEstimate.tax || 0),
+                total: Number(localEstimate.total || 0),
+              });
+              recovered.push({ ...localEstimate, id, cloud: true });
+            }
+            if (recovered.length) {
+              localStorage.removeItem(`estimates_${userId}`);
+            }
+          }
+        } catch (error) {
+          console.warn('Could not migrate local estimates to cloud:', error);
+        }
+
+        setEstimates([...recovered, ...cloudEstimates]);
       } catch (error) {
         console.warn('Estimate cloud sync unavailable, loading local fallback:', error);
         const saved = localStorage.getItem(`estimates_${userId}`);
