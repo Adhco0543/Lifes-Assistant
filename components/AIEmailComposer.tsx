@@ -160,6 +160,10 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
         provider: 'resend',
         providerId: data?.id || null,
       });
+      await firebaseBackend.saveDraft('work-email', {
+        completedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
       setStatus('Email sent successfully.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Email could not be sent.');
