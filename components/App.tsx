@@ -21,9 +21,12 @@ import WorkspaceSearch from './WorkspaceSearch';
 import PeopleCenter from './PeopleCenter';
 import ProjectsCenter from './ProjectsCenter';
 import GlobalRadarScanner from './GlobalRadarScanner';
+import RadarCenter from './RadarCenter';
+import type { OpenLoop } from '../lib/firebaseBackend';
 
 type ViewType =
   | 'home'
+  | 'radar'
   | 'chat'
   | 'tasks'
   | 'quotes'
@@ -46,6 +49,7 @@ interface AppProps {
 
 const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
+  { id: 'radar', label: 'Life Radar', icon: '◌' },
   { id: 'search', label: 'Search', icon: '⌕' },
   { id: 'people', label: 'People', icon: '◎' },
   { id: 'projects', label: 'Projects', icon: '▦' },
@@ -65,6 +69,7 @@ const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
 ];
 
 const VIEW_LABELS: Partial<Record<ViewType, string>> = {
+  radar: 'Life Radar',
   chat: 'Conversation',
   tasks: 'Task center',
   quotes: 'Quote builder',
@@ -96,6 +101,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   const [businessName, setBusinessName] = useState('My Workspace');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(true);
+  const [radarCount, setRadarCount] = useState(0);
 
   const currentUser = firebaseBackend.getCurrentUser();
 
@@ -164,6 +170,51 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setRadarCount(0);
+      return;
+    }
+
+    let mounted = true;
+    let unsubscribe = () => {};
+
+    const updateCount = (loops: OpenLoop[]) => {
+      if (!mounted) return;
+      const now = Date.now();
+      setRadarCount(
+        loops.filter((loop) => {
+          if (loop.status === 'resolved') return false;
+          if (
+            loop.status === 'snoozed' &&
+            loop.snoozedUntil &&
+            loop.snoozedUntil > now
+          ) {
+            return false;
+          }
+          return true;
+        }).length
+      );
+    };
+
+    const connect = async () => {
+      try {
+        await firebaseBackend.initialize();
+        updateCount(await firebaseBackend.getOpenLoops(50));
+        unsubscribe = firebaseBackend.onOpenLoopsChange(updateCount);
+      } catch (error) {
+        console.warn('Could not subscribe to Life Radar count:', error);
+      }
+    };
+
+    void connect();
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [isAuthenticated, currentUser?.uid]);
 
   const handleAuthSuccess = useCallback(async () => {
     setIsLoading(true);
@@ -320,6 +371,9 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
             >
               <span className="nav-icon">{item.icon}</span>
               <span>{item.label}</span>
+              {item.id === 'radar' && radarCount > 0 && (
+                <span className="radar-badge">{radarCount > 99 ? '99+' : radarCount}</span>
+              )}
             </button>
           ))}
         </div>
@@ -393,6 +447,9 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
               userId={effectiveUserId}
               onNavigate={navigate}
             />
+          )}
+          {currentView === 'radar' && (
+            <RadarCenter userId={effectiveUserId} onNavigate={navigate} />
           )}
           {currentView === 'chat' && (
             <AdvancedConversationalChat
@@ -536,6 +593,19 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           font-size: .8rem;
         }
         .nav-item.active .nav-icon { color: #e8e8e8; }
+        .radar-badge {
+          margin-left: auto;
+          min-width: 19px;
+          height: 19px;
+          padding: 0 5px;
+          border-radius: 999px;
+          display: inline-grid;
+          place-items: center;
+          background: #5d4932;
+          color: #ead7ae;
+          font-size: .57rem;
+          font-weight: 800;
+        }
         .sidebar-spacer { flex: 1; }
         .account-section { border-top: 1px solid #292929; padding-top: 6px; }
         .account-card {
