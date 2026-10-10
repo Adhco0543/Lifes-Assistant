@@ -72,8 +72,33 @@ export const AINoteEditor: React.FC<AINoteEditorProps> = ({ userId }) => {
           })
           .filter((item) => item.text);
 
-        setSavedNotes(cloudNotes);
+        const recovered: SavedNote[] = [];
+        try {
+          const rawLocal = localStorage.getItem(storageKey);
+          const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
+          if (Array.isArray(parsedLocal)) {
+            for (const localNote of parsedLocal as SavedNote[]) {
+              if (!localNote?.text || localNote.cloud) continue;
+              const id = await firebaseBackend.saveBusinessRecord('note', {
+                text: localNote.text,
+                projectId: localNote.projectId || '',
+                projectName: localNote.projectName || '',
+              });
+              recovered.push({ ...localNote, id, cloud: true });
+            }
+            if (recovered.length) {
+              localStorage.removeItem(storageKey);
+            }
+          }
+        } catch (error) {
+          console.warn('Could not migrate local notes to cloud:', error);
+        }
+
+        setSavedNotes([...recovered, ...cloudNotes]);
         setMode('cloud');
+        if (recovered.length) {
+          setStatus(`Recovered ${recovered.length} local note${recovered.length === 1 ? '' : 's'} into your cloud workspace.`);
+        }
       } catch {
         try {
           const stored = localStorage.getItem(storageKey);
