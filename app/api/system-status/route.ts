@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const result = {
     app: { ready: true },
     ai: {
-      configured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
+      configured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL),
       provider: 'Vercel AI Gateway',
       model: process.env.OPENAI_MODEL || 'gpt-6-luna',
     },
