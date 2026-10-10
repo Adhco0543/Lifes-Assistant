@@ -62,6 +62,38 @@ export interface UserProfile {
   updatedAt: number;
 }
 
+export type ContinuityDevice = "desktop" | "tablet" | "phone" | "unknown";
+
+export interface ContinuityState {
+  view: string;
+  label: string;
+  context?: string;
+  contextId?: string;
+  device: ContinuityDevice;
+  updatedAt: number;
+}
+
+export type OpenLoopStatus = "open" | "waiting" | "snoozed" | "resolved";
+export type OpenLoopPriority = "low" | "medium" | "high";
+
+export interface OpenLoop {
+  id: string;
+  title: string;
+  summary?: string;
+  status: OpenLoopStatus;
+  priority: OpenLoopPriority;
+  waitingOn?: string;
+  nextAction?: string;
+  dueAt?: number | null;
+  source?: string;
+  sourceId?: string;
+  sourceExcerpt?: string;
+  linkedView?: string;
+  snoozedUntil?: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "",
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "",
@@ -475,6 +507,251 @@ class FirebaseBackend {
     const userId = this.getUserId();
 
     await deleteDoc(doc(db, "users", userId, "records", recordId));
+  }
+
+  async saveContinuityState(
+    state: Omit<ContinuityState, "updatedAt">
+  ): Promise<ContinuityState> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error("Authentication required for continuity sync.");
+    }
+
+    const next: ContinuityState = {
+      ...state,
+      updatedAt: Date.now(),
+    };
+
+    await setDoc(
+      doc(db, "users", user.uid, "continuity", "current"),
+      {
+        ...next,
+        userId: user.uid,
+      },
+      { merge: true }
+    );
+
+    return next;
+  }
+
+  async getContinuityState(): Promise<ContinuityState | null> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+
+    if (!user) return null;
+
+    const snapshot = await getDoc(
+      doc(db, "users", user.uid, "continuity", "current")
+    );
+
+    if (!snapshot.exists()) return null;
+
+    const data = snapshot.data();
+
+    return {
+      view: String(data.view || "home"),
+      label: String(data.label || "Life's Assistant"),
+      context: data.context ? String(data.context) : undefined,
+      contextId: data.contextId ? String(data.contextId) : undefined,
+      device:
+        data.device === "desktop" ||
+        data.device === "tablet" ||
+        data.device === "phone"
+          ? data.device
+          : "unknown",
+      updatedAt: Number(data.updatedAt || Date.now()),
+    };
+  }
+
+  onContinuityStateChange(
+    callback: (state: ContinuityState | null) => void
+  ): () => void {
+    if (!this.db || !this.auth?.currentUser) {
+      return () => {};
+    }
+
+    const ref = doc(
+      this.db,
+      "users",
+      this.auth.currentUser.uid,
+      "continuity",
+      "current"
+    );
+
+    return onSnapshot(ref, (snapshot) => {
+      if (!snapshot.exists()) {
+        callback(null);
+        return;
+      }
+
+      const data = snapshot.data();
+
+      callback({
+        view: String(data.view || "home"),
+        label: String(data.label || "Life's Assistant"),
+        context: data.context ? String(data.context) : undefined,
+        contextId: data.contextId ? String(data.contextId) : undefined,
+        device:
+          data.device === "desktop" ||
+          data.device === "tablet" ||
+          data.device === "phone"
+            ? data.device
+            : "unknown",
+        updatedAt: Number(data.updatedAt || Date.now()),
+      });
+    });
+  }
+
+  async createOpenLoop(
+    loop: Omit<OpenLoop, "id" | "createdAt" | "updatedAt">
+  ): Promise<string> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error("Authentication required for Life Radar.");
+    }
+
+    const now = Date.now();
+    const ref = await addDoc(collection(db, "users", user.uid, "openLoops"), {
+      ...loop,
+      userId: user.uid,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return ref.id;
+  }
+
+  async getOpenLoops(maxCount = 50): Promise<OpenLoop[]> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+
+    if (!user) return [];
+
+    const openLoopsQuery = query(
+      collection(db, "users", user.uid, "openLoops"),
+      orderBy("updatedAt", "desc"),
+      queryLimit(maxCount)
+    );
+
+    const snapshot = await getDocs(openLoopsQuery);
+
+    return snapshot.docs.map((item) => {
+      const data = item.data();
+
+      return {
+        id: item.id,
+        title: String(data.title || "Open loop"),
+        summary: data.summary ? String(data.summary) : undefined,
+        status:
+          data.status === "waiting" ||
+          data.status === "snoozed" ||
+          data.status === "resolved"
+            ? data.status
+            : "open",
+        priority:
+          data.priority === "high" || data.priority === "low"
+            ? data.priority
+            : "medium",
+        waitingOn: data.waitingOn ? String(data.waitingOn) : undefined,
+        nextAction: data.nextAction ? String(data.nextAction) : undefined,
+        dueAt: data.dueAt ? Number(data.dueAt) : null,
+        source: data.source ? String(data.source) : undefined,
+        sourceId: data.sourceId ? String(data.sourceId) : undefined,
+        sourceExcerpt: data.sourceExcerpt
+          ? String(data.sourceExcerpt)
+          : undefined,
+        linkedView: data.linkedView ? String(data.linkedView) : undefined,
+        snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
+        createdAt: Number(data.createdAt || Date.now()),
+        updatedAt: Number(data.updatedAt || Date.now()),
+      } as OpenLoop;
+    });
+  }
+
+  onOpenLoopsChange(callback: (loops: OpenLoop[]) => void): () => void {
+    if (!this.db || !this.auth?.currentUser) {
+      return () => {};
+    }
+
+    const openLoopsQuery = query(
+      collection(this.db, "users", this.auth.currentUser.uid, "openLoops"),
+      orderBy("updatedAt", "desc"),
+      queryLimit(50)
+    );
+
+    return onSnapshot(openLoopsQuery, (snapshot) => {
+      const loops = snapshot.docs.map((item) => {
+        const data = item.data();
+
+        return {
+          id: item.id,
+          title: String(data.title || "Open loop"),
+          summary: data.summary ? String(data.summary) : undefined,
+          status:
+            data.status === "waiting" ||
+            data.status === "snoozed" ||
+            data.status === "resolved"
+              ? data.status
+              : "open",
+          priority:
+            data.priority === "high" || data.priority === "low"
+              ? data.priority
+              : "medium",
+          waitingOn: data.waitingOn ? String(data.waitingOn) : undefined,
+          nextAction: data.nextAction ? String(data.nextAction) : undefined,
+          dueAt: data.dueAt ? Number(data.dueAt) : null,
+          source: data.source ? String(data.source) : undefined,
+          sourceId: data.sourceId ? String(data.sourceId) : undefined,
+          sourceExcerpt: data.sourceExcerpt
+            ? String(data.sourceExcerpt)
+            : undefined,
+          linkedView: data.linkedView ? String(data.linkedView) : undefined,
+          snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
+          createdAt: Number(data.createdAt || Date.now()),
+          updatedAt: Number(data.updatedAt || Date.now()),
+        } as OpenLoop;
+      });
+
+      callback(loops);
+    });
+  }
+
+  async updateOpenLoop(
+    openLoopId: string,
+    patch: Partial<Omit<OpenLoop, "id" | "createdAt">>
+  ): Promise<void> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error("Authentication required for Life Radar.");
+    }
+
+    await updateDoc(
+      doc(db, "users", user.uid, "openLoops", openLoopId),
+      {
+        ...patch,
+        updatedAt: Date.now(),
+      }
+    );
+  }
+
+  async resolveOpenLoop(openLoopId: string): Promise<void> {
+    await this.updateOpenLoop(openLoopId, {
+      status: "resolved",
+      snoozedUntil: null,
+    });
+  }
+
+  async snoozeOpenLoop(openLoopId: string, until: number): Promise<void> {
+    await this.updateOpenLoop(openLoopId, {
+      status: "snoozed",
+      snoozedUntil: until,
+    });
   }
 }
 
