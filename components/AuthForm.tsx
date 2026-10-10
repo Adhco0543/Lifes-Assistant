@@ -233,11 +233,17 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
       <style jsx>{`
         .auth-form-container {
           display: flex;
+          flex-direction: column;
           align-items: center;
-          justify-content: center;
-          min-height: 100vh;
+          justify-content: flex-start;
+          width: 100%;
+          height: 100vh;
+          height: 100dvh;
+          overflow-y: auto;
+          overscroll-behavior-y: contain;
+          -webkit-overflow-scrolling: touch;
           background: #212121;
-          padding: 1rem;
+          padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
         }
 
         .auth-form {
@@ -247,6 +253,8 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
           box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
           width: 100%;
           max-width: 400px;
+          margin: auto 0;
+          flex: 0 0 auto;
         }
 
         .auth-form h2 {
@@ -421,7 +429,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, initialMode = 'lo
         .info-box p {
           margin: 0;
           font-size: 0.85rem;
-          color: #333;
+          color: #8f8f8f;
           line-height: 1.4;
         }
 
