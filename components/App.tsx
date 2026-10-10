@@ -63,6 +63,30 @@ const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'materials', label: 'Materials', icon: '◇' },
 ];
 
+const VIEW_LABELS: Partial<Record<ViewType, string>> = {
+  chat: 'Conversation',
+  tasks: 'Task center',
+  quotes: 'Quote builder',
+  notes: 'Notes',
+  email: 'Email drafts',
+  materials: 'Materials',
+  receipts: 'Action ledger',
+  memory: 'Memory',
+  brief: 'Focus brief',
+  search: 'Workspace search',
+  people: 'People',
+  projects: 'Projects',
+};
+
+function detectDevice(): 'desktop' | 'tablet' | 'phone' | 'unknown' {
+  if (typeof window === 'undefined') return 'unknown';
+
+  const width = window.innerWidth;
+  if (width <= 640) return 'phone';
+  if (width <= 1024) return 'tablet';
+  return 'desktop';
+}
+
 export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   const [currentView, setCurrentView] = useState<ViewType>('home');
   const [isLoading, setIsLoading] = useState(true);
@@ -146,8 +170,22 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
   }, [hydrate]);
 
   const navigate = useCallback((view: string) => {
-    setCurrentView(view as ViewType);
+    const nextView = view as ViewType;
+    setCurrentView(nextView);
     setSidebarOpen(false);
+
+    const label = VIEW_LABELS[nextView];
+    if (label) {
+      void firebaseBackend
+        .saveContinuityState({
+          view: nextView,
+          label,
+          device: detectDevice(),
+        })
+        .catch((error) => {
+          console.warn('Could not sync continuity state:', error);
+        });
+    }
   }, []);
 
   useEffect(() => {
