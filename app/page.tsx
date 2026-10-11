@@ -4,7 +4,7 @@ import EnhancedApp from '../components/EnhancedApp';
 import { Suspense } from 'react';
 
 function PageContent() {
-  return <EnhancedApp userId="default-user" />;
+  return <EnhancedApp />;
 }
 
 export default function HomePage() {
