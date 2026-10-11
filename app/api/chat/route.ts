@@ -7,6 +7,13 @@ type HistoryMessage = {
   content: string;
 };
 
+type AttachmentInput = {
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string;
+};
+
 type ResponsesApiResult = {
   output_text?: string;
   output?: Array<{
@@ -33,14 +40,21 @@ export async function POST(req: Request) {
       body.messages?.[body.messages.length - 1]?.content?.trim?.() ||
       "";
 
-    if (!message) {
+    const attachments = sanitizeAttachments(body.attachments);
+    const requestMessage =
+      message ||
+      (attachments.length
+        ? "Please review the attached file" + (attachments.length > 1 ? "s" : "") + "."
+        : "");
+
+    if (!requestMessage) {
       return NextResponse.json({
         type: "chat",
-        message: "I did not receive a message. Tell me what you want help with.",
+        message: "I did not receive a message or attachment. Tell me what you want help with.",
       });
     }
 
-    const action = classifyAction(message);
+    const action = classifyAction(requestMessage);
 
     const chatbotName =
       typeof body.chatbotName === "string" && body.chatbotName.trim()
@@ -83,9 +97,31 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n");
 
+    const attachmentContent = attachments.map((attachment) =>
+      attachment.type.startsWith("image/")
+        ? {
+            type: "input_image" as const,
+            image_url: attachment.dataUrl,
+            detail: "auto" as const,
+          }
+        : {
+            type: "input_file" as const,
+            filename: attachment.name,
+            file_data: attachment.dataUrl,
+          }
+    );
+
     const input = [
       ...history.slice(-12),
-      { role: "user" as const, content: message },
+      {
+        role: "user" as const,
+        content: attachments.length
+          ? [
+              ...attachmentContent,
+              { type: "input_text" as const, text: requestMessage },
+            ]
+          : requestMessage,
+      },
     ];
 
     const configuredModel = process.env.OPENAI_MODEL || "gpt-6-luna";
@@ -169,7 +205,7 @@ export async function POST(req: Request) {
           type: action,
           message:
             "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
-          data: buildDraft(action, message),
+          data: buildDraft(action, requestMessage),
         },
         { status: 502 }
       );
@@ -183,7 +219,7 @@ export async function POST(req: Request) {
       message:
         reply ||
         "I received your request, but I could not produce a useful response. Please try again.",
-      data: buildDraft(action, message),
+      data: buildDraft(action, requestMessage),
       model,
       provider,
     });
@@ -198,6 +234,45 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+function sanitizeAttachments(value: unknown): AttachmentInput[] {
+  if (!Array.isArray(value)) return [];
+
+  const supportedExtension =
+    /\.(pdf|txt|md|json|html?|xml|rtf|odt|docx?|pptx?|xlsx?|csv|tsv|iif|png|jpe?g|webp|gif|js|jsx|ts|tsx|py|java|c|cc|cpp|h|hpp|cs|go|rs|rb|php|swift|kt|kts|sh|sql|yaml|yml)$/i;
+  const maxFiles = 3;
+  const maxTotalBytes = 2_400_000;
+  const maxTotalDataUrlChars = 3_500_000;
+
+  const result: AttachmentInput[] = [];
+  let totalBytes = 0;
+  let totalDataUrlChars = 0;
+
+  for (const item of value.slice(0, maxFiles)) {
+    if (!item || typeof item !== "object") continue;
+
+    const candidate = item as Record<string, unknown>;
+    const name = String(candidate.name || "").trim().slice(0, 180);
+    const type = String(candidate.type || "application/octet-stream").trim().slice(0, 120);
+    const size = Number(candidate.size || 0);
+    const dataUrl = String(candidate.dataUrl || "");
+
+    if (!name || !supportedExtension.test(name)) continue;
+    if (!Number.isFinite(size) || size <= 0) continue;
+    if (!dataUrl.startsWith("data:") || !dataUrl.includes(";base64,")) continue;
+
+    totalBytes += size;
+    totalDataUrlChars += dataUrl.length;
+
+    if (totalBytes > maxTotalBytes || totalDataUrlChars > maxTotalDataUrlChars) {
+      throw new Error("Attachments are too large. Keep the combined files under 2.4 MB.");
+    }
+
+    result.push({ name, type, size, dataUrl });
+  }
+
+  return result;
 }
 
 function sanitizeMemory(value: unknown): string[] {
