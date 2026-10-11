@@ -171,7 +171,7 @@ export async function POST(req: Request) {
     const requestBody = {
       instructions,
       input,
-      max_output_tokens: 900,
+      max_output_tokens: 5000,
     };
 
     let response: Response | null = null;
