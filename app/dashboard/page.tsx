@@ -69,5 +69,5 @@ export default function DashboardPage() {
     return null;
   }
 
-  return <EnhancedApp userId={userId} />;
+  return <EnhancedApp />;
 }
