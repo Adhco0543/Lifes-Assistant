@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
-import { createGoogleOAuthState } from '../../../../../lib/googleOAuthState';
+import { createGoogleOAuthState, readGoogleOAuthState } from '../../../../../lib/googleOAuthState';
+import { oauthNonceCookie } from '../../../../../lib/oauthNonceCookie';
 
 const SERVICE_SCOPES: Record<string, string> = {
   drive: 'https://www.googleapis.com/auth/drive.readonly',
@@ -70,7 +71,12 @@ export async function POST(request: Request) {
     state,
   });
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     url: 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString(),
   });
+  response.headers.set(
+    'Set-Cookie',
+    oauthNonceCookie('google', readGoogleOAuthState(state).nonce, appOrigin.startsWith('https://'))
+  );
+  return response;
 }
