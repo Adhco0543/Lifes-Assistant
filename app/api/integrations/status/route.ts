@@ -5,12 +5,24 @@ export async function GET() {
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     'https://lifes-assistant.vercel.app';
 
+  const googleServerOAuthConfigured = Boolean(
+    process.env.GOOGLE_CLIENT_ID?.trim() &&
+    process.env.GOOGLE_CLIENT_SECRET?.trim()
+  );
+  const googleFirebaseConfigured = Boolean(
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY?.trim() &&
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim() &&
+    process.env.NEXT_PUBLIC_FIREBASE_APP_ID?.trim()
+  );
+
   return NextResponse.json({
     google: {
-      configured: Boolean(
-        process.env.GOOGLE_CLIENT_ID?.trim() &&
-        process.env.GOOGLE_CLIENT_SECRET?.trim()
-      ),
+      configured: googleServerOAuthConfigured || googleFirebaseConfigured,
+      mode: googleServerOAuthConfigured
+        ? 'server-oauth'
+        : googleFirebaseConfigured
+          ? 'firebase'
+          : 'none',
       callbackUrl: appUrl + '/api/integrations/google/callback',
       services: ['drive', 'gmail', 'calendar', 'photos'],
     },
