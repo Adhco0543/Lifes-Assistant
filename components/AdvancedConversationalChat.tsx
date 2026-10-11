@@ -742,45 +742,72 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       const token = await firebaseBackend.getIdToken();
       if (!token) throw new Error('Authentication required');
 
-      // Retrieve saved conversations when memory is on. For explicit recall questions,
-      // search more conversations and rank them by matching the user's topic.
-      // Send complete transcripts when they fit; report any omissions honestly.
+      // Retrieve relevant account-scoped history. Date questions use message timestamps,
+      // not only the conversation's last-updated date or keyword similarity.
       let recentConversationContext = '';
       if (memoryEnabled && firebaseBackend.isAvailable()) {
         try {
           const isRecallRequest = /remember|recollect|recall|yesterday|last (?:chat|time|week)|previous (?:chat|conversation)|we (?:talked|discussed)|what did we/i.test(userMessage);
-          const previous = (await firebaseBackend.getConversations(isRecallRequest ? 20 : 4))
+          const asksYesterday = /yesterday/i.test(userMessage);
+          const now = new Date();
+          const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+          const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+          const previous = (await firebaseBackend.getConversations(isRecallRequest ? 100 : 4))
             .filter((conversation) => conversation.id !== currentConversationId)
-            .slice(0, isRecallRequest ? 15 : 3);
+            .filter((conversation) => !asksYesterday ||
+              (conversation.createdAt < todayStart && conversation.updatedAt >= yesterdayStart))
+            .slice(0, isRecallRequest ? 25 : 3);
           const keywords = recallKeywords(userMessage);
           const candidates = await Promise.all(previous.map(async (conversation, index) => {
-            const saved = (await firebaseBackend.getMessages(conversation.id, MAX_VISIBLE_CHAT_MESSAGES))
+            const allSaved = (await firebaseBackend.getMessages(conversation.id, MAX_VISIBLE_CHAT_MESSAGES))
               .filter((item) => item.role === 'user' || item.role === 'assistant');
+            const saved = asksYesterday
+              ? allSaved.filter((item) => item.timestamp >= yesterdayStart && item.timestamp < todayStart)
+              : allSaved;
             const content = saved.map((item) => item.role + ': ' + item.content).join('\n');
             const haystack = (conversation.title + '\n' + content).toLowerCase();
             const relevance = keywords.reduce((sum, word) => sum + (haystack.includes(word) ? 10 : 0), 0);
-            return { conversation, content, relevance, index, savedCount: saved.length };
+            return { conversation, content, relevance, index, savedCount: saved.length,
+              totalCount: allSaved.length };
           }));
-          candidates.sort((a, b) => b.relevance - a.relevance || a.index - b.index);
+          const matching = candidates.filter((item) => item.savedCount > 0);
+          if (!asksYesterday) {
+            matching.sort((a, b) => b.relevance - a.relevance || a.index - b.index);
+          } else {
+            matching.sort((a, b) => a.conversation.createdAt - b.conversation.createdAt);
+          }
           let remaining = MAX_PRIOR_CONTEXT_CHARS;
           const selected: string[] = [];
-          for (const candidate of candidates.slice(0, isRecallRequest ? 3 : 2)) {
-            if (!candidate.content || remaining < 500) continue;
+          let included = 0;
+          for (const candidate of matching.slice(0, isRecallRequest ? 20 : 2)) {
+            if (!candidate.content || remaining < 500) break;
             const heading = 'Saved conversation: ' + candidate.conversation.title + ' (' +
               new Date(candidate.conversation.updatedAt).toLocaleDateString() +
-              ', ' + candidate.savedCount + ' retrieved messages):\n';
+              ', ' + candidate.savedCount + ' retrieved messages' +
+              (asksYesterday ? ' from yesterday' : '') + '):\n';
             const available = Math.max(0, remaining - heading.length - 150);
             if (available < 300) break;
-            const omitted = candidate.content.length > available;
-            const excerpt = omitted
+            const omitted = candidate.content.length > available ||
+              (!asksYesterday && candidate.totalCount >= MAX_VISIBLE_CHAT_MESSAGES);
+            const excerpt = candidate.content.length > available
               ? candidate.content.slice(-available)
               : candidate.content;
             selected.push(heading + (omitted
-              ? '[Earlier content omitted due to model context limit; this is not the full transcript.]\n'
-              : '[Complete retrieved transcript follows.]\n') + excerpt);
+              ? '[Some earlier messages may be omitted; this is not necessarily the full transcript.]\n'
+              : '[All retrieved messages for this conversation and requested date follow.]\n') + excerpt);
+            included++;
             remaining -= selected[selected.length - 1].length;
           }
-          recentConversationContext = selected.join('\n\n');
+          const dateLabel = asksYesterday
+            ? 'Yesterday is ' + localDateKey(new Date(yesterdayStart)) + ' in the user local time zone. '
+            : '';
+          const coverage = 'Retrieved ' + included + ' of ' + matching.length +
+            ' matching saved conversations' +
+            (asksYesterday ? ' containing messages dated yesterday' : '') +
+            '. This search covers at most the 100 most recently updated conversations. ' +
+            (included < matching.length ? 'Some conversations were omitted due to context limits. ' : '') +
+            'Do not claim that this is every conversation the user ever had.\n';
+          recentConversationContext = dateLabel + coverage + selected.join('\n\n');
         } catch (error) {
           console.warn('Could not retrieve older conversation context:', error);
           setHistoryStatus('Previous conversations could not be retrieved. Your current chat still works.');
@@ -808,6 +835,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           })),
           history: chatContext.selected,
           omittedCurrentMessages: chatContext.omitted,
+          localDate: localDateKey(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
         }),
       });
 
