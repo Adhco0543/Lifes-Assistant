@@ -23,7 +23,7 @@ async function getGithubJson<T>(path: string): Promise<T> {
       const response = await fetch(API + path, {
         headers: HEADERS,
         signal: AbortSignal.timeout(8000),
-        cache: "no-store",
+        next: { revalidate: 300 },
       });
       if (response.ok) return response.json() as Promise<T>;
       const rateLimited = response.status === 429 ||
@@ -88,7 +88,7 @@ async function getRawGithubFallback(
         "/" + branch + "/" + path.split("/").map(encodeURIComponent).join("/");
       const response = await fetch(url, {
         signal: AbortSignal.timeout(6000),
-        cache: "no-store",
+        next: { revalidate: 300 },
       });
       if (!response.ok) return null;
       const size = Number(response.headers.get("content-length") || 0);
@@ -106,9 +106,11 @@ async function getRawGithubFallback(
   if (!found.length) {
     return {
       context: "",
-      status: "GitHub REST API failed (" + originalError +
-        "), and the public raw-file fallback could not retrieve source files. " +
-        "The repository's visibility has not been established by this failure.",
+      status: "Could not retrieve source for " + owner + "/" + repoName +
+        " (GitHub REST: " + originalError +
+        "; public raw-file fallback: no files). This failure does not establish " +
+        "that the repository is missing or private. The exact repository slug " +
+        "is shown here to help diagnose follow-up context selection.",
     };
   }
   let remaining = 45000;
@@ -138,7 +140,12 @@ export async function getPublicGithubContext(
   previousText: string
 ): Promise<RepoContext | null> {
   if (!REVIEW_INTENT.test(message)) return null;
-  const match = message.match(REPO_URL) || previousText.match(REPO_URL);
+  // Current request wins. Otherwise use the most recently mentioned repository.
+  // Prior context can include multiple projects; taking its FIRST URL silently
+  // selects an unrelated repo and causes misleading 404s in follow-up turns.
+  const currentMatch = message.match(REPO_URL);
+  const previousMatches = Array.from(previousText.matchAll(new RegExp(REPO_URL.source, "gi")));
+  const match = currentMatch || previousMatches[previousMatches.length - 1];
   if (!match) return null;
   const owner = match[1];
   // URLs pasted into prose often end in a sentence period, comma, or colon.
