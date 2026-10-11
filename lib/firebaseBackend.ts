@@ -4,7 +4,11 @@ import type { Auth, User } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
   getAuth,
+  GoogleAuthProvider,
+  inMemoryPersistence,
+  setPersistence,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   sendPasswordResetEmail,
   updateProfile,
@@ -220,6 +224,69 @@ class FirebaseBackend {
   async sendPasswordReset(email: string): Promise<void> {
     const { auth } = await this.getServices();
     await sendPasswordResetEmail(auth, email);
+  }
+
+  async authorizeGoogleServices(
+    services: Array<"drive" | "gmail" | "calendar" | "photos">
+  ): Promise<{
+    accessToken: string;
+    email: string;
+    name: string;
+    photoURL: string;
+    services: Array<"drive" | "gmail" | "calendar" | "photos">;
+  }> {
+    await this.initialize();
+
+    if (!this.app) {
+      throw new Error("Firebase is not initialized.");
+    }
+
+    const connectionApp =
+      getApps().find((app) => app.name === "google-connection") ??
+      initializeApp(firebaseConfig, "google-connection");
+    const connectionAuth = getAuth(connectionApp);
+
+    await setPersistence(connectionAuth, inMemoryPersistence);
+
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+
+    if (services.includes("drive")) {
+      provider.addScope("https://www.googleapis.com/auth/drive.readonly");
+    }
+    if (services.includes("gmail")) {
+      provider.addScope("https://www.googleapis.com/auth/gmail.readonly");
+    }
+    if (services.includes("calendar")) {
+      provider.addScope("https://www.googleapis.com/auth/calendar.readonly");
+    }
+    if (services.includes("photos")) {
+      provider.addScope(
+        "https://www.googleapis.com/auth/photospicker.mediaitems.readonly"
+      );
+    }
+
+    try {
+      const result = await signInWithPopup(connectionAuth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const accessToken = credential?.accessToken || "";
+
+      if (!accessToken) {
+        throw new Error("Google did not return an access token.");
+      }
+
+      return {
+        accessToken,
+        email: result.user.email || "",
+        name: result.user.displayName || "",
+        photoURL: result.user.photoURL || "",
+        services,
+      };
+    } finally {
+      if (connectionAuth.currentUser) {
+        await signOut(connectionAuth).catch(() => undefined);
+      }
+    }
   }
 
   async logout(): Promise<void> {
