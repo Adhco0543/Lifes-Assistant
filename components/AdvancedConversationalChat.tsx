@@ -851,7 +851,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       });
 
       if (!apiResponse.ok) {
-        throw new Error(`Chat API error: ${apiResponse.status}`);
+        const failure = await apiResponse.json().catch(() => null) as { message?: string; error?: string } | null;
+        throw new Error(failure?.message || failure?.error || `Chat API error: ${apiResponse.status}`);
       }
 
       const data = (await apiResponse.json()) as ChatApiResponse;
