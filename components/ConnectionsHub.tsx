@@ -72,6 +72,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
   });
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('Loading connection status…');
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
   const googleBusy = busy.startsWith('google-');
   const githubBusy = busy.startsWith('github-');
@@ -550,10 +551,33 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     }
   };
 
+  const googleReconnectNeeded = Boolean(
+    google.connected && google.mode === 'firebase' &&
+    google.reconnectRequiredAfter && Date.now() >= google.reconnectRequiredAfter
+  );
+
   const providerCards = [
-    { name: 'Microsoft 365', note: 'Outlook, Calendar, OneDrive', state: 'Next' },
-    { name: 'Dropbox', note: 'Files and shared folders', state: 'Next' },
-    { name: 'Apple / iCloud', note: 'Native Apple access requires the iPhone/Mac app path.', state: 'Native' },
+    {
+      id: 'microsoft',
+      name: 'Microsoft 365',
+      note: 'Outlook, Calendar, OneDrive',
+      state: 'Planned',
+      details: 'Microsoft sign-in and Microsoft Graph permissions are not implemented yet. A Microsoft Entra app registration and a secure OAuth callback are needed before Bella can access Outlook, Calendar, or OneDrive.',
+    },
+    {
+      id: 'dropbox',
+      name: 'Dropbox',
+      note: 'Files and shared folders',
+      state: 'Planned',
+      details: 'Dropbox sign-in and file APIs are not connected yet. A Dropbox app, user consent, and scoped file-reading endpoints must be added before Bella can search your files.',
+    },
+    {
+      id: 'apple',
+      name: 'Apple / iCloud',
+      note: 'Photos and iCloud content',
+      state: 'Native',
+      details: 'Full iCloud Photos access is not available through a general website connection. A companion iPhone or Mac app, with your explicit Photos permissions, is the planned route. This tile does not connect to iCloud today.',
+    },
   ];
 
   return (
@@ -576,11 +600,13 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
               <p>One connection foundation for Drive, Gmail, Calendar, and Photos.</p>
             </div>
             <span className={google.connected ? 'state connected' : 'state'}>
-              {google.connected
-                ? 'Connected'
-                : status.google?.configured
-                  ? 'Ready'
-                  : 'Setup required'}
+              {googleReconnectNeeded
+                ? 'Reconnect needed'
+                : google.connected
+                  ? 'Connected'
+                  : status.google?.configured
+                    ? 'Ready to connect'
+                    : 'Setup required'}
             </span>
           </div>
 
@@ -631,27 +657,39 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
             </div>
           )}
 
-          {status.google?.mode === 'firebase' && (
+          {status.google?.mode === 'firebase' && !google.connected && (
             <div className="setup-box firebase-mode">
-              <strong>Firebase Google connection</strong>
+              <strong>Google is ready to connect</strong>
               <p>
-                No separate Google client secret is required for this beta path. Google access is short-lived, so the app may occasionally ask you to reconnect.
+                Select the Google services above and choose Connect Google. This beta connection uses Firebase sign-in and may need renewal after about 50 minutes.
               </p>
+            </div>
+          )}
+          {googleReconnectNeeded && (
+            <div className="setup-box">
+              <strong>Google access has expired</strong>
+              <p>Your account is still listed, but Bella needs fresh permission to access Google services. Select Reconnect Google below.</p>
             </div>
           )}
 
           <div className="provider-actions">
             {google.connected ? (
               <>
+                {!googleReconnectNeeded && (
+                  <button
+                    className="primary"
+                    disabled={googleBusy}
+                    onClick={() => verify(google)}
+                  >
+                    {busy === 'google-test' ? 'Checking…' : 'Test connection'}
+                  </button>
+                )}
                 <button
-                  className="primary"
+                  className={googleReconnectNeeded ? 'primary' : ''}
                   disabled={googleBusy}
-                  onClick={() => verify(google)}
+                  onClick={connect}
                 >
-                  {busy === 'google-test' ? 'Checking…' : 'Test connection'}
-                </button>
-                <button disabled={googleBusy} onClick={connect}>
-                  Change permissions
+                  {googleReconnectNeeded ? 'Reconnect Google' : 'Change permissions'}
                 </button>
                 <button
                   className="danger"
@@ -790,12 +828,26 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
 
         <div className="coming-grid">
           {providerCards.map((provider) => (
-            <article key={provider.name}>
-              <div>
-                <strong>{provider.name}</strong>
-                <p>{provider.note}</p>
-              </div>
-              <span>{provider.state}</span>
+            <article key={provider.id} className="planned-provider">
+              <button
+                type="button"
+                className="planned-trigger"
+                aria-expanded={expandedProvider === provider.id}
+                aria-controls={'provider-details-' + provider.id}
+                onClick={() => setExpandedProvider((current) => current === provider.id ? null : provider.id)}
+              >
+                <span className="planned-label">
+                  <strong>{provider.name}</strong>
+                  <small>{provider.note}</small>
+                </span>
+                <span className="planned-state">{provider.state} {expandedProvider === provider.id ? '−' : '+'}</span>
+              </button>
+              {expandedProvider === provider.id && (
+                <div className="planned-details" id={'provider-details-' + provider.id}>
+                  <p>{provider.details}</p>
+                  <strong>Connection not yet available</strong>
+                </div>
+              )}
             </article>
           ))}
         </div>
@@ -849,10 +901,16 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
         button:disabled { opacity: .55; cursor: default; }
         .message { margin-top: 9px; padding: 10px 12px; border: 1px solid #343434; background: #1d1d1d; border-radius: 10px; color: #868686; font-size: .64rem; }
         .coming-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
-        .coming-grid article { min-height: 78px; padding: 13px; border: 1px solid #343434; border-radius: 13px; background: #252525; display: flex; justify-content: space-between; gap: 12px; }
-        .coming-grid strong { font-size: .73rem; }
-        .coming-grid p { margin: 4px 0 0; color: #707070; font-size: .62rem; line-height: 1.4; }
-        .coming-grid span { align-self: flex-start; padding: 4px 7px; border-radius: 999px; background: #333; color: #888; font-size: .56rem; }
+        .coming-grid article { min-height: 78px; border: 1px solid #343434; border-radius: 13px; background: #252525; overflow: hidden; }
+        .planned-trigger { width: 100%; min-height: 78px; padding: 13px; display: flex; justify-content: space-between; align-items: flex-start; text-align: left; border: 0; border-radius: 0; background: transparent; gap: 12px; }
+        .planned-trigger:hover, .planned-trigger:focus-visible { background: #303030; }
+        .planned-label strong, .planned-label small { display: block; }
+        .planned-label strong { font-size: .73rem; }
+        .planned-label small { margin-top: 4px; color: #888; font-size: .62rem; line-height: 1.4; }
+        .planned-state { white-space: nowrap; padding: 4px 7px; border-radius: 999px; background: #333; color: #aaa; font-size: .56rem; }
+        .planned-details { border-top: 1px solid #393939; padding: 12px 13px; }
+        .planned-details p { margin: 0 0 10px; color: #aaa; font-size: .68rem; line-height: 1.6; }
+        .planned-details strong { color: #d4b989; font-size: .65rem; }
         .security-note { margin-top: 14px; padding: 14px; border: 1px solid #343434; border-radius: 13px; background: #252525; }
         .security-note strong { font-size: .72rem; }
         .security-note p { margin: 5px 0 0; color: #737373; font-size: .64rem; line-height: 1.5; }
