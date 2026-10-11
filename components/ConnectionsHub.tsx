@@ -73,6 +73,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('Loading connection status…');
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [googleNotice, setGoogleNotice] = useState('');
 
   const googleBusy = busy.startsWith('google-');
   const githubBusy = busy.startsWith('github-');
@@ -94,7 +95,9 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        setMessage(data.error || 'Google connection needs attention.');
+        const detail = data.error || 'Google connection needs attention.';
+        setGoogleNotice(detail);
+        setMessage(detail);
         return;
       }
 
@@ -106,9 +109,12 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
       };
       await firebaseBackend.saveDraft('integration-google', next);
       setGoogle(next);
+      setGoogleNotice('Google connection verified. Bella can use the services authorized above.');
       setMessage('Google connection verified.');
-    } catch {
-      setMessage('Google connection test failed.');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Google connection test failed.';
+      setGoogleNotice(detail);
+      setMessage(detail);
     } finally {
       setBusy('');
     }
@@ -387,17 +393,21 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
   };
 
   const connect = async () => {
+    setGoogleNotice('');
     if (!status.google?.configured) {
+      setGoogleNotice('Google connection is not available in this build.');
       setMessage('Google connection is not available in this build.');
       return;
     }
 
     if (!chosenServices.length) {
+      setGoogleNotice('Select at least one Google service.');
       setMessage('Select at least one Google service.');
       return;
     }
 
     setBusy('google-connect');
+    setGoogleNotice('Opening Google sign-in… If no window appears, check whether your browser blocked popups.');
     setMessage('Opening Google permission screen…');
 
     if (status.google.mode === 'firebase') {
@@ -451,25 +461,23 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
         await verify(next);
       } catch (error: any) {
         const code = String(error?.code || '');
+        let detail = '';
         if (code === 'auth/operation-not-allowed') {
-          setMessage(
-            'Google sign-in is not enabled in Firebase yet. Enable Google under Firebase Authentication > Sign-in method, then try again.'
-          );
+          detail = 'Google sign-in is disabled in Firebase Authentication. Enable the Google sign-in provider, then retry.';
         } else if (code === 'auth/unauthorized-domain') {
-          setMessage(
-            'This site is not yet an authorized Firebase sign-in domain. Add lifes-assistant.vercel.app under Firebase Authentication > Settings > Authorized domains.'
-          );
+          detail = 'This site is not an authorized Firebase sign-in domain. Add lifes-assistant.vercel.app to Firebase Authentication > Settings > Authorized domains.';
         } else if (code === 'auth/popup-blocked') {
-          setMessage('Your browser blocked the Google sign-in popup. Allow popups for Life’s Assistant and try again.');
+          detail = 'Your browser blocked the Google popup. Allow popups for lifes-assistant.vercel.app, then retry.';
         } else if (code === 'auth/popup-closed-by-user') {
-          setMessage('Google connection was canceled.');
+          detail = 'The Google sign-in window was closed before connecting.';
+        } else if (code === 'auth/cancelled-popup-request') {
+          detail = 'Another Google sign-in was already open. Close other sign-in windows and retry.';
         } else {
-          setMessage(
-            error instanceof Error
-              ? error.message
-              : 'Could not connect Google through Firebase.'
-          );
+          detail = error instanceof Error ? error.message : 'Could not connect Google through Firebase.';
+          if (code && !detail.includes(code)) detail += ' (' + code + ')';
         }
+        setGoogleNotice(detail);
+        setMessage(detail);
       } finally {
         setBusy('');
       }
@@ -709,6 +717,11 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
               </button>
             )}
           </div>
+          {googleNotice && (
+            <div className="google-feedback" role="status" aria-live="polite">
+              {googleNotice}
+            </div>
+          )}
         </section>
 
         <section className="provider github-provider">
@@ -895,6 +908,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
         .setup-box p { margin: 4px 0 7px; color: #887d67; font-size: .63rem; }
         code { display: block; overflow-x: auto; padding: 8px; background: #1c1c1c; border-radius: 8px; color: #c7b78c; font-size: .61rem; }
         .provider-actions { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 7px; }
+        .google-feedback { margin-top: 12px; padding: 12px; border: 1px solid #66583d; background: #302b22; color: #f0dfba; border-radius: 10px; font-size: .72rem; line-height: 1.55; overflow-wrap: anywhere; }
         button { border: 1px solid #3b3b3b; background: #2d2d2d; color: #ccc; border-radius: 9px; min-height: 37px; padding: 0 11px; cursor: pointer; font-size: .66rem; }
         button.primary { background: #ededed; color: #111; border-color: #ededed; font-weight: 750; }
         button.danger { border-color: #4b3434; color: #c88989; background: #302626; }
