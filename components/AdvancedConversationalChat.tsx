@@ -804,6 +804,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             <h2>Life&apos;s Assistant</h2>
             <p>Loading...</p>
           </div>
+          {fullScreen && onClose && (
+            <button className="dashboard-back-btn" onClick={onClose}>
+              <span aria-hidden="true">←</span>
+              <span>Dashboard</span>
+            </button>
+          )}
         </div>
 
         <div className="chat-main loading-center">
@@ -848,10 +854,17 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           <p>Ask anything. Draft, plan, organize, and get work moving.</p>
         </div>
 
-        {!fullScreen && onClose && (
-          <button className="close-btn" onClick={onClose}>
-            ✕
+        {fullScreen && onClose ? (
+          <button className="dashboard-back-btn" onClick={onClose}>
+            <span aria-hidden="true">←</span>
+            <span>Dashboard</span>
           </button>
+        ) : (
+          onClose && (
+            <button className="close-btn" onClick={onClose}>
+              ✕
+            </button>
+          )
         )}
       </div>
 
@@ -1145,6 +1158,27 @@ const styles = `
     border-radius: 0.4rem;
     padding: 0.3rem 0.5rem;
     cursor: pointer;
+  }
+
+  .dashboard-back-btn {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid #3a3a3a;
+    border-radius: 10px;
+    padding: 0 11px;
+    background: #2b2b2b;
+    color: #e7e7e7;
+    font-size: .72rem;
+    font-weight: 650;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .dashboard-back-btn:hover {
+    background: #343434;
+    border-color: #474747;
   }
 
   .name-editor {
@@ -1545,6 +1579,25 @@ const styles = `
 
     .message-bubble {
       max-width: 90%;
+    }
+
+    .chat-header {
+      gap: 10px;
+      padding: .72rem .8rem;
+    }
+
+    .header-left {
+      min-width: 0;
+    }
+
+    .header-left p {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dashboard-back-btn {
+      padding: 0 9px;
     }
   }
 `;
