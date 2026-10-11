@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getFirebaseRequestUser } from '../../../../../../lib/serverAuth';
-import { sealGoogleTokenBundle } from '../../../../../../lib/googleTokenVault';
+import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
+import { sealGoogleTokenBundle } from '../../../../../lib/googleTokenVault';
 
 type GoogleService = 'drive' | 'gmail' | 'calendar' | 'photos';
 
