@@ -5,8 +5,9 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   GoogleAuthProvider,
+  browserPopupRedirectResolver,
+  initializeAuth,
   inMemoryPersistence,
-  setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
@@ -235,18 +236,24 @@ class FirebaseBackend {
     photoURL: string;
     services: Array<"drive" | "gmail" | "calendar" | "photos">;
   }> {
-    await this.initialize();
-
+    // IMPORTANT: No await before signInWithPopup. Browsers require the popup
+    // to open while the original button click still has user activation.
+    // Firebase is already initialized by the signed-in workspace.
     if (!this.app) {
-      throw new Error("Firebase is not initialized.");
+      throw new Error("Firebase is not initialized. Sign in and reload the page.");
     }
 
-    const connectionApp =
-      getApps().find((app) => app.name === "google-connection") ??
+    const existingConnectionApp = getApps().find((app) => app.name === "google-connection");
+    const connectionApp = existingConnectionApp ??
       initializeApp(firebaseConfig, "google-connection");
-    const connectionAuth = getAuth(connectionApp);
-
-    await setPersistence(connectionAuth, inMemoryPersistence);
+    // Use ephemeral auth from the outset, rather than asynchronously changing
+    // persistence immediately before the popup (which loses user activation).
+    const connectionAuth = existingConnectionApp
+      ? getAuth(connectionApp)
+      : initializeAuth(connectionApp, {
+          persistence: inMemoryPersistence,
+          popupRedirectResolver: browserPopupRedirectResolver,
+        });
 
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
@@ -266,8 +273,10 @@ class FirebaseBackend {
       );
     }
 
+    // Invoke immediately, synchronously from the click handler's call stack.
+    const popupResult = signInWithPopup(connectionAuth, provider);
     try {
-      const result = await signInWithPopup(connectionAuth, provider);
+      const result = await popupResult;
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const accessToken = credential?.accessToken || "";
 
