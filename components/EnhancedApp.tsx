@@ -3,7 +3,7 @@
 import React, { useEffect } from "react";
 import App from "./App";
 
-export function EnhancedApp() {
+export function EnhancedApp(_props: { userId?: string }) {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
     document.documentElement.style.colorScheme = "dark";
