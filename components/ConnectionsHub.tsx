@@ -15,6 +15,8 @@ type GoogleConnection = {
   sealedBundle?: string;
   connectedAt?: number;
   lastVerifiedAt?: number;
+  reconnectRequiredAfter?: number;
+  mode?: 'server-oauth' | 'firebase';
   checks?: Record<string, boolean>;
 };
 
@@ -36,6 +38,7 @@ type GitHubConnection = {
 type IntegrationStatus = {
   google?: {
     configured?: boolean;
+    mode?: 'server-oauth' | 'firebase' | 'none';
     callbackUrl?: string;
   };
   github?: {
@@ -384,14 +387,91 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
 
   const connect = async () => {
     if (!status.google?.configured) {
-      setMessage(
-        'The Connections screen is installed, but Google OAuth still needs its client ID and secret.'
-      );
+      setMessage('Google connection is not available in this build.');
       return;
     }
 
     if (!chosenServices.length) {
       setMessage('Select at least one Google service.');
+      return;
+    }
+
+    setBusy('google-connect');
+    setMessage('Opening Google permission screen…');
+
+    if (status.google.mode === 'firebase') {
+      try {
+        const googleAuth = await firebaseBackend.authorizeGoogleServices(chosenServices);
+        const token = await firebaseBackend.getIdToken();
+
+        if (!token) {
+          throw new Error('Authentication required.');
+        }
+
+        const response = await fetch('/api/integrations/google/firebase', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + token,
+          },
+          body: JSON.stringify({
+            accessToken: googleAuth.accessToken,
+            services: googleAuth.services,
+          }),
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.ok || !data.sealedBundle) {
+          throw new Error(data.error || 'Could not finish Google connection.');
+        }
+
+        const next: GoogleConnection = {
+          connected: true,
+          provider: 'google',
+          email: String(data.email || googleAuth.email || ''),
+          name: String(data.name || googleAuth.name || ''),
+          services: Array.isArray(data.services) ? data.services : chosenServices,
+          scope: String(data.scope || ''),
+          sealedBundle: String(data.sealedBundle),
+          connectedAt: Number(data.connectedAt || Date.now()),
+          reconnectRequiredAfter: Number(data.reconnectRequiredAfter || 0) || undefined,
+          mode: 'firebase',
+        };
+
+        await firebaseBackend.saveDraft('integration-google', next);
+        setGoogle(next);
+        setSelected({
+          drive: next.services?.includes('drive') ?? false,
+          gmail: next.services?.includes('gmail') ?? false,
+          calendar: next.services?.includes('calendar') ?? false,
+          photos: next.services?.includes('photos') ?? false,
+        });
+        setMessage('Google connected through Firebase. Checking the permissions now…');
+        await verify(next);
+      } catch (error: any) {
+        const code = String(error?.code || '');
+        if (code === 'auth/operation-not-allowed') {
+          setMessage(
+            'Google sign-in is not enabled in Firebase yet. Enable Google under Firebase Authentication > Sign-in method, then try again.'
+          );
+        } else if (code === 'auth/unauthorized-domain') {
+          setMessage(
+            'This site is not yet an authorized Firebase sign-in domain. Add lifes-assistant.vercel.app under Firebase Authentication > Settings > Authorized domains.'
+          );
+        } else if (code === 'auth/popup-blocked') {
+          setMessage('Your browser blocked the Google sign-in popup. Allow popups for Life’s Assistant and try again.');
+        } else if (code === 'auth/popup-closed-by-user') {
+          setMessage('Google connection was canceled.');
+        } else {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : 'Could not connect Google through Firebase.'
+          );
+        }
+      } finally {
+        setBusy('');
+      }
       return;
     }
 
@@ -402,12 +482,10 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     );
 
     if (!popup) {
+      setBusy('');
       setMessage('Your browser blocked the Google sign-in popup.');
       return;
     }
-
-    setBusy('google-connect');
-    setMessage('Opening Google permission screen…');
 
     try {
       const token = await firebaseBackend.getIdToken();
@@ -528,20 +606,17 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
                     <strong>{service.name}</strong>
                     <small>{service.note}</small>
                   </div>
-                  {google.connected ? (
-                    <span>{connected ? 'ON' : 'OFF'}</span>
-                  ) : (
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(event) =>
-                        setSelected((current) => ({
-                          ...current,
-                          [service.id]: event.target.checked,
-                        }))
-                      }
-                    />
-                  )}
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={googleBusy}
+                    onChange={(event) =>
+                      setSelected((current) => ({
+                        ...current,
+                        [service.id]: event.target.checked,
+                      }))
+                    }
+                  />
                 </label>
               );
             })}
@@ -551,9 +626,17 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
             <div className="setup-box">
               <strong>Google connection is not configured yet</strong>
               <p>
-                The button is disabled until GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are added in Vercel. Then register this callback:
+                Firebase or server OAuth configuration is missing from this deployment.
               </p>
-              <code>{status.google?.callbackUrl || 'https://lifes-assistant.vercel.app/api/integrations/google/callback'}</code>
+            </div>
+          )}
+
+          {status.google?.mode === 'firebase' && (
+            <div className="setup-box firebase-mode">
+              <strong>Firebase Google connection</strong>
+              <p>
+                No separate Google client secret is required for this beta path. Google access is short-lived, so the app may occasionally ask you to reconnect.
+              </p>
             </div>
           )}
 
@@ -720,8 +803,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
         <section className="security-note">
           <strong>Connection security</strong>
           <p>
-            OAuth access and refresh tokens are sealed on the server before the encrypted bundle is
-            saved with your Firebase workspace. Plain Google tokens are not written to localStorage.
+            Google tokens are sealed on the server before the encrypted bundle is saved with your Firebase workspace. Plain Google tokens are not written to localStorage. Full server OAuth can still be enabled later for long-lived refresh tokens.
           </p>
         </section>
       </div>
