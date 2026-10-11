@@ -438,6 +438,16 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
 
       <main className="main">
         <header className="topbar">
+          {currentView === 'chat' && (
+            <button
+              type="button"
+              className="chat-exit-topbar"
+              onClick={() => navigate('home')}
+              aria-label="Exit chat and return to dashboard"
+            >
+              <span aria-hidden="true">←</span> Dashboard
+            </button>
+          )}
           <button className="menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
           <div className="topbar-copy">
             <div className="topbar-title">{activeLabel}</div>
@@ -661,6 +671,22 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
           backdrop-filter: blur(14px);
           gap: 10px;
         }
+        .chat-exit-topbar {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 38px;
+          padding: 0 12px;
+          border: 1px solid #505050;
+          border-radius: 9px;
+          background: #343434;
+          color: #fff;
+          font-weight: 700;
+          font-size: .78rem;
+          cursor: pointer;
+        }
+        .chat-exit-topbar:hover { background: #414141; }
         .menu-btn {
           display: none;
           border: 0;
