@@ -24,6 +24,32 @@ type PendingAttachment = ChatAttachmentMeta & {
 
 const MAX_ATTACHMENT_BYTES = 2_400_000;
 const MAX_ATTACHMENTS = 3;
+const MAX_VISIBLE_CHAT_MESSAGES = 2000;
+const MAX_CURRENT_CONTEXT_CHARS = 90000;
+const MAX_PRIOR_CONTEXT_CHARS = 85000;
+
+function currentChatContext(messages: ChatMessage[]) {
+  const eligible = messages.filter((message) => message.role === 'user' || message.role === 'assistant');
+  let chars = 0;
+  const selected: ChatMessage[] = [];
+  for (let index = eligible.length - 1; index >= 0; index--) {
+    const message = eligible[index];
+    const length = message.content.length;
+    if (chars + length > MAX_CURRENT_CONTEXT_CHARS && selected.length) break;
+    selected.unshift(message);
+    chars += length;
+  }
+  return { selected: selected.map(({ role, content }) => ({ role, content })),
+    omitted: eligible.length - selected.length };
+}
+
+function recallKeywords(value: string): string[] {
+  const stopWords = new Set(['about', 'what', 'when', 'where', 'which', 'that', 'this', 'with',
+    'have', 'from', 'there', 'their', 'were', 'talk', 'talked', 'discuss', 'discussed',
+    'remember', 'recall', 'yesterday', 'before', 'previous', 'last', 'chat', 'conversation']);
+  return [...new Set((value.toLowerCase().match(/[a-z0-9]{4,}/g) || [])
+    .filter((word) => !stopWords.has(word)))].slice(0, 12);
+}
 const SUPPORTED_ATTACHMENT_EXTENSIONS =
   /\.(pdf|txt|md|json|html?|xml|rtf|odt|docx?|pptx?|xlsx?|csv|tsv|iif|png|jpe?g|webp|gif|js|jsx|ts|tsx|py|java|c|cc|cpp|h|hpp|cs|go|rs|rb|php|swift|kt|kts|sh|sql|yaml|yml)$/i;
 
@@ -280,7 +306,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         throw new Error('Sign in to access saved conversations.');
       }
 
-      const msgs = await firebaseBackend.getMessages(conversationId, 100);
+      const msgs = await firebaseBackend.getMessages(conversationId, MAX_VISIBLE_CHAT_MESSAGES);
       if (requestNumber !== conversationLoadSequence.current) return;
       setMessages(msgs);
       setCurrentConversationId(conversationId);
@@ -716,29 +742,52 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       const token = await firebaseBackend.getIdToken();
       if (!token) throw new Error('Authentication required');
 
-      // Include recent prior chats so a new conversation can continue yesterday's discussion.
-      // These are account-scoped Firestore messages, not invented AI memories.
+      // Retrieve saved conversations when memory is on. For explicit recall questions,
+      // search more conversations and rank them by matching the user's topic.
+      // Send complete transcripts when they fit; report any omissions honestly.
       let recentConversationContext = '';
       if (memoryEnabled && firebaseBackend.isAvailable()) {
         try {
-          const previous = (await firebaseBackend.getConversations(6))
+          const isRecallRequest = /remember|recollect|recall|yesterday|last (?:chat|time|week)|previous (?:chat|conversation)|we (?:talked|discussed)|what did we/i.test(userMessage);
+          const previous = (await firebaseBackend.getConversations(isRecallRequest ? 20 : 4))
             .filter((conversation) => conversation.id !== currentConversationId)
-            .slice(0, 3);
-          const snippets = await Promise.all(previous.map(async (conversation) => {
-            const recent = (await firebaseBackend.getMessages(conversation.id, 16))
-              .filter((item) => item.role === 'user' || item.role === 'assistant')
-              .slice(-8);
-            if (!recent.length) return '';
-            return 'Conversation ' + conversation.title + ' (' +
-              new Date(conversation.updatedAt).toLocaleDateString() + '):\n' +
-              recent.map((item) => item.role + ': ' + item.content.slice(0, 400)).join('\n');
+            .slice(0, isRecallRequest ? 15 : 3);
+          const keywords = recallKeywords(userMessage);
+          const candidates = await Promise.all(previous.map(async (conversation, index) => {
+            const saved = (await firebaseBackend.getMessages(conversation.id, MAX_VISIBLE_CHAT_MESSAGES))
+              .filter((item) => item.role === 'user' || item.role === 'assistant');
+            const content = saved.map((item) => item.role + ': ' + item.content).join('\n');
+            const haystack = (conversation.title + '\n' + content).toLowerCase();
+            const relevance = keywords.reduce((sum, word) => sum + (haystack.includes(word) ? 10 : 0), 0);
+            return { conversation, content, relevance, index, savedCount: saved.length };
           }));
-          recentConversationContext = snippets.filter(Boolean).join('\n\n').slice(0, 7000);
+          candidates.sort((a, b) => b.relevance - a.relevance || a.index - b.index);
+          let remaining = MAX_PRIOR_CONTEXT_CHARS;
+          const selected: string[] = [];
+          for (const candidate of candidates.slice(0, isRecallRequest ? 3 : 2)) {
+            if (!candidate.content || remaining < 500) continue;
+            const heading = 'Saved conversation: ' + candidate.conversation.title + ' (' +
+              new Date(candidate.conversation.updatedAt).toLocaleDateString() +
+              ', ' + candidate.savedCount + ' retrieved messages):\n';
+            const available = Math.max(0, remaining - heading.length - 150);
+            if (available < 300) break;
+            const omitted = candidate.content.length > available;
+            const excerpt = omitted
+              ? candidate.content.slice(-available)
+              : candidate.content;
+            selected.push(heading + (omitted
+              ? '[Earlier content omitted due to model context limit; this is not the full transcript.]\n'
+              : '[Complete retrieved transcript follows.]\n') + excerpt);
+            remaining -= selected[selected.length - 1].length;
+          }
+          recentConversationContext = selected.join('\n\n');
         } catch (error) {
           console.warn('Could not retrieve older conversation context:', error);
-          setHistoryStatus('Recent chat memory could not be loaded. Your current conversation still works.');
+          setHistoryStatus('Previous conversations could not be retrieved. Your current chat still works.');
         }
       }
+
+      const chatContext = memoryEnabled ? currentChatContext(messages) : { selected: [], omitted: 0 };
 
       const apiResponse = await fetch('/api/chat', {
         method: 'POST',
@@ -757,12 +806,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             size,
             dataUrl,
           })),
-          history: memoryEnabled
-            ? messages
-                .slice(-30)
-                .filter((item) => item.role === 'user' || item.role === 'assistant')
-                .map((item) => ({ role: item.role, content: item.content }))
-            : [],
+          history: chatContext.selected,
+          omittedCurrentMessages: chatContext.omitted,
         }),
       });
 
