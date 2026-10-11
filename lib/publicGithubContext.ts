@@ -141,7 +141,9 @@ export async function getPublicGithubContext(
   const match = message.match(REPO_URL) || previousText.match(REPO_URL);
   if (!match) return null;
   const owner = match[1];
-  const repoName = match[2].replace(/\.git$/i, "");
+  // URLs pasted into prose often end in a sentence period, comma, or colon.
+  // Those characters are not part of the GitHub repository slug.
+  const repoName = match[2].replace(/[.,;:!?]+$/g, "").replace(/\.git$/i, "");
   if (!owner || !repoName) return null;
   const fullName = owner + "/" + repoName;
 
