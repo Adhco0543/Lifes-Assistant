@@ -27,6 +27,12 @@ import {
 } from "firebase/firestore";
 import { getFirestore } from "firebase/firestore";
 
+export interface ChatAttachmentMeta {
+  name: string;
+  type: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   userId: string;
@@ -37,6 +43,7 @@ export interface ChatMessage {
   edited?: boolean;
   tags?: string[];
   starred?: boolean;
+  attachments?: ChatAttachmentMeta[];
 }
 
 export interface Conversation {
@@ -354,6 +361,15 @@ class FirebaseBackend {
         edited: data.edited ?? false,
         tags: data.tags ?? [],
         starred: data.starred ?? false,
+        attachments: Array.isArray(data.attachments)
+          ? data.attachments
+              .filter((attachment: unknown) => Boolean(attachment && typeof attachment === "object"))
+              .map((attachment: any) => ({
+                name: String(attachment.name || "Attachment"),
+                type: String(attachment.type || "application/octet-stream"),
+                size: Number(attachment.size || 0),
+              }))
+          : [],
       };
     });
   }
