@@ -85,66 +85,67 @@ export async function POST(req: Request) {
 
     let response: Response | null = null;
 
-    try {
-      const gatewayToken =
-        process.env.AI_GATEWAY_API_KEY?.trim() ||
-        (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
+    const openAIKey = process.env.OPENAI_API_KEY?.trim();
 
-      if (gatewayToken) {
-        response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: "Bearer " + gatewayToken,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: gatewayModel,
-            instructions,
-            input,
-            max_output_tokens: 450,
-          }),
-        });
+    if (openAIKey) {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + openAIKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: directModel,
+          instructions,
+          input,
+          max_output_tokens: 450,
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        console.error(
+          "Life Radar direct OpenAI error:",
+          response.status,
+          detail.slice(0, 500)
+        );
+        response = null;
       }
-    } catch (error) {
-      console.warn("Life Radar AI Gateway request could not start:", error);
-    }
-
-    if (response && !response.ok) {
-      const detail = await response.text();
-      console.error(
-        "Life Radar AI Gateway error:",
-        response.status,
-        detail.slice(0, 500)
-      );
-      response = null;
     }
 
     if (!response) {
-      const openAIKey = process.env.OPENAI_API_KEY?.trim();
+      try {
+        const gatewayToken =
+          process.env.AI_GATEWAY_API_KEY?.trim() ||
+          (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
 
-      if (openAIKey) {
-        response = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: "Bearer " + openAIKey,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: directModel,
-            instructions,
-            input,
-            max_output_tokens: 450,
-          }),
-        });
-
-        if (!response.ok) {
-          const detail = await response.text();
-          console.error(
-            "Life Radar direct OpenAI error:",
-            response.status,
-            detail.slice(0, 500)
-          );
+        if (gatewayToken) {
+          response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer " + gatewayToken,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: gatewayModel,
+              instructions,
+              input,
+              max_output_tokens: 450,
+            }),
+          });
         }
+      } catch (error) {
+        console.warn("Life Radar AI Gateway request could not start:", error);
+      }
+
+      if (response && !response.ok) {
+        const detail = await response.text();
+        console.error(
+          "Life Radar AI Gateway error:",
+          response.status,
+          detail.slice(0, 500)
+        );
+        response = null;
       }
     }
 
