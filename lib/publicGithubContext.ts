@@ -17,19 +17,37 @@ const EXCLUDE = /(^|\/)(?:\.env(?:\..*)?|\.git|node_modules|\.next|dist|build|co
 const INCLUDE = /\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|cs|swift|kt|rb|php|sql|md|json|ya?ml|toml|css|html)$/i;
 
 async function getGithubJson<T>(path: string): Promise<T> {
-  const response = await fetch(API + path, {
-    headers: HEADERS,
-    signal: AbortSignal.timeout(8000),
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    if (response.status === 404) throw new Error("Repository not found or not public.");
-    if (response.status === 403 || response.status === 429) {
-      throw new Error("GitHub's public API rate limit was reached. Try again later.");
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(API + path, {
+        headers: HEADERS,
+        signal: AbortSignal.timeout(8000),
+        cache: "no-store",
+      });
+      if (response.ok) return response.json() as Promise<T>;
+      const rateLimited = response.status === 429 ||
+        (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0");
+      if (rateLimited) {
+        throw new Error("GitHub public API rate limit reached. Try again later or connect GitHub.");
+      }
+      // GitHub can temporarily return 404 for a public repository; retry once.
+      lastError = new Error("GitHub public API returned HTTP " + response.status + ".");
+      if (attempt === 0 && (response.status === 404 || response.status >= 500)) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        continue;
+      }
+      throw lastError;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("GitHub request failed.");
+      if (attempt === 0 && (lastError.name === "TimeoutError" ||
+          lastError.name === "AbortError" || lastError.message.includes("fetch failed"))) {
+        continue;
+      }
+      throw lastError;
     }
-    throw new Error("GitHub returned HTTP " + response.status + ".");
   }
-  return response.json() as Promise<T>;
+  throw lastError || new Error("GitHub public API could not be reached.");
 }
 
 function scoreFile(path: string): number {
@@ -147,10 +165,14 @@ export async function getPublicGithubContext(
         sections.join("\n"),
     };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : "Unknown error";
+    console.warn("Public GitHub repository fetch failed", { repository: fullName, reason });
     return {
       context: "",
-      status: "Could not read GitHub repository " + fullName + ": " +
-        (error instanceof Error ? error.message : "Unknown error"),
+      status: "Could not fetch source from GitHub for " + fullName + ": " + reason +
+        " This does not establish that the repository is private or missing. " +
+        "Do not claim that previously retrieved files were never read; distinguish " +
+        "earlier access from this failed request.",
     };
   }
 }
