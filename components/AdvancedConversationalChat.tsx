@@ -14,6 +14,7 @@ interface AdvancedChatProps {
 type ChatApiResponse = {
   type?: 'chat' | 'quote' | 'email' | 'task' | string;
   message?: string;
+  githubReviewStatus?: string;
   data?: any;
 };
 
@@ -857,6 +858,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       const response =
         data.message || "I received your message, but I couldn't generate a response.";
+
+      if (data.githubReviewStatus) {
+        setHistoryStatus(data.githubReviewStatus);
+      }
 
       const assistantMsg: ChatMessage = {
         id: `assistant-${Date.now()}`,
