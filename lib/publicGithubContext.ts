@@ -63,10 +63,52 @@ export async function getPublicGithubContext(
     const branch = encodeURIComponent(repo.default_branch);
     const tree = await getGithubJson<GithubTree>("/repos/" + encodeURIComponent(owner) + "/" +
       encodeURIComponent(repoName) + "/git/trees/" + branch + "?recursive=1");
-    const files = (tree.tree || []).filter((entry) =>
+    const eligible = (tree.tree || []).filter((entry) =>
       entry.type === "blob" && entry.sha && INCLUDE.test(entry.path) &&
       !EXCLUDE.test(entry.path) && (entry.size ?? 0) < 100_000
-    ).sort((a, b) => scoreFile(b.path) - scoreFile(a.path)).slice(0, 12);
+    );
+    const sorted = eligible.sort((a, b) => scoreFile(b.path) - scoreFile(a.path));
+    // A broad review needs UI, state, data, routes and tests, not 12 API routes.
+    // Specific user questions may override the mix with files matching their topic.
+    const topic = message.toLowerCase();
+    const buckets: Array<{ pattern: RegExp; max: number }> = [
+      { pattern: /^(?:readme\.md|package\.json|tsconfig\.json|next\.config\.|pyproject\.toml)/i, max: 2 },
+      { pattern: /^(?:components|src\/components|app\/.*page\.|app\/.*layout\.)/i, max: 3 },
+      { pattern: /^(?:lib|src\/lib|src\/hooks|hooks)\//i, max: 3 },
+      { pattern: /^(?:app\/api|pages\/api)\//i, max: 2 },
+      { pattern: /(?:^|\/)(?:tests|__tests__)\/|\.(?:test|spec)\.[jt]sx?$/i, max: 1 },
+    ];
+    const selected: typeof sorted = [];
+    const seen = new Set<string>();
+    const add = (entry: typeof sorted[number]) => {
+      if (seen.has(entry.path)) return;
+      seen.add(entry.path);
+      selected.push(entry);
+    };
+    const topicWords = topic.match(/[a-z0-9]{5,}/g) || [];
+    const meaningful = topicWords.filter((word) =>
+      !["github", "source", "files", "review", "repository", "which", "please",
+        "could", "would", "right", "these", "check", "read", "open", "improvements"].includes(word)
+    );
+    if (meaningful.length) {
+      sorted.filter((entry) => meaningful.some((word) => entry.path.toLowerCase().includes(word)))
+        .slice(0, 3).forEach(add);
+    }
+    for (const bucket of buckets) {
+      let added = 0;
+      for (const entry of sorted) {
+        if (selected.length >= 12 || added >= bucket.max) break;
+        if (!seen.has(entry.path) && bucket.pattern.test(entry.path)) {
+          add(entry);
+          added++;
+        }
+      }
+    }
+    for (const entry of sorted) {
+      if (selected.length >= 12) break;
+      add(entry);
+    }
+    const files = selected;
 
     const sections: string[] = [];
     let remaining = 45000;
