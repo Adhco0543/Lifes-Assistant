@@ -182,6 +182,7 @@ export async function POST(req: Request) {
     };
 
     let response: Response | null = null;
+    let gatewayBillingRequired = false;
     let model = directModel;
     let provider = "openai-direct";
 
@@ -239,6 +240,7 @@ export async function POST(req: Request) {
 
       if (response && !response.ok) {
         const detail = await response.text();
+        gatewayBillingRequired = response.status === 403 && detail.includes("customer_verification_required");
         console.error(
           "AI Gateway Responses API error:",
           response.status,
@@ -252,8 +254,9 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           type: action,
-          message:
-            "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
+          message: gatewayBillingRequired
+            ? "Bella cannot reach the AI service because Vercel AI Gateway requires billing verification. Add a valid payment method in your Vercel AI Gateway settings, or configure a working direct OpenAI API key."
+            : "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
           data: buildDraft(action, requestMessage),
         },
         { status: 502 }
