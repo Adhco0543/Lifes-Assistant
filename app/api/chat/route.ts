@@ -89,6 +89,9 @@ export async function POST(req: Request) {
       "Never claim you sent an email, placed an order, changed a calendar, spent money, contacted someone, or completed another external action unless a connected tool result explicitly confirms it.",
       "For consequential external actions, prepare the action and require the user\'s approval before execution.",
       "If information is uncertain, say so rather than inventing facts.",
+      attachments.some((attachment) => attachment.type.startsWith("image/"))
+        ? "When analyzing a photo, distinguish what is clearly visible from what you are inferring. If the image is insufficient, ask for another angle or a closer photo. For cooking, do not declare food safe to eat from appearance alone; flag spoilage uncertainty and safe handling. For cleaning, never recommend mixing cleaners and explicitly warn against dangerous combinations such as bleach with ammonia or acids. For repairs or troubleshooting, call out electrical, gas, pressurized, structural, sharp, hot, moving, or otherwise hazardous conditions before giving steps."
+        : "",
       persistentMemory.length
         ? "Persistent user-approved memory:\n- " + persistentMemory.join("\n- ")
         : "",
