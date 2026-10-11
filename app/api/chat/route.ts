@@ -134,68 +134,69 @@ export async function POST(req: Request) {
     };
 
     let response: Response | null = null;
-    let model = gatewayModel;
-    let provider = "vercel-ai-gateway";
+    let model = directModel;
+    let provider = "openai-direct";
 
-    try {
-      const gatewayToken =
-        process.env.AI_GATEWAY_API_KEY?.trim() ||
-        (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
+    const openAIKey = process.env.OPENAI_API_KEY?.trim();
 
-      if (gatewayToken) {
-        response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: "Bearer " + gatewayToken,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...requestBody,
-            model: gatewayModel,
-          }),
-        });
+    if (openAIKey) {
+      response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + openAIKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...requestBody,
+          model: directModel,
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        console.error(
+          "Direct OpenAI Responses API error:",
+          response.status,
+          detail.slice(0, 600)
+        );
+        response = null;
       }
-    } catch (error) {
-      console.warn("AI Gateway request could not start:", error);
-    }
-
-    if (response && !response.ok) {
-      const detail = await response.text();
-      console.error(
-        "AI Gateway Responses API error:",
-        response.status,
-        detail.slice(0, 600)
-      );
-      response = null;
     }
 
     if (!response) {
-      const openAIKey = process.env.OPENAI_API_KEY?.trim();
+      provider = "vercel-ai-gateway";
+      model = gatewayModel;
 
-      if (openAIKey) {
-        provider = "openai-direct";
-        model = directModel;
+      try {
+        const gatewayToken =
+          process.env.AI_GATEWAY_API_KEY?.trim() ||
+          (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
 
-        response = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: "Bearer " + openAIKey,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...requestBody,
-            model: directModel,
-          }),
-        });
-
-        if (!response.ok) {
-          const detail = await response.text();
-          console.error(
-            "Direct OpenAI Responses API error:",
-            response.status,
-            detail.slice(0, 600)
-          );
+        if (gatewayToken) {
+          response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer " + gatewayToken,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              ...requestBody,
+              model: gatewayModel,
+            }),
+          });
         }
+      } catch (error) {
+        console.warn("AI Gateway request could not start:", error);
+      }
+
+      if (response && !response.ok) {
+        const detail = await response.text();
+        console.error(
+          "AI Gateway Responses API error:",
+          response.status,
+          detail.slice(0, 600)
+        );
+        response = null;
       }
     }
 
