@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
-import { createGitHubOAuthState } from '../../../../../lib/githubOAuthState';
+import { createGitHubOAuthState, readGitHubOAuthState } from '../../../../../lib/githubOAuthState';
+import { oauthNonceCookie } from '../../../../../lib/oauthNonceCookie';
 
 export async function POST(request: Request) {
   const user = await getFirebaseRequestUser(request);
@@ -45,7 +46,12 @@ export async function POST(request: Request) {
     allow_signup: 'true',
   });
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     url: 'https://github.com/login/oauth/authorize?' + params.toString(),
   });
+  response.headers.set(
+    'Set-Cookie',
+    oauthNonceCookie('github', readGitHubOAuthState(state).nonce, appOrigin.startsWith('https://'))
+  );
+  return response;
 }
