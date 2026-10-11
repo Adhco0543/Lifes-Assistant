@@ -164,6 +164,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [historyStatus, setHistoryStatus] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [loadingConversationId, setLoadingConversationId] = useState('');
+  const [conversationLoadError, setConversationLoadError] = useState('');
+  const conversationLoadSequence = useRef(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -268,17 +272,35 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   }, [userId]);
 
   const loadConversation = useCallback(async (conversationId: string) => {
+    const requestNumber = ++conversationLoadSequence.current;
+    setLoadingConversationId(conversationId);
+    setConversationLoadError('');
     try {
-      if (!firebaseBackend.isAvailable()) return;
+      if (!firebaseBackend.isAvailable() || !firebaseBackend.getCurrentUser()) {
+        throw new Error('Sign in to access saved conversations.');
+      }
 
       const msgs = await firebaseBackend.getMessages(conversationId, 100);
+      if (requestNumber !== conversationLoadSequence.current) return;
       setMessages(msgs);
       setCurrentConversationId(conversationId);
       localStorage.setItem('life-chat-current:' + userId, conversationId);
-      setHistoryStatus('Chat history saved to your account.');
+      setHistoryStatus(msgs.length
+        ? 'Conversation restored from your account.'
+        : 'This conversation has no saved messages yet.');
+      setPendingAction(null);
+      setHistoryOpen(false);
     } catch (error) {
+      if (requestNumber !== conversationLoadSequence.current) return;
       console.error('Error loading conversation:', error);
-      setHistoryStatus('Could not load saved messages. Check your connection and try again.');
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setConversationLoadError('Could not open that conversation: ' + message);
+      setHistoryStatus('Could not open saved messages. Your current chat was not changed.');
+      setHistoryOpen(true);
+    } finally {
+      if (requestNumber === conversationLoadSequence.current) {
+        setLoadingConversationId('');
+      }
     }
   }, [userId]);
 
@@ -298,7 +320,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             if (!cancelled) setConversations(convs);
           });
 
-          const existingConvs = await firebaseBackend.getConversations();
+          const existingConvs = await firebaseBackend.getConversations(100);
           if (cancelled) return;
 
           setConversations(existingConvs);
@@ -432,6 +454,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       const title = `Chat ${new Date().toLocaleDateString()}`;
       const newConvId = await firebaseBackend.createConversation(title, businessContext);
+      ++conversationLoadSequence.current;
+      setLoadingConversationId('');
+      setHistoryOpen(false);
+      setConversationLoadError('');
       setCurrentConversationId(newConvId);
       localStorage.setItem('life-chat-current:' + userId, newConvId);
       setHistoryStatus('New conversation ready. Messages will be saved to your account.');
@@ -888,48 +914,78 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           <p>Ask anything. Draft, plan, organize, and get work moving.</p>
         </div>
 
-        {fullScreen && onClose ? (
-          <button className="dashboard-back-btn" onClick={onClose}>
-            <span aria-hidden="true">←</span>
-            <span>Dashboard</span>
+        <div className="chat-header-actions">
+          <button
+            type="button"
+            className="history-toggle-btn"
+            aria-expanded={historyOpen}
+            onClick={() => {
+              setHistoryOpen((open) => !open);
+              setConversationLoadError('');
+            }}
+          >
+            {historyOpen ? 'Close history' : 'History (' + conversations.length + ')'}
           </button>
-        ) : (
-          onClose && (
-            <button className="close-btn" onClick={onClose}>
-              ✕
+          {fullScreen && onClose ? (
+            <button type="button" className="dashboard-back-btn" onClick={onClose}>
+              <span aria-hidden="true">←</span>
+              <span>Dashboard</span>
             </button>
-          )
-        )}
+          ) : (
+            onClose && (
+              <button className="close-btn" onClick={onClose}>
+                ✕
+              </button>
+            )
+          )}
+        </div>
       </div>
 
       {historyStatus && (
         <div className="chat-history-status" role="status">{historyStatus}</div>
       )}
 
-      {firebaseBackend.isAvailable() && conversations.length > 0 && (
-        <div className="conversations-panel">
-          <button className="new-chat-btn" onClick={createNewConversation}>
-            + New Chat
-          </button>
-
-          <div className="conversations-list">
-            {conversations.map((conv) => (
-              <button
-                key={conv.id}
-                className={`conversation-item ${
-                  conv.id === currentConversationId ? 'active' : ''
-                }`}
-                onClick={() => loadConversation(conv.id)}
-              >
-                <span className="conv-title">{conv.title}</span>
-                <span className="conv-count">{conv.messageCount}</span>
-              </button>
-            ))}
+      {historyOpen && (
+        <section className="history-browser" aria-label="Saved conversations">
+          <div className="history-browser-heading">
+            <div>
+              <strong>Saved conversations</strong>
+              <p>Select a conversation to open its saved messages.</p>
+            </div>
+            <button type="button" className="new-chat-btn" onClick={createNewConversation}>
+              + New chat
+            </button>
           </div>
-        </div>
+          {conversationLoadError && (
+            <p className="history-error" role="alert">{conversationLoadError}</p>
+          )}
+          {conversations.length === 0 ? (
+            <p className="history-empty">No saved conversations found for this account.</p>
+          ) : (
+            <div className="history-list">
+              {conversations.map((conv) => (
+                <button
+                  type="button"
+                  key={conv.id}
+                  disabled={Boolean(loadingConversationId)}
+                  className={`history-item ${conv.id === currentConversationId ? 'active' : ''}`}
+                  onClick={() => void loadConversation(conv.id)}
+                >
+                  <span className="history-item-main">
+                    <strong>{conv.title || 'Untitled conversation'}</strong>
+                    <small>{new Date(conv.updatedAt || conv.createdAt).toLocaleString()} · {conv.messageCount || 0} saved messages</small>
+                  </span>
+                  <span className="history-item-open">
+                    {loadingConversationId === conv.id ? 'Opening…' : 'Open →'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
       )}
 
-      <div className="chat-main">
+      <div className="chat-main" style={historyOpen ? { display: 'none' } : undefined}>
         <div className="messages-wrapper">
           <div className="messages-container">
             {messages.length === 0 ? (
@@ -1248,36 +1304,69 @@ const styles = `
     line-height: 1.3;
   }
 
-  .conversations-panel {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    overflow-x: auto;
-    padding: 0.65rem;
-    background: #1f1f1f;
-    border-bottom: 1px solid #2f2f2f;
+  .chat-header-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  .history-toggle-btn {
+    min-height: 36px;
+    border: 1px solid #515151;
+    border-radius: 9px;
+    padding: 0 11px;
+    color: #f5f5f5;
+    background: #343434;
+    font-size: .75rem;
+    font-weight: 650;
+    cursor: pointer;
   }
-
-  .new-chat-btn,
-  .conversation-item {
-    border: none;
-    border-radius: 0.5rem;
-    padding: 0.45rem 0.7rem;
-    background: #2f2f2f;
-    color: white;
+  .history-toggle-btn:hover { background: #444; }
+  .history-browser {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 18px;
+    background: #202020;
+  }
+  .history-browser-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .history-browser-heading strong { font-size: 1rem; }
+  .history-browser-heading p { margin: 5px 0 0; color: #999; font-size: .76rem; }
+  .new-chat-btn {
+    border: 1px solid #525252;
+    border-radius: 9px;
+    padding: 10px 12px;
+    background: #343434;
+    color: #fff;
     cursor: pointer;
     white-space: nowrap;
   }
-
-  .conversation-item.active {
-    background: #3a3a3a;
+  .history-list { display: flex; flex-direction: column; gap: 8px; }
+  .history-item {
+    width: 100%;
+    min-height: 66px;
+    padding: 12px 14px;
+    border: 1px solid #393939;
+    border-radius: 12px;
+    background: #2a2a2a;
+    color: #eee;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
   }
-
-  .conv-count {
-    margin-left: 0.4rem;
-    opacity: 0.7;
-    font-size: 0.75rem;
-  }
+  .history-item:hover { background: #333; border-color: #555; }
+  .history-item.active { border-color: #777; }
+  .history-item:disabled { cursor: wait; opacity: .75; }
+  .history-item-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .history-item-main strong { overflow-wrap: anywhere; font-size: .85rem; }
+  .history-item-main small { color: #aaa; font-size: .7rem; }
+  .history-item-open { flex-shrink: 0; font-size: .75rem; color: #ddd; }
+  .history-error { color: #ffc1b9; background: #422a2a; border-radius: 8px; padding: 10px; }
+  .history-empty { color: #aaa; font-size: .8rem; }
 
   .chat-main {
     flex: 1;
