@@ -352,7 +352,7 @@ class FirebaseBackend {
     const conversationsQuery = query(
       collection(this.db, "users", userId, "conversations"),
       orderBy("updatedAt", "desc"),
-      queryLimit(25)
+      queryLimit(100)
     );
 
     return onSnapshot(conversationsQuery, (snapshot) => {
