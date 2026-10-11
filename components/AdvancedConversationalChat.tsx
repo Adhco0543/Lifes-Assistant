@@ -45,6 +45,64 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function dataUrlByteSize(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) return 0;
+  const base64 = dataUrl.slice(comma + 1);
+  return Math.floor((base64.length * 3) / 4);
+}
+
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Could not read that photo.'));
+    };
+    image.src = url;
+  });
+}
+
+async function prepareImageAttachment(
+  file: File,
+  id: string
+): Promise<PendingAttachment> {
+  const image = await loadImageFromFile(file);
+  const maxDimension = 1600;
+  const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Photo processing is not available in this browser.');
+
+  context.drawImage(image, 0, 0, width, height);
+
+  let quality = 0.84;
+  let dataUrl = canvas.toDataURL('image/jpeg', quality);
+  while (dataUrlByteSize(dataUrl) > 1_600_000 && quality > 0.5) {
+    quality -= 0.08;
+    dataUrl = canvas.toDataURL('image/jpeg', quality);
+  }
+
+  const originalBase = file.name.replace(/\.[^.]+$/, '') || 'photo';
+  return {
+    id,
+    name: originalBase + '.jpg',
+    type: 'image/jpeg',
+    size: dataUrlByteSize(dataUrl),
+    dataUrl,
+  };
+}
+
 type RadarApiLoop = {
   title: string;
   summary?: string;
@@ -109,6 +167,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -515,9 +574,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  const handleFileSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = '';
+  const addFiles = async (files: File[]) => {
     if (!files.length) return;
 
     setAttachmentError('');
@@ -529,34 +586,55 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
 
     const chosen = files.slice(0, room);
-    const unsupported = chosen.find((file) => !SUPPORTED_ATTACHMENT_EXTENSIONS.test(file.name));
+    const unsupported = chosen.find(
+      (file) => !file.type.startsWith('image/') && !SUPPORTED_ATTACHMENT_EXTENSIONS.test(file.name)
+    );
     if (unsupported) {
       setAttachmentError(unsupported.name + ' is not a supported chat attachment.');
       return;
     }
 
-    const existingBytes = attachments.reduce((sum, item) => sum + item.size, 0);
-    const addedBytes = chosen.reduce((sum, file) => sum + file.size, 0);
-
-    if (existingBytes + addedBytes > MAX_ATTACHMENT_BYTES) {
-      setAttachmentError('Keep the combined attachments under 2.4 MB for now.');
-      return;
-    }
-
     try {
       const next = await Promise.all(
-        chosen.map(async (file, index) => ({
-          id: Date.now() + '-' + index + '-' + file.name,
-          name: file.name,
-          type: file.type || 'application/octet-stream',
-          size: file.size,
-          dataUrl: await readFileAsDataUrl(file),
-        }))
+        chosen.map(async (file, index) => {
+          const id = Date.now() + '-' + index + '-' + file.name;
+
+          if (file.type.startsWith('image/')) {
+            return prepareImageAttachment(file, id);
+          }
+
+          return {
+            id,
+            name: file.name,
+            type: file.type || 'application/octet-stream',
+            size: file.size,
+            dataUrl: await readFileAsDataUrl(file),
+          } satisfies PendingAttachment;
+        })
       );
+
+      const existingBytes = attachments.reduce((sum, item) => sum + item.size, 0);
+      const addedBytes = next.reduce((sum, item) => sum + item.size, 0);
+
+      if (existingBytes + addedBytes > MAX_ATTACHMENT_BYTES) {
+        setAttachmentError('Keep the combined attachments under 2.4 MB for now.');
+        return;
+      }
+
       setAttachments((current) => current.concat(next).slice(0, MAX_ATTACHMENTS));
-    } catch {
-      setAttachmentError('One of those files could not be read. Try it again.');
+    } catch (error) {
+      setAttachmentError(
+        error instanceof Error
+          ? error.message
+          : 'One of those files could not be read. Try it again.'
+      );
     }
+  };
+
+  const handleFileSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    await addFiles(files);
   };
 
   const removeAttachment = (id: string) => {
@@ -806,7 +884,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             {messages.length === 0 ? (
               <div className="empty-state">
                 <h3>Welcome 👋</h3>
-                <p>Ask me to create a quote, draft an email, make a reminder, or plan work.</p>
+                <p>Ask anything, attach a file, or take a photo to identify, cook, clean, troubleshoot, or plan.</p>
               </div>
             ) : (
               messages.map((msg) => (
@@ -906,6 +984,23 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
           {attachmentError && <p className="attachment-error">{attachmentError}</p>}
 
+          {attachments.some((attachment) => attachment.type.startsWith('image/')) && (
+            <div className="photo-actions" aria-label="Photo help shortcuts">
+              <button type="button" onClick={() => setInput('What is this? Identify what you can see and tell me what it is used for.')}>
+                Identify
+              </button>
+              <button type="button" onClick={() => setInput('Help me with cooking using what is in this photo. Tell me what you can identify, what I can make, and any food-safety concerns.')}>
+                Cooking
+              </button>
+              <button type="button" onClick={() => setInput('Help me clean what is in this photo. Identify the surface or mess if possible, tell me what is safe to use, and warn me about anything I should not mix.')}>
+                Cleaning
+              </button>
+              <button type="button" onClick={() => setInput('Look at this photo and help me figure out what is going on and what I should do next. If something could be dangerous, tell me before giving steps.')}>
+                Help / Fix
+              </button>
+            </div>
+          )}
+
           <div className="input-wrapper">
             <input
               ref={fileInputRef}
@@ -913,6 +1008,14 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               type="file"
               multiple
               accept=".pdf,.txt,.md,.json,.html,.htm,.xml,.rtf,.odt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.iif,.png,.jpg,.jpeg,.webp,.gif,.js,.jsx,.ts,.tsx,.py,.java,.c,.cc,.cpp,.h,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.kts,.sh,.sql,.yaml,.yml"
+              onChange={handleFileSelection}
+            />
+            <input
+              ref={cameraInputRef}
+              className="file-input"
+              type="file"
+              accept="image/*"
+              capture="environment"
               onChange={handleFileSelection}
             />
             <button
@@ -923,6 +1026,16 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               disabled={isLoading}
             >
               📎
+            </button>
+            <button
+              className="camera-btn"
+              onClick={() => cameraInputRef.current?.click()}
+              title="Take a photo"
+              aria-label="Take a photo"
+              type="button"
+              disabled={isLoading}
+            >
+              📷
             </button>
 
             <button
@@ -1331,6 +1444,28 @@ const styles = `
     font-size: .68rem;
   }
 
+  .photo-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 8px;
+  }
+
+  .photo-actions button {
+    min-height: 30px;
+    padding: 0 9px;
+    border: 1px solid #444;
+    border-radius: 999px;
+    background: #292929;
+    color: #cfcfcf;
+    cursor: pointer;
+    font-size: .64rem;
+  }
+
+  .photo-actions button:hover {
+    background: #343434;
+  }
+
   .input-wrapper {
     display: flex;
     gap: 0.5rem;
@@ -1355,6 +1490,7 @@ const styles = `
   }
 
   .attach-btn,
+  .camera-btn,
   .mic-btn,
   .send-btn {
     border: none;
@@ -1367,11 +1503,13 @@ const styles = `
   }
 
   .attach-btn,
+  .camera-btn,
   .mic-btn {
     background: rgba(255,255,255,0.1);
   }
 
-  .attach-btn:disabled {
+  .attach-btn:disabled,
+  .camera-btn:disabled {
     opacity: .5;
     cursor: default;
   }
