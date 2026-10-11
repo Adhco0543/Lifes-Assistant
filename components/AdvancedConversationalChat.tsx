@@ -163,6 +163,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [queuedLaunch, setQueuedLaunch] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -273,10 +274,13 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       const msgs = await firebaseBackend.getMessages(conversationId, 100);
       setMessages(msgs);
       setCurrentConversationId(conversationId);
+      localStorage.setItem('life-chat-current:' + userId, conversationId);
+      setHistoryStatus('Chat history saved to your account.');
     } catch (error) {
       console.error('Error loading conversation:', error);
+      setHistoryStatus('Could not load saved messages. Check your connection and try again.');
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -291,13 +295,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
         if (firebaseBackend.isAvailable() && currentUser) {
           unsubscribe = firebaseBackend.onConversationsChange((convs) => {
-            if (cancelled) return;
-
-            setConversations(convs);
-
-            if (convs.length > 0 && !currentConversationId) {
-              loadConversation(convs[0].id);
-            }
+            if (!cancelled) setConversations(convs);
           });
 
           const existingConvs = await firebaseBackend.getConversations();
@@ -306,11 +304,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           setConversations(existingConvs);
 
           if (existingConvs.length > 0) {
-            await loadConversation(existingConvs[0].id);
+            const rememberedId = localStorage.getItem('life-chat-current:' + userId);
+            const selected = existingConvs.find((conv) => conv.id === rememberedId) || existingConvs[0];
+            await loadConversation(selected.id);
           } else {
             const newConvId = await firebaseBackend.createConversation('New Chat', businessContext);
             if (!cancelled) {
               setCurrentConversationId(newConvId);
+              localStorage.setItem('life-chat-current:' + userId, newConvId);
+              setHistoryStatus('New conversation ready. Messages will be saved to your account.');
             }
           }
         } else {
@@ -325,9 +327,11 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           };
 
           setMessages([welcomeMsg]);
+          setHistoryStatus('Not signed in. This chat is not being saved to the cloud.');
         }
       } catch (error) {
         console.error('Error initializing chat:', error);
+        setHistoryStatus('Could not connect to saved chat history. Messages may not be preserved.');
 
         const welcomeMsg: ChatMessage = {
           id: 'welcome',
@@ -354,7 +358,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       cancelled = true;
       if (unsubscribe) unsubscribe();
     };
-  }, [userId, businessContext, currentConversationId, loadConversation]);
+  }, [userId, businessContext, loadConversation]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -429,6 +433,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       const title = `Chat ${new Date().toLocaleDateString()}`;
       const newConvId = await firebaseBackend.createConversation(title, businessContext);
       setCurrentConversationId(newConvId);
+      localStorage.setItem('life-chat-current:' + userId, newConvId);
+      setHistoryStatus('New conversation ready. Messages will be saved to your account.');
       setMessages([]);
       setInput('');
       setAttachments([]);
@@ -437,7 +443,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     } catch (error) {
       console.error('Error creating conversation:', error);
     }
-  }, [businessContext]);
+  }, [businessContext, userId]);
 
   useEffect(() => {
     const handleNewConversation = () => {
@@ -672,6 +678,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         await firebaseBackend.trackEvent('message_sent', { length: userMessage.length });
       } catch (error) {
         console.warn('Error saving user message:', error);
+        setHistoryStatus('Could not save your message to the cloud. Check your connection.');
       }
     }
 
@@ -682,6 +689,31 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     try {
       const token = await firebaseBackend.getIdToken();
       if (!token) throw new Error('Authentication required');
+
+      // Include recent prior chats so a new conversation can continue yesterday's discussion.
+      // These are account-scoped Firestore messages, not invented AI memories.
+      let recentConversationContext = '';
+      if (memoryEnabled && firebaseBackend.isAvailable()) {
+        try {
+          const previous = (await firebaseBackend.getConversations(6))
+            .filter((conversation) => conversation.id !== currentConversationId)
+            .slice(0, 3);
+          const snippets = await Promise.all(previous.map(async (conversation) => {
+            const recent = (await firebaseBackend.getMessages(conversation.id, 16))
+              .filter((item) => item.role === 'user' || item.role === 'assistant')
+              .slice(-8);
+            if (!recent.length) return '';
+            return 'Conversation ' + conversation.title + ' (' +
+              new Date(conversation.updatedAt).toLocaleDateString() + '):\n' +
+              recent.map((item) => item.role + ': ' + item.content.slice(0, 400)).join('\n');
+          }));
+          recentConversationContext = snippets.filter(Boolean).join('\n\n').slice(0, 7000);
+        } catch (error) {
+          console.warn('Could not retrieve older conversation context:', error);
+          setHistoryStatus('Recent chat memory could not be loaded. Your current conversation still works.');
+        }
+      }
+
       const apiResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
@@ -692,6 +724,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           responseStyle,
           memoryEnabled,
           persistentMemory: memoryEnabled ? persistentMemory : [],
+          recentConversationContext: memoryEnabled ? recentConversationContext : '',
           attachments: outgoingAttachments.map(({ name, type, size, dataUrl }) => ({
             name,
             type,
@@ -700,7 +733,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           })),
           history: memoryEnabled
             ? messages
-                .slice(-12)
+                .slice(-30)
                 .filter((item) => item.role === 'user' || item.role === 'assistant')
                 .map((item) => ({ role: item.role, content: item.content }))
             : [],
@@ -732,6 +765,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           await firebaseBackend.saveMessage(assistantMsg);
         } catch (error) {
           console.warn('Error saving assistant message:', error);
+          setHistoryStatus('The reply appeared, but could not be saved to your account.');
         }
       }
 
@@ -867,6 +901,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           )
         )}
       </div>
+
+      {historyStatus && (
+        <div className="chat-history-status" role="status">{historyStatus}</div>
+      )}
 
       {firebaseBackend.isAvailable() && conversations.length > 0 && (
         <div className="conversations-panel">
@@ -1200,6 +1238,14 @@ const styles = `
     border-radius: 0.4rem;
     border: none;
     cursor: pointer;
+  }
+
+  .chat-history-status {
+    padding: 6px 14px;
+    border-bottom: 1px solid #303030;
+    color: #a5a5a5;
+    font-size: .68rem;
+    line-height: 1.3;
   }
 
   .conversations-panel {
