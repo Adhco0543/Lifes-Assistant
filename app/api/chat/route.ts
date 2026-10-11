@@ -78,6 +78,11 @@ export async function POST(req: Request) {
         ? body.recentConversationContext.slice(0, 85000)
         : "";
 
+    const localDate = typeof body.localDate === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(body.localDate)
+      ? body.localDate
+      : "";
+    const timeZone = typeof body.timeZone === "string" ? body.timeZone.slice(0, 100) : "";
+
     const omittedCurrentMessages = memoryEnabled
       ? Math.max(0, Math.floor(Number(body.omittedCurrentMessages) || 0))
       : 0;
@@ -90,6 +95,9 @@ export async function POST(req: Request) {
           ? "Give detailed, structured responses when useful."
           : "Use a balanced level of detail.",
       "Be practical and truthful.",
+      localDate
+        ? "The user's current local date is " + localDate + (timeZone ? " (" + timeZone + ")" : "") + ". Resolve yesterday and other relative dates using this date, not your training cutoff."
+        : "If the user's local date is unknown, do not guess relative dates.",
       memoryEnabled
         ? "Use prior conversation context when relevant."
         : "Do not rely on prior conversation history beyond the current request.",
@@ -98,6 +106,7 @@ export async function POST(req: Request) {
       "For consequential external actions, prepare the action and require the user\'s approval before execution.",
       "If information is uncertain, say so rather than inventing facts.",
       "When asked about prior conversations, use the saved transcript evidence below and distinguish exact retrieved text from inference. Never claim you saw an entire conversation if the supplied transcript says content was omitted.",
+      "When asked what happened yesterday, distinguish a single saved conversation from all matching conversations. Report the actual coverage and do not invent missing details.",
       omittedCurrentMessages
         ? "The current conversation history omitted " + omittedCurrentMessages + " older messages due to context limits. Do not claim complete recall of that conversation."
         : "",
