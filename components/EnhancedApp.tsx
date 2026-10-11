@@ -3,11 +3,7 @@
 import React, { useEffect } from "react";
 import App from "./App";
 
-interface EnhancedAppProps {
-  userId: string;
-}
-
-export function EnhancedApp({ userId }: EnhancedAppProps) {
+export function EnhancedApp() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
     document.documentElement.style.colorScheme = "dark";
@@ -15,7 +11,7 @@ export function EnhancedApp({ userId }: EnhancedAppProps) {
     document.body.style.backgroundColor = "#212121";
   }, []);
 
-  return <App userId={userId} />;
+  return <App />;
 }
 
 export default EnhancedApp;
