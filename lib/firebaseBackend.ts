@@ -409,13 +409,14 @@ class FirebaseBackend {
 
     const messagesQuery = query(
       collection(db, "users", userId, "conversations", conversationId, "messages"),
-      orderBy("timestamp", "asc"),
+      orderBy("timestamp", "desc"),
       queryLimit(maxCount)
     );
 
     const snapshot = await getDocs(messagesQuery);
 
-    return snapshot.docs.map((item) => {
+    // Fetch the newest messages, then restore chronological display order.
+    return snapshot.docs.slice().reverse().map((item) => {
       const data = item.data();
 
       return {
