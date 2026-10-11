@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
-import type { ChatMessage, Conversation } from '../lib/firebaseBackend';
+import type { ChatAttachmentMeta, ChatMessage, Conversation } from '../lib/firebaseBackend';
 
 interface AdvancedChatProps {
   userId?: string;
@@ -16,6 +16,34 @@ type ChatApiResponse = {
   message?: string;
   data?: any;
 };
+
+type PendingAttachment = ChatAttachmentMeta & {
+  id: string;
+  dataUrl: string;
+};
+
+const MAX_ATTACHMENT_BYTES = 2_400_000;
+const MAX_ATTACHMENTS = 3;
+const SUPPORTED_ATTACHMENT_EXTENSIONS =
+  /\.(pdf|txt|md|json|html?|xml|rtf|odt|docx?|pptx?|xlsx?|csv|tsv|iif|png|jpe?g|webp|gif|js|jsx|ts|tsx|py|java|c|cc|cpp|h|hpp|cs|go|rs|rb|php|swift|kt|kts|sh|sql|yaml|yml)$/i;
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === 'string'
+        ? resolve(reader.result)
+        : reject(new Error('Could not read file.'));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file.'));
+    reader.readAsDataURL(file);
+  });
+}
 
 type RadarApiLoop = {
   title: string;
@@ -75,9 +103,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [persistentMemory, setPersistentMemory] = useState<string[]>([]);
   const [pendingAction, setPendingAction] = useState<ChatApiResponse | null>(null);
   const [queuedLaunch, setQueuedLaunch] = useState(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -341,6 +372,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setCurrentConversationId(newConvId);
       setMessages([]);
       setInput('');
+      setAttachments([]);
+      setAttachmentError('');
       setPendingAction(null);
     } catch (error) {
       console.error('Error creating conversation:', error);
@@ -482,11 +515,66 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     }
   };
 
-  const handleSendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+  const handleFileSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
 
-    const userMessage = input.trim();
+    setAttachmentError('');
+
+    const room = Math.max(0, MAX_ATTACHMENTS - attachments.length);
+    if (!room) {
+      setAttachmentError('You can attach up to ' + MAX_ATTACHMENTS + ' files per message.');
+      return;
+    }
+
+    const chosen = files.slice(0, room);
+    const unsupported = chosen.find((file) => !SUPPORTED_ATTACHMENT_EXTENSIONS.test(file.name));
+    if (unsupported) {
+      setAttachmentError(unsupported.name + ' is not a supported chat attachment.');
+      return;
+    }
+
+    const existingBytes = attachments.reduce((sum, item) => sum + item.size, 0);
+    const addedBytes = chosen.reduce((sum, file) => sum + file.size, 0);
+
+    if (existingBytes + addedBytes > MAX_ATTACHMENT_BYTES) {
+      setAttachmentError('Keep the combined attachments under 2.4 MB for now.');
+      return;
+    }
+
+    try {
+      const next = await Promise.all(
+        chosen.map(async (file, index) => ({
+          id: Date.now() + '-' + index + '-' + file.name,
+          name: file.name,
+          type: file.type || 'application/octet-stream',
+          size: file.size,
+          dataUrl: await readFileAsDataUrl(file),
+        }))
+      );
+      setAttachments((current) => current.concat(next).slice(0, MAX_ATTACHMENTS));
+    } catch {
+      setAttachmentError('One of those files could not be read. Try it again.');
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
+    setAttachmentError('');
+  };
+
+  const handleSendMessage = useCallback(async () => {
+    if ((!input.trim() && !attachments.length) || isLoading) return;
+
+    const outgoingAttachments = attachments;
+    const typedMessage = input.trim();
+    const userMessage =
+      typedMessage ||
+      'Attached ' + outgoingAttachments.map((item) => item.name).join(', ') + '.';
     setInput('');
+    setAttachments([]);
+    setAttachmentError('');
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -495,6 +583,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       role: 'user',
       content: userMessage,
       timestamp: Date.now(),
+      attachments: outgoingAttachments.map(({ name, type, size }) => ({ name, type, size })),
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -525,6 +614,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           responseStyle,
           memoryEnabled,
           persistentMemory: memoryEnabled ? persistentMemory : [],
+          attachments: outgoingAttachments.map(({ name, type, size, dataUrl }) => ({
+            name,
+            type,
+            size,
+            dataUrl,
+          })),
           history: memoryEnabled
             ? messages
                 .slice(-12)
@@ -586,7 +681,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setIsLoading(false);
       inputRef.current?.focus();
     }
-  }, [input, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId, captureLifeRadar]);
+  }, [input, attachments, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId, captureLifeRadar]);
 
   useEffect(() => {
     if (!queuedLaunch || !input.trim() || isLoading) return;
@@ -720,6 +815,16 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
                     {msg.content.split('\n').map((line, idx) => (
                       <div key={idx}>{line}</div>
                     ))}
+                    {msg.attachments?.length ? (
+                      <div className="message-attachments">
+                        {msg.attachments.map((attachment, index) => (
+                          <span className="message-attachment" key={attachment.name + '-' + index}>
+                            📎 {attachment.name}
+                            <small>{formatFileSize(attachment.size)}</small>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ))
@@ -779,7 +884,47 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         )}
 
         <div className="input-area">
+          {attachments.length > 0 && (
+            <div className="pending-attachments">
+              {attachments.map((attachment) => (
+                <div className="pending-attachment" key={attachment.id}>
+                  <span>
+                    <strong>{attachment.name}</strong>
+                    <small>{formatFileSize(attachment.size)}</small>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(attachment.id)}
+                    title={'Remove ' + attachment.name}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {attachmentError && <p className="attachment-error">{attachmentError}</p>}
+
           <div className="input-wrapper">
+            <input
+              ref={fileInputRef}
+              className="file-input"
+              type="file"
+              multiple
+              accept=".pdf,.txt,.md,.json,.html,.htm,.xml,.rtf,.odt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.iif,.png,.jpg,.jpeg,.webp,.gif,.js,.jsx,.ts,.tsx,.py,.java,.c,.cc,.cpp,.h,.hpp,.cs,.go,.rs,.rb,.php,.swift,.kt,.kts,.sh,.sql,.yaml,.yml"
+              onChange={handleFileSelection}
+            />
+            <button
+              className="attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach files"
+              type="button"
+              disabled={isLoading}
+            >
+              📎
+            </button>
+
             <button
               className={`mic-btn ${isListening ? 'listening' : ''}`}
               onClick={handleToggleMic}
@@ -805,7 +950,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             <button
               className="send-btn"
               onClick={handleSendMessage}
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && !attachments.length) || isLoading}
               type="button"
             >
               ➤
@@ -1007,6 +1152,31 @@ const styles = `
     border-radius: 0;
   }
 
+  .message-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+  }
+
+  .message-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 8px;
+    border-radius: 9px;
+    background: #252525;
+    border: 1px solid #424242;
+    font-size: .7rem;
+    overflow-wrap: anywhere;
+  }
+
+  .message-attachment small {
+    color: #8b8b8b;
+    white-space: nowrap;
+  }
+
   .typing {
     display: flex;
     gap: 0.3rem;
@@ -1104,6 +1274,63 @@ const styles = `
     background: #212121;
   }
 
+  .pending-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-bottom: 8px;
+  }
+
+  .pending-attachment {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 7px 8px 7px 10px;
+    border: 1px solid #444;
+    border-radius: 11px;
+    background: #292929;
+  }
+
+  .pending-attachment span,
+  .pending-attachment strong,
+  .pending-attachment small {
+    min-width: 0;
+  }
+
+  .pending-attachment strong,
+  .pending-attachment small {
+    display: block;
+  }
+
+  .pending-attachment strong {
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: .68rem;
+  }
+
+  .pending-attachment small {
+    margin-top: 2px;
+    color: #888;
+    font-size: .58rem;
+  }
+
+  .pending-attachment button {
+    border: 0;
+    background: transparent;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+
+  .attachment-error {
+    margin: 0 0 8px;
+    color: #d69a9a;
+    font-size: .68rem;
+  }
+
   .input-wrapper {
     display: flex;
     gap: 0.5rem;
@@ -1111,6 +1338,10 @@ const styles = `
     border: 1px solid #4a4a4a;
     border-radius: 24px;
     padding: 0.4rem;
+  }
+
+  .file-input {
+    display: none;
   }
 
   .input-wrapper input {
@@ -1123,6 +1354,7 @@ const styles = `
     outline: none;
   }
 
+  .attach-btn,
   .mic-btn,
   .send-btn {
     border: none;
@@ -1134,8 +1366,14 @@ const styles = `
     flex-shrink: 0;
   }
 
+  .attach-btn,
   .mic-btn {
     background: rgba(255,255,255,0.1);
+  }
+
+  .attach-btn:disabled {
+    opacity: .5;
+    cursor: default;
   }
 
   .mic-btn.listening {
