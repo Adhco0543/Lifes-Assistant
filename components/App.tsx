@@ -465,6 +465,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
             <AdvancedConversationalChat
               userId={effectiveUserId}
               fullScreen
+              onClose={() => navigate('home')}
               businessContext={`${businessName} · ${businessType}`}
             />
           )}
