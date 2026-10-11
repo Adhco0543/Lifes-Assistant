@@ -1,4 +1,5 @@
 import { readGitHubOAuthState } from '../../../../../lib/githubOAuthState';
+import { assertOauthNonceCookie, clearOauthNonceCookie } from '../../../../../lib/oauthNonceCookie';
 import { sealGitHubTokenBundle } from '../../../../../lib/githubTokenVault';
 
 function popupResponse(
@@ -23,6 +24,7 @@ function popupResponse(
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
+        'Set-Cookie': clearOauthNonceCookie('github', origin.startsWith('https://')),
       },
     }
   );
@@ -41,6 +43,7 @@ export async function GET(request: Request) {
   try {
     const state = readGitHubOAuthState(stateText);
     origin = state.appOrigin;
+    assertOauthNonceCookie(request, 'github', state.nonce);
 
     if (providerError) {
       return popupResponse(origin, {
