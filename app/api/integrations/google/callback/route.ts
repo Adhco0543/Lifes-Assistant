@@ -1,4 +1,5 @@
 import { readGoogleOAuthState } from '../../../../../lib/googleOAuthState';
+import { assertOauthNonceCookie, clearOauthNonceCookie } from '../../../../../lib/oauthNonceCookie';
 import { sealGoogleTokenBundle } from '../../../../../lib/googleTokenVault';
 
 function popupResponse(
@@ -23,6 +24,7 @@ function popupResponse(
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
+        'Set-Cookie': clearOauthNonceCookie('google', origin.startsWith('https://')),
       },
     }
   );
@@ -41,6 +43,7 @@ export async function GET(request: Request) {
   try {
     const state = readGoogleOAuthState(stateText);
     origin = state.appOrigin;
+    assertOauthNonceCookie(request, 'google', state.nonce);
 
     if (providerError) {
       return popupResponse(origin, {
