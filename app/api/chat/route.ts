@@ -82,7 +82,7 @@ export async function POST(req: Request) {
         ? body.recentConversationContext.slice(0, 85000)
         : "";
 
-    const localDate = typeof body.localDate === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(body.localDate)
+    const localDate = typeof body.localDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.localDate)
       ? body.localDate
       : "";
     const timeZone = typeof body.timeZone === "string" ? body.timeZone.slice(0, 100) : "";
