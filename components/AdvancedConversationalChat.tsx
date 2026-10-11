@@ -815,6 +815,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       }
 
       const chatContext = memoryEnabled ? currentChatContext(messages) : { selected: [], omitted: 0 };
+      // Preserve local calendar dates for messages in the currently open conversation.
+      // Without dates, a "yesterday" question can confuse today's and yesterday's messages.
+      const datedChatHistory = chatContext.selected.map((item, index) => {
+        const eligible = messages.filter((message) => message.role === 'user' || message.role === 'assistant');
+        const original = eligible[eligible.length - chatContext.selected.length + index];
+        return { role: item.role, content: original
+          ? '[' + localDateKey(new Date(original.timestamp)) + '] ' + item.content
+          : item.content };
+      });
 
       const apiResponse = await fetch('/api/chat', {
         method: 'POST',
@@ -833,7 +842,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             size,
             dataUrl,
           })),
-          history: chatContext.selected,
+          history: datedChatHistory,
           omittedCurrentMessages: chatContext.omitted,
           localDate: localDateKey(),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
