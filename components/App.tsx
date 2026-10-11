@@ -45,11 +45,7 @@ type ViewType =
   | 'projects'
   | 'onboarding';
 
-interface AppProps {
-  userId?: string;
-}
-
-const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
+ const ASSISTANT_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'radar', label: 'Life Radar', icon: '◌' },
   { id: 'connections', label: 'Connections', icon: '⌘' },
@@ -97,7 +93,7 @@ function detectDevice(): 'desktop' | 'tablet' | 'phone' | 'unknown' {
   return 'desktop';
 }
 
-export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
+export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewType>('home');
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -265,7 +261,8 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
 
   const handleOnboardingComplete = useCallback(
     async (data: any) => {
-      const targetUserId = firebaseBackend.getCurrentUser()?.uid || userId;
+      const targetUserId = firebaseBackend.getCurrentUser()?.uid;
+      if (!targetUserId) return;
       const nextBusinessName =
         data?.businessName || data?.responses?.businessName || data?.responses?.[1] || 'My Workspace';
       const nextBusinessType =
@@ -304,7 +301,7 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
       setBusinessName(nextBusinessName);
       setCurrentView('home');
     },
-    [userId]
+    []
   );
 
   const handleLogout = async () => {
@@ -333,16 +330,21 @@ export const App: React.FC<AppProps> = ({ userId = 'default-user' }) => {
     return <AuthForm onSuccess={handleAuthSuccess} />;
   }
 
+  // Never derive a workspace identity from a caller-supplied or shared ID.
+  // Firebase Auth is the only source of the active user's namespace.
+  const effectiveUserId = firebaseBackend.getCurrentUser()?.uid;
+  if (!effectiveUserId) {
+    return <div className="loading"><p>Checking your account...</p></div>;
+  }
+
   if (currentView === 'onboarding') {
     return (
       <Progressiveonboarding
-        userId={firebaseBackend.getCurrentUser()?.uid || userId}
+        userId={effectiveUserId}
         onComplete={handleOnboardingComplete}
       />
     );
   }
-
-  const effectiveUserId = firebaseBackend.getCurrentUser()?.uid || userId;
 
   return (
     <>
