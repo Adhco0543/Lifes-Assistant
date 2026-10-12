@@ -511,6 +511,8 @@ export const App: React.FC = () => {
         .boot-text { font-size: .92rem; color: #8e8e8e; }
         .shell {
           min-height: 100vh;
+          min-height: 100dvh;
+          height: 100dvh;
           display: flex;
           background: #212121;
           color: #ececec;
@@ -519,11 +521,15 @@ export const App: React.FC = () => {
           width: 270px;
           min-width: 270px;
           height: 100vh;
+          height: 100dvh;
           background: #171717;
           border-right: 1px solid #2a2a2a;
           display: flex;
           flex-direction: column;
-          padding: 10px;
+          padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+          overflow-y: auto;
+          overscroll-behavior-y: contain;
+          -webkit-overflow-scrolling: touch;
           position: relative;
           z-index: 30;
         }
@@ -658,6 +664,7 @@ export const App: React.FC = () => {
           min-width: 0;
           flex: 1;
           height: 100vh;
+          height: 100dvh;
           display: flex;
           flex-direction: column;
           background: #212121;
@@ -721,6 +728,8 @@ export const App: React.FC = () => {
           .sidebar {
             position: fixed;
             left: 0;
+            width: min(270px, calc(100vw - 24px));
+            min-width: 0;
             top: 0;
             transform: translateX(-101%);
             transition: transform 180ms ease;
