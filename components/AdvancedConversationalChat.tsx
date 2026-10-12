@@ -26,10 +26,10 @@ type PendingAttachment = ChatAttachmentMeta & {
 const MAX_ATTACHMENT_BYTES = 2_400_000;
 const MAX_ATTACHMENTS = 3;
 const MAX_VISIBLE_CHAT_MESSAGES = 2000;
-const MAX_CURRENT_CONTEXT_CHARS = 24000;
-const MAX_PRIOR_CONTEXT_CHARS = 14000;
-const MAX_CONTEXT_MESSAGE_CHARS = 5000;
-const MAX_PRIOR_MESSAGE_CHARS = 1400;
+const MAX_CURRENT_CONTEXT_CHARS = 12000;
+const MAX_PRIOR_CONTEXT_CHARS = 7000;
+const MAX_CONTEXT_MESSAGE_CHARS = 3200;
+const MAX_PRIOR_MESSAGE_CHARS = 900;
 const MAX_RECALL_CONVERSATIONS = 10;
 const MAX_RECALL_MESSAGES_PER_CONVERSATION = 400;
 
@@ -848,7 +848,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             const saved = asksYesterday
               ? allSaved.filter((item) => item.timestamp >= yesterdayStart && item.timestamp < todayStart)
               : allSaved;
-            const compacted = compactConversationMessages(saved, keywords, asksYesterday ? 18 : 14);
+            const compacted = compactConversationMessages(saved, keywords, asksYesterday ? 12 : 10);
             const content = compacted.map((item) =>
               '[' + localDateKey(new Date(item.timestamp)) + '] ' + item.role + ': ' + item.content
             ).join('\n');
@@ -874,7 +874,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           let remaining = MAX_PRIOR_CONTEXT_CHARS;
           const selected: string[] = [];
           let included = 0;
-          for (const candidate of matching.slice(0, isRecallRequest ? 8 : 2)) {
+          for (const candidate of matching.slice(0, isRecallRequest ? 5 : 2)) {
             if (!candidate.content || remaining < 500) break;
             const heading = 'Saved conversation: ' + candidate.conversation.title + ' (' +
               new Date(candidate.conversation.updatedAt).toLocaleDateString() +
