@@ -167,6 +167,13 @@ function localNoonFromDateKey(dateKey?: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+const DEFAULT_ASSISTANT_NAME = 'Bella';
+
+const normalizeAssistantName = (value: unknown): string => {
+  const name = typeof value === 'string' ? value.trim() : '';
+  return !name || name === "Life's Assistant" ? DEFAULT_ASSISTANT_NAME : name;
+};
+
 export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   userId = 'default-user',
   businessContext,
@@ -179,9 +186,9 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [isInitialized, setIsInitialized] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState('');
-  const [chatbotName, setChatbotName] = useState("Life's Assistant");
+  const [chatbotName, setChatbotName] = useState(DEFAULT_ASSISTANT_NAME);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState("Life's Assistant");
+  const [nameInput, setNameInput] = useState(DEFAULT_ASSISTANT_NAME);
   const [isListening, setIsListening] = useState(false);
   const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed'>('balanced');
   const [memoryEnabled, setMemoryEnabled] = useState(true);
@@ -208,8 +215,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     const loadPreferences = async () => {
       const savedName = localStorage.getItem('chatbot_name:' + userId);
       if (savedName) {
-        setChatbotName(savedName);
-        setNameInput(savedName);
+        const resolvedName = normalizeAssistantName(savedName);
+        setChatbotName(resolvedName);
+        setNameInput(resolvedName);
+        if (resolvedName !== savedName) {
+          localStorage.setItem('chatbot_name:' + userId, resolvedName);
+        }
       }
 
       try {
@@ -217,8 +228,9 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         if (!active || !cloudPrefs) return;
 
         if (typeof cloudPrefs.assistantName === 'string' && cloudPrefs.assistantName.trim()) {
-          setChatbotName(cloudPrefs.assistantName.trim());
-          setNameInput(cloudPrefs.assistantName.trim());
+          const resolvedName = normalizeAssistantName(cloudPrefs.assistantName);
+          setChatbotName(resolvedName);
+          setNameInput(resolvedName);
         }
 
         if (cloudPrefs.tone === 'concise' || cloudPrefs.tone === 'balanced' || cloudPrefs.tone === 'detailed') {
@@ -371,7 +383,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             conversationId: 'local',
             role: 'assistant',
             content:
-              "👋 Hi! I'm Life's Assistant. I can help with everyday planning, work, writing, tasks, reminders, memory, projects, estimates, and turning ideas into finished actions.",
+              "👋 Hi! I'm Bella. I can help with everyday planning, work, writing, tasks, reminders, memory, projects, estimates, and turning ideas into finished actions.",
             timestamp: Date.now(),
           };
 
@@ -388,7 +400,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           conversationId: 'local',
           role: 'assistant',
           content:
-            "👋 Hi! I'm Life's Assistant. I can help organize life and work, remember useful context, draft things, plan projects, and turn conversations into actions.",
+            "👋 Hi! I'm Bella. I can help organize life and work, remember useful context, draft things, plan projects, and turn conversations into actions.",
           timestamp: Date.now(),
         };
 
@@ -925,7 +937,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   };
 
   const handleSaveName = async () => {
-    const trimmedName = nameInput.trim() || "Life's Assistant";
+    const trimmedName = nameInput.trim() || DEFAULT_ASSISTANT_NAME;
     setChatbotName(trimmedName);
     localStorage.setItem('chatbot_name:' + userId, trimmedName);
 
@@ -1248,7 +1260,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               name="message-input"
               ref={inputRef}
               type="text"
-              placeholder="Message Life's Assistant"
+              placeholder={'Message ' + chatbotName}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyPress}
