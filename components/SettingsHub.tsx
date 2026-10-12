@@ -25,8 +25,13 @@ const CATEGORIES: Array<{ id: SettingCategory; label: string; icon: string; note
   { id: 'integrations', label: 'Integrations', icon: '↗', note: 'External services' },
 ];
 
+const normalizeAssistantName = (value: unknown): string => {
+  const name = typeof value === 'string' ? value.trim() : '';
+  return !name || name === "Life's Assistant" ? 'Bella' : name;
+};
+
 const DEFAULTS: Preferences = {
-  assistantName: "Life's Assistant",
+  assistantName: 'Bella',
   tone: 'balanced',
   memoryEnabled: true,
   compactMode: false,
@@ -66,6 +71,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
         const stored = localStorage.getItem(storageKey);
         if (stored) {
           localPrefs = { ...DEFAULTS, ...JSON.parse(stored) };
+          localPrefs.assistantName = normalizeAssistantName(localPrefs.assistantName);
         }
       } catch {
         localPrefs = DEFAULTS;
@@ -77,7 +83,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
 
         setPrefs({
           ...localPrefs,
-          assistantName: String(cloudPrefs?.assistantName || localPrefs.assistantName),
+          assistantName: normalizeAssistantName(cloudPrefs?.assistantName || localPrefs.assistantName),
           tone:
             cloudPrefs?.tone === 'concise' ||
             cloudPrefs?.tone === 'balanced' ||
