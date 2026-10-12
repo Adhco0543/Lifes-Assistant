@@ -26,8 +26,20 @@ type PendingAttachment = ChatAttachmentMeta & {
 const MAX_ATTACHMENT_BYTES = 2_400_000;
 const MAX_ATTACHMENTS = 3;
 const MAX_VISIBLE_CHAT_MESSAGES = 2000;
-const MAX_CURRENT_CONTEXT_CHARS = 90000;
-const MAX_PRIOR_CONTEXT_CHARS = 85000;
+const MAX_CURRENT_CONTEXT_CHARS = 24000;
+const MAX_PRIOR_CONTEXT_CHARS = 14000;
+const MAX_CONTEXT_MESSAGE_CHARS = 5000;
+const MAX_PRIOR_MESSAGE_CHARS = 1400;
+const MAX_RECALL_CONVERSATIONS = 10;
+const MAX_RECALL_MESSAGES_PER_CONVERSATION = 400;
+
+function trimForContext(value: string, maxChars: number): string {
+  const text = value.trim();
+  if (text.length <= maxChars) return text;
+  const head = Math.floor(maxChars * 0.38);
+  const tail = maxChars - head - 35;
+  return text.slice(0, head) + '\n[…middle shortened…]\n' + text.slice(-tail);
+}
 
 function currentChatContext(messages: ChatMessage[]) {
   const eligible = messages.filter((message) => message.role === 'user' || message.role === 'assistant');
@@ -35,9 +47,11 @@ function currentChatContext(messages: ChatMessage[]) {
   const selected: ChatMessage[] = [];
   for (let index = eligible.length - 1; index >= 0; index--) {
     const message = eligible[index];
-    const length = message.content.length;
+    const compactContent = trimForContext(message.content, MAX_CONTEXT_MESSAGE_CHARS);
+    const compactMessage = { ...message, content: compactContent };
+    const length = compactContent.length;
     if (chars + length > MAX_CURRENT_CONTEXT_CHARS && selected.length) break;
-    selected.unshift(message);
+    selected.unshift(compactMessage);
     chars += length;
   }
   return { selected: selected.map(({ role, content }) => ({ role, content })),
@@ -50,6 +64,62 @@ function recallKeywords(value: string): string[] {
     'remember', 'recall', 'yesterday', 'before', 'previous', 'last', 'chat', 'conversation']);
   return [...new Set((value.toLowerCase().match(/[a-z0-9]{4,}/g) || [])
     .filter((word) => !stopWords.has(word)))].slice(0, 12);
+}
+
+function compactConversationMessages(
+  messages: ChatMessage[],
+  keywords: string[],
+  limit = 16
+): ChatMessage[] {
+  if (messages.length <= limit) {
+    return messages.map((message) => ({
+      ...message,
+      content: trimForContext(message.content, MAX_PRIOR_MESSAGE_CHARS),
+    }));
+  }
+
+  const selected = new Set<number>();
+  const add = (index: number) => {
+    if (index >= 0 && index < messages.length) selected.add(index);
+  };
+
+  add(0);
+  add(1);
+  for (let index = Math.max(0, messages.length - 6); index < messages.length; index++) add(index);
+
+  if (keywords.length) {
+    messages.forEach((message, index) => {
+      const lower = message.content.toLowerCase();
+      if (keywords.some((keyword) => lower.includes(keyword))) {
+        add(index - 1);
+        add(index);
+        add(index + 1);
+      }
+    });
+  }
+
+  const userIndexes = messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => message.role === 'user')
+    .map(({ index }) => index);
+
+  if (selected.size < limit && userIndexes.length) {
+    const remaining = Math.max(1, limit - selected.size);
+    const stride = Math.max(1, Math.floor(userIndexes.length / remaining));
+    for (let i = 0; i < userIndexes.length && selected.size < limit; i += stride) {
+      add(userIndexes[i]);
+    }
+  }
+
+  for (let index = messages.length - 1; index >= 0 && selected.size < limit; index--) add(index);
+
+  return [...selected]
+    .sort((a, b) => a - b)
+    .slice(-limit)
+    .map((index) => ({
+      ...messages[index],
+      content: trimForContext(messages[index].content, MAX_PRIOR_MESSAGE_CHARS),
+    }));
 }
 const SUPPORTED_ATTACHMENT_EXTENSIONS =
   /\.(pdf|txt|md|json|html?|xml|rtf|odt|docx?|pptx?|xlsx?|csv|tsv|iif|png|jpe?g|webp|gif|js|jsx|ts|tsx|py|java|c|cc|cpp|h|hpp|cs|go|rs|rb|php|swift|kt|kts|sh|sql|yaml|yml)$/i;
@@ -765,23 +835,35 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           const now = new Date();
           const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
           const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-          const previous = (await firebaseBackend.getConversations(isRecallRequest ? 100 : 4))
+          const previous = (await firebaseBackend.getConversations(isRecallRequest ? 40 : 4))
             .filter((conversation) => conversation.id !== currentConversationId)
             .filter((conversation) => !asksYesterday ||
               (conversation.createdAt < todayStart && conversation.updatedAt >= yesterdayStart))
-            .slice(0, isRecallRequest ? 25 : 3);
+            .slice(0, isRecallRequest ? MAX_RECALL_CONVERSATIONS : 3);
           const keywords = recallKeywords(userMessage);
           const candidates = await Promise.all(previous.map(async (conversation, index) => {
-            const allSaved = (await firebaseBackend.getMessages(conversation.id, MAX_VISIBLE_CHAT_MESSAGES))
+            const messageLimit = isRecallRequest ? MAX_RECALL_MESSAGES_PER_CONVERSATION : 120;
+            const allSaved = (await firebaseBackend.getMessages(conversation.id, messageLimit))
               .filter((item) => item.role === 'user' || item.role === 'assistant');
             const saved = asksYesterday
               ? allSaved.filter((item) => item.timestamp >= yesterdayStart && item.timestamp < todayStart)
               : allSaved;
-            const content = saved.map((item) => item.role + ': ' + item.content).join('\n');
-            const haystack = (conversation.title + '\n' + content).toLowerCase();
-            const relevance = keywords.reduce((sum, word) => sum + (haystack.includes(word) ? 10 : 0), 0);
-            return { conversation, content, relevance, index, savedCount: saved.length,
-              totalCount: allSaved.length };
+            const compacted = compactConversationMessages(saved, keywords, asksYesterday ? 18 : 14);
+            const content = compacted.map((item) =>
+              '[' + localDateKey(new Date(item.timestamp)) + '] ' + item.role + ': ' + item.content
+            ).join('\n');
+            const searchable = (conversation.title + '\n' +
+              saved.map((item) => item.content.slice(0, 1800)).join('\n')).toLowerCase();
+            const relevance = keywords.reduce((sum, word) => sum + (searchable.includes(word) ? 10 : 0), 0);
+            return {
+              conversation,
+              content,
+              relevance,
+              index,
+              savedCount: saved.length,
+              compactedCount: compacted.length,
+              retrievalCapped: allSaved.length >= messageLimit,
+            };
           }));
           const matching = candidates.filter((item) => item.savedCount > 0);
           if (!asksYesterday) {
@@ -792,32 +874,33 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           let remaining = MAX_PRIOR_CONTEXT_CHARS;
           const selected: string[] = [];
           let included = 0;
-          for (const candidate of matching.slice(0, isRecallRequest ? 20 : 2)) {
+          for (const candidate of matching.slice(0, isRecallRequest ? 8 : 2)) {
             if (!candidate.content || remaining < 500) break;
             const heading = 'Saved conversation: ' + candidate.conversation.title + ' (' +
               new Date(candidate.conversation.updatedAt).toLocaleDateString() +
-              ', ' + candidate.savedCount + ' retrieved messages' +
+              ', ' + candidate.savedCount + ' matching saved messages' +
               (asksYesterday ? ' from yesterday' : '') + '):\n';
-            const available = Math.max(0, remaining - heading.length - 150);
+            const available = Math.max(0, remaining - heading.length - 180);
             if (available < 300) break;
-            const omitted = candidate.content.length > available ||
-              (!asksYesterday && candidate.totalCount >= MAX_VISIBLE_CHAT_MESSAGES);
+            const omitted = candidate.compactedCount < candidate.savedCount ||
+              candidate.content.length > available ||
+              candidate.retrievalCapped;
             const excerpt = candidate.content.length > available
               ? candidate.content.slice(-available)
               : candidate.content;
             selected.push(heading + (omitted
-              ? '[Some earlier messages may be omitted; this is not necessarily the full transcript.]\n'
-              : '[All retrieved messages for this conversation and requested date follow.]\n') + excerpt);
+              ? '[Compact excerpt selected for relevance and timeline coverage; some messages are omitted.]\n'
+              : '[Complete set of matching messages retrieved for this excerpt.]\n') + excerpt);
             included++;
             remaining -= selected[selected.length - 1].length;
           }
           const dateLabel = asksYesterday
             ? 'Yesterday is ' + localDateKey(new Date(yesterdayStart)) + ' in the user local time zone. '
             : '';
-          const coverage = 'Retrieved ' + included + ' of ' + matching.length +
+          const coverage = 'Retrieved compact excerpts from ' + included + ' of ' + matching.length +
             ' matching saved conversations' +
             (asksYesterday ? ' containing messages dated yesterday' : '') +
-            '. This search covers at most the 100 most recently updated conversations. ' +
+            '. The search checks up to 40 recent conversations and compresses long chats before sending them to the model. ' +
             (included < matching.length ? 'Some conversations were omitted due to context limits. ' : '') +
             'Do not claim that this is every conversation the user ever had.\n';
           recentConversationContext = dateLabel + coverage + selected.join('\n\n');
