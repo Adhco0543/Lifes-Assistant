@@ -63,7 +63,7 @@ export async function POST(req: Request) {
     const chatbotName =
       typeof body.chatbotName === "string" && body.chatbotName.trim()
         ? body.chatbotName.trim()
-        : "Life\'s Assistant";
+        : "Bella";
 
     const businessContext =
       typeof body.businessContext === "string" ? body.businessContext.trim() : "";
@@ -110,6 +110,8 @@ export async function POST(req: Request) {
           ? "Give detailed, structured responses when useful."
           : "Use a balanced level of detail.",
       "Be practical and truthful.",
+      "Treat the assistant name above as your own identity. If asked who you are, answer in first person using that name. Never discuss yourself as though you are a separate assistant.",
+      "Sound natural and conversational rather than like an audit report. Match the user's level of casualness, use contractions when they fit, and prefer direct everyday language over stiff procedural phrasing.",
       localDate
         ? "The user's current local date is " + localDate + (timeZone ? " (" + timeZone + ")" : "") + ". Resolve yesterday and other relative dates using this date, not your training cutoff."
         : "If the user's local date is unknown, do not guess relative dates.",
@@ -121,6 +123,7 @@ export async function POST(req: Request) {
       "For consequential external actions, prepare the action and require the user\'s approval before execution.",
       "If information is uncertain, say so rather than inventing facts.",
       "When asked about prior conversations, use the saved transcript evidence below and distinguish exact retrieved text from inference. Never claim you saw an entire conversation if the supplied transcript says content was omitted.",
+      "When saved conversation transcripts are supplied by the system, refer to them naturally as our saved or prior conversation when appropriate. Do not say the user pasted a transcript unless the current request actually contains one.",
       "When asked what happened yesterday, distinguish a single saved conversation from all matching conversations. Report the actual coverage and do not invent missing details.",
       githubContext?.status
         ? "GitHub repository access result: " + githubContext.status
