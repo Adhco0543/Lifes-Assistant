@@ -79,7 +79,7 @@ export async function POST(req: Request) {
     const persistentMemory = memoryEnabled ? sanitizeMemory(body.persistentMemory) : [];
     const recentConversationContext =
       memoryEnabled && typeof body.recentConversationContext === "string"
-        ? body.recentConversationContext.slice(0, 16000)
+        ? body.recentConversationContext.slice(0, 8000)
         : "";
 
     const localDate = typeof body.localDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.localDate)
@@ -184,12 +184,13 @@ export async function POST(req: Request) {
     const requestBody = {
       instructions,
       input,
-      max_output_tokens: 3200,
+      max_output_tokens: 1400,
     };
 
     let response: Response | null = null;
     let gatewayBillingRequired = false;
     let directRateLimited = false;
+    let directCreditsExhausted = false;
     let model = directModel;
     let provider = "openai-direct";
 
@@ -220,6 +221,8 @@ export async function POST(req: Request) {
         const detail = await attempt.text();
         directRateLimited = directRateLimited ||
           (attempt.status === 429 && /rate_limit|rate limit|tokens per min/i.test(detail));
+        directCreditsExhausted = directCreditsExhausted ||
+          /credit_balance_exhausted|insufficient_quota|no credits remaining/i.test(detail);
         console.error(
           "Direct OpenAI Responses API error (" + candidateModel + "):",
           attempt.status,
@@ -267,14 +270,33 @@ export async function POST(req: Request) {
     }
 
     if (!response || !response.ok) {
+      const localFallback = buildLocalFallback(
+        requestMessage,
+        chatbotName,
+        recentConversationContext,
+        localDate
+      );
+
+      if (localFallback) {
+        return NextResponse.json({
+          type: action,
+          message: localFallback,
+          data: buildDraft(action, requestMessage),
+          model: "local-degraded-mode",
+          provider: "local",
+        });
+      }
+
       return NextResponse.json(
         {
           type: action,
-          message: gatewayBillingRequired
-            ? directRateLimited
-              ? "Bella's direct OpenAI models are temporarily rate-limited, and the Vercel backup is unavailable because billing verification is not enabled. Your message was preserved; try again shortly."
-              : "Bella could not reach a direct OpenAI model, and the Vercel backup requires billing verification. Your message was preserved so you can try again."
-            : "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
+          message: directCreditsExhausted
+            ? "Bella reached OpenAI, but the API account has no credits remaining. Luna is also temporarily rate-limited, and the Vercel backup is unavailable until billing verification is enabled. Your message was preserved."
+            : gatewayBillingRequired
+              ? directRateLimited
+                ? "Bella's direct OpenAI model is temporarily rate-limited, and the Vercel backup is unavailable because billing verification is not enabled. Your message was preserved; try again after the rate limit resets."
+                : "Bella could not reach a direct OpenAI model, and the Vercel backup requires billing verification. Your message was preserved so you can try again."
+              : "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
           data: buildDraft(action, requestMessage),
         },
         { status: 502 }
@@ -366,9 +388,9 @@ function sanitizeMemory(value: unknown): string[] {
 
   return value
     .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim().slice(0, 350))
+    .map((item) => item.trim().slice(0, 260))
     .filter(Boolean)
-    .slice(0, 20);
+    .slice(0, 12);
 }
 
 function sanitizeHistory(value: unknown): HistoryMessage[] {
@@ -387,14 +409,77 @@ function sanitizeHistory(value: unknown): HistoryMessage[] {
     )
     .map((item) => ({
       role: item.role,
-      content: item.content.slice(0, 6000),
+      content: item.content.slice(0, 3600),
     }))
     .reduceRight<{ messages: HistoryMessage[]; chars: number }>((state, item) => {
-      if (state.chars + item.content.length > 26000 && state.messages.length) return state;
+      if (state.chars + item.content.length > 14000 && state.messages.length) return state;
       state.messages.unshift(item);
       state.chars += item.content.length;
       return state;
     }, { messages: [], chars: 0 }).messages;
+}
+
+function buildLocalFallback(
+  requestMessage: string,
+  chatbotName: string,
+  recentConversationContext: string,
+  localDate: string
+): string {
+  const lower = requestMessage.toLowerCase();
+  const asksIdentity =
+    /\b(who are you|what(?:'s| is) your name|your name)\b/i.test(requestMessage);
+  const asksRecall =
+    /remember|recollect|recall|yesterday|last (?:chat|time|week)|previous (?:chat|conversation)|we (?:talked|discussed)|what did we/i.test(requestMessage);
+
+  if (!asksIdentity && !asksRecall) return "";
+
+  const parts: string[] = [];
+  if (asksIdentity) {
+    parts.push("I'm " + chatbotName + ".");
+  }
+
+  if (asksRecall) {
+    if (!recentConversationContext.trim()) {
+      parts.push("The full AI service is temporarily unavailable, and I don't have a saved-history excerpt for that request to safely summarize.");
+    } else {
+      const headings = recentConversationContext
+        .split("\n")
+        .filter((line) => line.startsWith("Saved conversation: "))
+        .slice(0, 5)
+        .map((line) => line.replace(/^Saved conversation:\s*/, "").trim());
+
+      const userLines = recentConversationContext
+        .split("\n")
+        .filter((line) => /\]\s+user:\s+/i.test(line))
+        .map((line) => line.replace(/^.*?\]\s+user:\s+/i, "").trim())
+        .filter(Boolean)
+        .slice(0, 6)
+        .map((line) => line.length > 180 ? line.slice(0, 177) + "..." : line);
+
+      if (headings.length) {
+        parts.push(
+          "Full AI generation is temporarily offline, but I can still read the saved-history excerpts. I found " +
+          headings.length +
+          " saved conversation" +
+          (headings.length === 1 ? "" : "s") +
+          (localDate ? " around " + localDate : "") +
+          ": " +
+          headings.join("; ") +
+          "."
+        );
+      }
+
+      if (userLines.length) {
+        parts.push("Some of your saved messages were: " + userLines.map((line) => "“" + line + "”").join(" · "));
+      }
+
+      if (!headings.length && !userLines.length) {
+        parts.push("I found saved-history data, but it is too limited to summarize safely without the full AI service.");
+      }
+    }
+  }
+
+  return parts.join(" ");
 }
 
 function extractOutputText(result: ResponsesApiResult): string {
