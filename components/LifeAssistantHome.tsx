@@ -273,6 +273,9 @@ export default function LifeAssistantHome({
         .home-page {
           height: 100%;
           overflow-y: auto;
+          overscroll-behavior-y: contain;
+          -webkit-overflow-scrolling: touch;
+          scroll-padding-bottom: calc(110px + env(safe-area-inset-bottom));
           background:
             radial-gradient(circle at 78% 4%, rgba(96, 165, 250, 0.07), transparent 25%),
             #212121;
@@ -613,7 +616,11 @@ export default function LifeAssistantHome({
           .command-center { grid-template-columns: 1fr; }
         }
         @media (max-width: 680px) {
-          .home-inner { width: min(100% - 28px, 1180px); padding-top: 24px; }
+          .home-inner {
+            width: min(100% - 28px, 1180px);
+            padding-top: 24px;
+            padding-bottom: calc(110px + env(safe-area-inset-bottom));
+          }
           .hero-copy { padding-top: 16px; }
           .hero-visual { min-height: 280px; border-radius: 17px; }
           .quick-grid, .lower-grid, .recent-strip { grid-template-columns: 1fr; }
