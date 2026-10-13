@@ -237,6 +237,13 @@ function localNoonFromDateKey(dateKey?: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function continuityDevice(): 'desktop' | 'tablet' | 'phone' | 'unknown' {
+  if (typeof window === 'undefined') return 'unknown';
+  if (window.innerWidth <= 640) return 'phone';
+  if (window.innerWidth <= 1024) return 'tablet';
+  return 'desktop';
+}
+
 const DEFAULT_ASSISTANT_NAME = 'Bella';
 
 const normalizeAssistantName = (value: unknown): string => {
@@ -380,7 +387,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     };
   }, [userId]);
 
-  const loadConversation = useCallback(async (conversationId: string) => {
+  const loadConversation = useCallback(async (conversationId: string, conversationTitle?: string) => {
     const requestNumber = ++conversationLoadSequence.current;
     setLoadingConversationId(conversationId);
     setConversationLoadError('');
@@ -394,6 +401,16 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setMessages(msgs);
       setCurrentConversationId(conversationId);
       localStorage.setItem('life-chat-current:' + userId, conversationId);
+
+      void firebaseBackend.saveContinuityState({
+        view: 'chat',
+        label: 'Conversation',
+        context: conversationTitle || 'Saved conversation',
+        contextId: conversationId,
+        device: continuityDevice(),
+      }).catch((error) => {
+        console.warn('Could not sync chat continuity:', error);
+      });
       setHistoryStatus(msgs.length
         ? 'Conversation restored from your account.'
         : 'This conversation has no saved messages yet.');
@@ -435,9 +452,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           setConversations(existingConvs);
 
           if (existingConvs.length > 0) {
+            const cloudContinuity = await firebaseBackend.getContinuityState().catch(() => null);
+            const cloudConversationId =
+              cloudContinuity?.view === 'chat' ? cloudContinuity.contextId : undefined;
             const rememberedId = localStorage.getItem('life-chat-current:' + userId);
-            const selected = existingConvs.find((conv) => conv.id === rememberedId) || existingConvs[0];
-            await loadConversation(selected.id);
+            const selected =
+              existingConvs.find((conv) => conv.id === cloudConversationId) ||
+              existingConvs.find((conv) => conv.id === rememberedId) ||
+              existingConvs[0];
+            await loadConversation(selected.id, selected.title);
           } else {
             const newConvId = await firebaseBackend.createConversation('New Chat', businessContext);
             if (!cancelled) {
@@ -1153,7 +1176,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
                   key={conv.id}
                   disabled={Boolean(loadingConversationId)}
                   className={`history-item ${conv.id === currentConversationId ? 'active' : ''}`}
-                  onClick={() => void loadConversation(conv.id)}
+                  onClick={() => void loadConversation(conv.id, conv.title)}
                 >
                   <span className="history-item-main">
                     <strong>{conv.title || 'Untitled conversation'}</strong>
