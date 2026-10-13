@@ -88,6 +88,25 @@ export const AIEmailComposer: React.FC<AIEmailComposerProps> = ({ userId }) => {
       }).catch(() => {
         // Cloud draft autosave is best-effort.
       });
+
+      const context =
+        subject.trim() ||
+        (recipient.trim() ? 'Email to ' + recipient.trim() : '') ||
+        'Working email draft';
+
+      void firebaseBackend.saveContinuityState({
+        view: 'email',
+        label: 'Email draft',
+        context: context.slice(0, 100),
+        device:
+          window.innerWidth <= 640
+            ? 'phone'
+            : window.innerWidth <= 1024
+              ? 'tablet'
+              : 'desktop',
+      }).catch(() => {
+        // Continuity sync is best-effort.
+      });
     }, 650);
 
     return () => window.clearTimeout(timer);
