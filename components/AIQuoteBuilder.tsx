@@ -163,6 +163,26 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
       }).catch(() => {
         // Cloud draft autosave is best-effort; explicit save still has local fallback.
       });
+
+      const context =
+        clientName.trim() ||
+        projectDescription.trim().slice(0, 100) ||
+        'Working quote draft';
+
+      void firebaseBackend.saveContinuityState({
+        view: 'quotes',
+        label: 'Quote builder',
+        context,
+        contextId: projectId || undefined,
+        device:
+          window.innerWidth <= 640
+            ? 'phone'
+            : window.innerWidth <= 1024
+              ? 'tablet'
+              : 'desktop',
+      }).catch(() => {
+        // Continuity sync is best-effort.
+      });
     }, 650);
 
     return () => window.clearTimeout(timer);
