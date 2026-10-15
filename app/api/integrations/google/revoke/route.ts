@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
 import { openGoogleTokenBundle } from '../../../../../lib/googleTokenVault';
+import { revokeOAuthConnection } from '../../../../../lib/oauthRevocation';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 
 export async function POST(request: Request) {
   const user = await getFirebaseRequestUser(request);
@@ -8,26 +10,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   }
 
-  try {
-    const body = await request.json();
-    const bundle = openGoogleTokenBundle(String(body?.sealedBundle || ''));
-
-    if (String(bundle.uid || '') !== user.uid) {
-      return NextResponse.json({ error: 'Connection owner mismatch.' }, { status: 403 });
-    }
-
-    const token = String(bundle.refresh_token || bundle.access_token || '');
-    if (token) {
-      await fetch('https://oauth2.googleapis.com/revoke', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ token }),
-        cache: 'no-store',
-      });
-    }
-
-    return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ ok: true });
-  }
+  const body: unknown = await request.json().catch(() => null);
+  const result = await revokeOAuthConnection({
+    provider: 'google',
+    authenticatedUid: user.uid,
+    body,
+    openBundle: openGoogleTokenBundle,
+  });
+  if (!result.body.ok) reportIntegrationFailure('google', 'revoke', result.status);
+  return NextResponse.json(result.body, { status: result.status });
 }

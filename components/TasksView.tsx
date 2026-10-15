@@ -119,7 +119,7 @@ export const TasksView: React.FC<TasksViewProps> = ({ userId }) => {
           })
           .filter((task) => task.title);
 
-        let migratedLocal: LocalTask[] = [];
+        const migratedLocal: LocalTask[] = [];
         try {
           const rawLocal = localStorage.getItem(storageKey);
           const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];

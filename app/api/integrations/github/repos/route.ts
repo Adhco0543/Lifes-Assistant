@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
 import { getGitHubAccessToken } from '../../../../../lib/githubAccess';
 
@@ -54,12 +55,10 @@ export async function POST(request: Request) {
       sealedBundle: token.sealedBundle,
       refreshed: token.refreshed,
     });
-  } catch (error) {
+  } catch {
+    reportIntegrationFailure('github', 'request');
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : 'GitHub repository lookup failed.',
-      },
+      { error: 'GitHub repository lookup failed. Reconnect and try again.' },
       { status: 400 }
     );
   }

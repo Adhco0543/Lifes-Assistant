@@ -367,7 +367,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     try {
       if (github.sealedBundle) {
         const token = await firebaseBackend.getIdToken();
-        await fetch('/api/integrations/github/revoke', {
+        const response = await fetch('/api/integrations/github/revoke', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -375,6 +375,12 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
           },
           body: JSON.stringify({ sealedBundle: github.sealedBundle }),
         });
+        const result: unknown = await response.json().catch(() => null);
+        if (!response.ok || !result || typeof result !== 'object' ||
+            !('revoked' in result) || result.revoked !== true) {
+          setMessage('GitHub did not confirm token revocation. Connection retained. Please retry.');
+          return;
+        }
       }
 
       const cleared: GitHubConnection = {
@@ -387,6 +393,8 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
       setGitHub(cleared);
       setGitHubRepositoryAccess(false);
       setMessage('GitHub disconnected.');
+    } catch {
+      setMessage('Could not disconnect GitHub. Your connection is still saved.');
     } finally {
       setBusy('');
     }
@@ -535,7 +543,7 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
     try {
       if (google.sealedBundle) {
         const token = await firebaseBackend.getIdToken();
-        await fetch('/api/integrations/google/revoke', {
+        const response = await fetch('/api/integrations/google/revoke', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -543,6 +551,12 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
           },
           body: JSON.stringify({ sealedBundle: google.sealedBundle }),
         });
+        const result: unknown = await response.json().catch(() => null);
+        if (!response.ok || !result || typeof result !== 'object' ||
+            !('revoked' in result) || result.revoked !== true) {
+          setMessage('Google did not confirm token revocation. Connection retained. Please retry.');
+          return;
+        }
       }
 
       const cleared: GoogleConnection = {
@@ -554,6 +568,8 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
       await firebaseBackend.saveDraft('integration-google', cleared);
       setGoogle(cleared);
       setMessage('Google disconnected.');
+    } catch {
+      setMessage('Could not disconnect Google. Your connection is still saved.');
     } finally {
       setBusy('');
     }

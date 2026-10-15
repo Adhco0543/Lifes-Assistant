@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
 import { sealGoogleTokenBundle } from '../../../../../lib/googleTokenVault';
 
@@ -93,15 +94,10 @@ export async function POST(request: Request) {
       reconnectRequiredAfter: bundle.expires_at,
       mode: 'firebase',
     });
-  } catch (error) {
+  } catch {
+    reportIntegrationFailure('google', 'request');
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Google connection could not be completed.',
-      },
+      { ok: false, error: 'Google connection could not be completed. Please retry.' },
       { status: 400 }
     );
   }

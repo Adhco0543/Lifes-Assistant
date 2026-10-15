@@ -71,7 +71,7 @@ export function TranscriptViewer({
     const text = editedText || transcript.text;
     if (highlights.length === 0) return text;
 
-    let result = [];
+    const result = [];
     let lastIndex = 0;
 
     const sortedHighlights = [...highlights].sort((a, b) => a.start - b.start);
