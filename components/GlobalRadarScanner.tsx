@@ -13,7 +13,6 @@ export default function GlobalRadarScanner({
 }: GlobalRadarScannerProps) {
   useEffect(() => {
     let cancelled = false;
-    let timer: number | undefined;
     let changeTimer: number | undefined;
     let scanRunning = false;
     let rerunRequested = false;
@@ -72,7 +71,7 @@ export default function GlobalRadarScanner({
     };
 
     void scan();
-    timer = window.setInterval(() => {
+    const timer = window.setInterval(() => {
       void scan();
     }, 5 * 60 * 1000);
 
