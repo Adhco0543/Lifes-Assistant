@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
 import { getGitHubAccessToken } from '../../../../../lib/githubAccess';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 
 export async function POST(request: Request) {
   const user = await getFirebaseRequestUser(request);
@@ -52,14 +53,12 @@ export async function POST(request: Request) {
       refreshed: token.refreshed,
       checkedAt: Date.now(),
     });
-  } catch (error) {
+  } catch {
+    reportIntegrationFailure('github', 'verify');
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'GitHub connection test failed.',
+        error: 'GitHub connection verification failed. Reconnect and try again.',
       },
       { status: 400 }
     );
