@@ -42,7 +42,7 @@ const msg = (content, role = 'user', timestamp = 1) => ({
 
 test('chat flow context respects memory order and bounded history', () => {
   const messages = Array.from({ length: 30 }, (_, i) =>
-    msg('message ' + i + ' '.repeat(700), i % 2 ? 'assistant' : 'user', i + 1));
+    msg('message ' + i + ' ' + 'x'.repeat(700), i % 2 ? 'assistant' : 'user', i + 1));
   const context = currentChatContext(messages);
   assert.ok(context.omitted > 0);
   assert.equal(context.omitted + context.selected.length, messages.length);
