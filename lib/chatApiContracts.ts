@@ -48,8 +48,28 @@ export function validateChatRequest(value: unknown):
       return { valid: false, error: 'Invalid ' + key + ' input.' };
     }
   }
-  if (Array.isArray(body.attachments) && body.attachments.length > 3) {
-    return { valid: false, error: 'Too many attachments.' };
+  if (Array.isArray(body.attachments)) {
+    if (body.attachments.length > 3) {
+      return { valid: false, error: 'Too many attachments.' };
+    }
+    let declaredBytes = 0;
+    let encodedChars = 0;
+    for (const item of body.attachments) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return { valid: false, error: 'Invalid attachment.' };
+      }
+      const part = item as Record<string, unknown>;
+      if (typeof part.name !== 'string' || typeof part.type !== 'string' ||
+          typeof part.dataUrl !== 'string' || typeof part.size !== 'number' ||
+          !Number.isFinite(part.size) || part.size <= 0) {
+        return { valid: false, error: 'Invalid attachment.' };
+      }
+      declaredBytes += part.size;
+      encodedChars += part.dataUrl.length;
+    }
+    if (declaredBytes > 2_400_000 || encodedChars > 3_500_000) {
+      return { valid: false, error: 'Attachments are too large.' };
+    }
   }
   if (Array.isArray(body.history) && body.history.length > 2000) {
     return { valid: false, error: 'Too many history messages.' };
