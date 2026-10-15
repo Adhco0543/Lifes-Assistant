@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getFirebaseRequestUser } from '../../../../../lib/serverAuth';
 import { getGoogleAccessToken } from '../../../../../lib/googleAccess';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 
 async function probe(url: string, accessToken: string): Promise<boolean> {
   const response = await fetch(url, {
@@ -61,11 +62,12 @@ export async function POST(request: Request) {
       refreshed: token.refreshed,
       checkedAt: Date.now(),
     });
-  } catch (error) {
+  } catch {
+    reportIntegrationFailure('google', 'verify');
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : 'Google connection test failed.',
+        error: 'Google connection verification failed. Reconnect and try again.',
       },
       { status: 400 }
     );
