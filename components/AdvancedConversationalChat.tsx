@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import type { ChatMessage, Conversation } from '../lib/firebaseBackend';
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, SUPPORTED_ATTACHMENT_EXTENSIONS, formatFileSize, readFileAsDataUrl, dataUrlByteSize, prepareImageAttachment } from '../lib/chatAttachments';
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, SUPPORTED_ATTACHMENT_EXTENSIONS, formatFileSize, readFileAsDataUrl, prepareImageAttachment } from '../lib/chatAttachments';
 import type { PendingAttachment } from '../lib/chatAttachments';
 import { currentChatContext, recallKeywords, compactConversationMessages } from '../lib/chatContext';
 import { parseChatApiResponse } from '../lib/chatApiContracts';
