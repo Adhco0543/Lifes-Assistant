@@ -49,7 +49,7 @@ class JobExtractorClass {
 
     const text = transcript.toLowerCase();
     let matchCount = 0;
-    let totalPossible = 10; // Job title, company, description, location, salary, type, contact, start, deadline, notes
+    const totalPossible = 10; // Job title, company, description, location, salary, type, contact, start, deadline, notes
 
     // Extract job title
     const titleMatch = this.extractJobTitle(text);
