@@ -3,6 +3,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import type { ChatAttachmentMeta, ChatMessage, Conversation } from '../lib/firebaseBackend';
+import { currentChatContext, recallKeywords, compactConversationMessages } from '../lib/chatContext';
+import { parseChatApiResponse } from '../lib/chatApiContracts';
+import type { ChatApiResponse } from '../lib/chatApiContracts';
+import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 
 interface AdvancedChatProps {
   userId?: string;
@@ -10,13 +14,6 @@ interface AdvancedChatProps {
   onClose?: () => void;
   fullScreen?: boolean;
 }
-
-type ChatApiResponse = {
-  type?: 'chat' | 'quote' | 'email' | 'task' | string;
-  message?: string;
-  githubReviewStatus?: string;
-  data?: any;
-};
 
 type PendingAttachment = ChatAttachmentMeta & {
   id: string;
@@ -26,101 +23,10 @@ type PendingAttachment = ChatAttachmentMeta & {
 const MAX_ATTACHMENT_BYTES = 2_400_000;
 const MAX_ATTACHMENTS = 3;
 const MAX_VISIBLE_CHAT_MESSAGES = 2000;
-const MAX_CURRENT_CONTEXT_CHARS = 12000;
 const MAX_PRIOR_CONTEXT_CHARS = 7000;
-const MAX_CONTEXT_MESSAGE_CHARS = 3200;
-const MAX_PRIOR_MESSAGE_CHARS = 900;
 const MAX_RECALL_CONVERSATIONS = 10;
 const MAX_RECALL_MESSAGES_PER_CONVERSATION = 400;
 
-function trimForContext(value: string, maxChars: number): string {
-  const text = value.trim();
-  if (text.length <= maxChars) return text;
-  const head = Math.floor(maxChars * 0.38);
-  const tail = maxChars - head - 35;
-  return text.slice(0, head) + '\n[…middle shortened…]\n' + text.slice(-tail);
-}
-
-function currentChatContext(messages: ChatMessage[]) {
-  const eligible = messages.filter((message) => message.role === 'user' || message.role === 'assistant');
-  let chars = 0;
-  const selected: ChatMessage[] = [];
-  for (let index = eligible.length - 1; index >= 0; index--) {
-    const message = eligible[index];
-    const compactContent = trimForContext(message.content, MAX_CONTEXT_MESSAGE_CHARS);
-    const compactMessage = { ...message, content: compactContent };
-    const length = compactContent.length;
-    if (chars + length > MAX_CURRENT_CONTEXT_CHARS && selected.length) break;
-    selected.unshift(compactMessage);
-    chars += length;
-  }
-  return { selected: selected.map(({ role, content }) => ({ role, content })),
-    omitted: eligible.length - selected.length };
-}
-
-function recallKeywords(value: string): string[] {
-  const stopWords = new Set(['about', 'what', 'when', 'where', 'which', 'that', 'this', 'with',
-    'have', 'from', 'there', 'their', 'were', 'talk', 'talked', 'discuss', 'discussed',
-    'remember', 'recall', 'yesterday', 'before', 'previous', 'last', 'chat', 'conversation']);
-  return [...new Set((value.toLowerCase().match(/[a-z0-9]{4,}/g) || [])
-    .filter((word) => !stopWords.has(word)))].slice(0, 12);
-}
-
-function compactConversationMessages(
-  messages: ChatMessage[],
-  keywords: string[],
-  limit = 16
-): ChatMessage[] {
-  if (messages.length <= limit) {
-    return messages.map((message) => ({
-      ...message,
-      content: trimForContext(message.content, MAX_PRIOR_MESSAGE_CHARS),
-    }));
-  }
-
-  const selected = new Set<number>();
-  const add = (index: number) => {
-    if (index >= 0 && index < messages.length) selected.add(index);
-  };
-
-  add(0);
-  add(1);
-  for (let index = Math.max(0, messages.length - 6); index < messages.length; index++) add(index);
-
-  if (keywords.length) {
-    messages.forEach((message, index) => {
-      const lower = message.content.toLowerCase();
-      if (keywords.some((keyword) => lower.includes(keyword))) {
-        add(index - 1);
-        add(index);
-        add(index + 1);
-      }
-    });
-  }
-
-  const userIndexes = messages
-    .map((message, index) => ({ message, index }))
-    .filter(({ message }) => message.role === 'user')
-    .map(({ index }) => index);
-
-  if (selected.size < limit && userIndexes.length) {
-    const remaining = Math.max(1, limit - selected.size);
-    const stride = Math.max(1, Math.floor(userIndexes.length / remaining));
-    for (let i = 0; i < userIndexes.length && selected.size < limit; i += stride) {
-      add(userIndexes[i]);
-    }
-  }
-
-  for (let index = messages.length - 1; index >= 0 && selected.size < limit; index--) add(index);
-
-  return [...selected]
-    .sort((a, b) => a - b)
-    .slice(-limit)
-    .map((index) => ({
-      ...messages[index],
-      content: trimForContext(messages[index].content, MAX_PRIOR_MESSAGE_CHARS),
-    }));
-}
 const SUPPORTED_ATTACHMENT_EXTENSIONS =
   /\.(pdf|txt|md|json|html?|xml|rtf|odt|docx?|pptx?|xlsx?|csv|tsv|iif|png|jpe?g|webp|gif|js|jsx|ts|tsx|py|java|c|cc|cpp|h|hpp|cs|go|rs|rb|php|swift|kt|kts|sh|sql|yaml|yml)$/i;
 
@@ -409,7 +315,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         contextId: conversationId,
         device: continuityDevice(),
       }).catch((error) => {
-        console.warn('Could not sync chat continuity:', error);
+        reportIntegrationFailure('firebase', 'save');
       });
       setHistoryStatus(msgs.length
         ? 'Conversation restored from your account.'
@@ -418,7 +324,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setHistoryOpen(false);
     } catch (error) {
       if (requestNumber !== conversationLoadSequence.current) return;
-      console.error('Error loading conversation:', error);
+      reportIntegrationFailure('firebase', 'load');
       const message = error instanceof Error ? error.message : 'Unknown error';
       setConversationLoadError('Could not open that conversation: ' + message);
       setHistoryStatus('Could not open saved messages. Your current chat was not changed.');
@@ -484,7 +390,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           setHistoryStatus('Not signed in. This chat is not being saved to the cloud.');
         }
       } catch (error) {
-        console.error('Error initializing chat:', error);
+        reportIntegrationFailure('firebase', 'load');
         setHistoryStatus('Could not connect to saved chat history. Messages may not be preserved.');
 
         const welcomeMsg: ChatMessage = {
@@ -599,7 +505,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setAttachmentError('');
       setPendingAction(null);
     } catch (error) {
-      console.error('Error creating conversation:', error);
+      reportIntegrationFailure('firebase', 'save');
     }
   }, [businessContext, userId]);
 
@@ -703,7 +609,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         });
       }
     } catch (error) {
-      console.warn('Life Radar capture skipped:', error);
+      reportIntegrationFailure('radar', 'request');
     }
   }, [businessContext, currentConversationId]);
 
@@ -835,7 +741,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         await firebaseBackend.saveMessage(userMsg);
         await firebaseBackend.trackEvent('message_sent', { length: userMessage.length });
       } catch (error) {
-        console.warn('Error saving user message:', error);
+        reportIntegrationFailure('firebase', 'save');
         setHistoryStatus('Could not save your message to the cloud. Check your connection.');
       }
     }
@@ -928,7 +834,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
             'Do not claim that this is every conversation the user ever had.\n';
           recentConversationContext = dateLabel + coverage + selected.join('\n\n');
         } catch (error) {
-          console.warn('Could not retrieve older conversation context:', error);
+          reportIntegrationFailure('firebase', 'load');
           setHistoryStatus('Previous conversations could not be retrieved. Your current chat still works.');
         }
       }
@@ -970,10 +876,14 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       if (!apiResponse.ok) {
         const failure = await apiResponse.json().catch(() => null) as { message?: string; error?: string } | null;
-        throw new Error(failure?.message || failure?.error || `Chat API error: ${apiResponse.status}`);
+        const knownMessage = typeof failure?.message === 'string' &&
+          failure.message.length > 0 && failure.message.length <= 500
+          ? failure.message : undefined;
+        throw new Error('Chat service: ' + (knownMessage ||
+          (apiResponse.status === 401 ? 'Please sign in again.' : 'The AI service is unavailable. Please try again.')));
       }
 
-      const data = (await apiResponse.json()) as ChatApiResponse;
+      const data = parseChatApiResponse(await apiResponse.json());
 
       const response =
         data.message || "I received your message, but I couldn't generate a response.";
@@ -997,7 +907,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         try {
           await firebaseBackend.saveMessage(assistantMsg);
         } catch (error) {
-          console.warn('Error saving assistant message:', error);
+          reportIntegrationFailure('firebase', 'save');
           setHistoryStatus('The reply appeared, but could not be saved to your account.');
         }
       }
@@ -1008,16 +918,16 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         setPendingAction(null);
       }
     } catch (error) {
-      console.error('Error in handleSendMessage:', error);
+      reportIntegrationFailure('chat', 'request');
 
       const errorMsg: ChatMessage = {
         id: `error-${Date.now()}`,
         userId: 'system',
         conversationId: currentConversationId || 'local',
         role: 'assistant',
-        content: `I encountered an error processing your request. ${
-          error instanceof Error ? error.message : 'Please try again.'
-        }`,
+        content: error instanceof Error && error.message.startsWith('Chat service:')
+          ? error.message.slice('Chat service:'.length).trim().slice(0, 500)
+          : 'I could not complete your request. Please try again.',
         timestamp: Date.now(),
       };
 
