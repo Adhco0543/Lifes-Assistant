@@ -1,4 +1,5 @@
 import { readGoogleOAuthState } from '../../../../../lib/googleOAuthState';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 import { assertOauthNonceCookie, clearOauthNonceCookie } from '../../../../../lib/oauthNonceCookie';
 import { sealGoogleTokenBundle } from '../../../../../lib/googleTokenVault';
 
@@ -118,11 +119,12 @@ export async function GET(request: Request) {
       sealedBundle,
       connectedAt: Date.now(),
     });
-  } catch (error) {
+  } catch {
+    reportIntegrationFailure('google', 'connect');
     return popupResponse(origin, {
       type: 'life-assistant-google-oauth',
       ok: false,
-      error: error instanceof Error ? error.message : 'Google connection failed.',
+      error: 'Google connection could not be completed. Please retry.',
     });
   }
 }
