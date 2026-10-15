@@ -13,6 +13,5 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # Existing lockfile predates the @vercel/oidc dependency; npm install repairs it in CI.
-      - run: npm install --no-audit --no-fund
+      - run: npm ci
       - run: npm run validate
