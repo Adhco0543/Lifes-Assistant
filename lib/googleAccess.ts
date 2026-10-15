@@ -43,6 +43,9 @@ export async function getGoogleAccessToken(
   }
 
   const refreshed = await response.json();
+  if (typeof refreshed?.access_token !== 'string' || !refreshed.access_token) {
+    throw new Error('Google token refresh failed. Reconnect your account.');
+  }
   const nextBundle = {
     ...bundle,
     access_token: refreshed.access_token,
