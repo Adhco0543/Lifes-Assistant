@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { verifyFirebaseRequest } from "../../../lib/serverAuth";
 import { getPublicGithubContext } from "../../../lib/publicGithubContext";
+import { validateChatRequest, parseResponsesApiResult } from "../../../lib/chatApiContracts";
+import type { ResponsesApiResult } from "../../../lib/chatApiContracts";
+import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
 
 type HistoryMessage = {
   role: "user" | "assistant";
@@ -15,38 +18,32 @@ type AttachmentInput = {
   dataUrl: string;
 };
 
-type ResponsesApiResult = {
-  status?: string;
-  incomplete_details?: { reason?: string };
-  usage?: { output_tokens?: number };
-  output_text?: string;
-  output?: Array<{
-    type?: string;
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
-  }>;
-};
-
 export async function POST(req: Request) {
   try {
     if (!(await verifyFirebaseRequest(req))) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    const body = await req.json();
-
-    const message =
-      body.message?.trim?.() ||
-      body.input?.trim?.() ||
-      body.content?.trim?.() ||
-      body.messages?.[body.messages.length - 1]?.content?.trim?.() ||
-      "";
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (contentLength > 4_000_000) {
+      return NextResponse.json({ error: 'Request is too large.' }, { status: 413 });
+    }
+    const validation = validateChatRequest(await req.json().catch(() => null));
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+    const body = validation.body;
+    const incomingMessages = Array.isArray(body.messages) ? body.messages : [];
+    const lastIncoming = incomingMessages[incomingMessages.length - 1];
+    const lastMessageContent = lastIncoming && typeof lastIncoming === 'object' &&
+      'content' in lastIncoming ? lastIncoming.content : undefined;
+    const message = [body.message, body.input, body.content, lastMessageContent]
+      .find((value) => typeof value === 'string' && value.trim()) as string | undefined;
+    const trimmedMessage = message?.trim() || '';
 
     const attachments = sanitizeAttachments(body.attachments);
     const requestMessage =
-      message ||
+      trimmedMessage ||
       (attachments.length
         ? "Please review the attached file" + (attachments.length > 1 ? "s" : "") + "."
         : "");
@@ -223,11 +220,7 @@ export async function POST(req: Request) {
           (attempt.status === 429 && /rate_limit|rate limit|tokens per min/i.test(detail));
         directCreditsExhausted = directCreditsExhausted ||
           /credit_balance_exhausted|insufficient_quota|no credits remaining/i.test(detail);
-        console.error(
-          "Direct OpenAI Responses API error (" + candidateModel + "):",
-          attempt.status,
-          detail.slice(0, 600)
-        );
+        reportIntegrationFailure('openai', 'request', attempt.status);
       }
     }
 
@@ -253,18 +246,14 @@ export async function POST(req: Request) {
             }),
           });
         }
-      } catch (error) {
-        console.warn("AI Gateway request could not start:", error);
+      } catch {
+        reportIntegrationFailure('gateway', 'request');
       }
 
       if (response && !response.ok) {
         const detail = await response.text();
         gatewayBillingRequired = response.status === 403 && detail.includes("customer_verification_required");
-        console.error(
-          "AI Gateway Responses API error:",
-          response.status,
-          detail.slice(0, 600)
-        );
+        reportIntegrationFailure('gateway', 'request', response.status);
         response = null;
       }
     }
@@ -303,15 +292,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = (await response.json()) as ResponsesApiResult;
+    const result = parseResponsesApiResult(await response.json());
     const reply = extractOutputText(result);
     if (!reply) {
-      console.error("AI returned no text", {
-        model, provider, status: result.status,
-        incompleteReason: result.incomplete_details?.reason,
-        outputTokens: result.usage?.output_tokens,
-        outputTypes: result.output?.map((item) => item.type).slice(0, 10),
-      });
+      reportIntegrationFailure('chat', 'parse-response');
       return NextResponse.json({
         type: action,
         message: result.incomplete_details?.reason === "max_output_tokens"
@@ -331,8 +315,8 @@ export async function POST(req: Request) {
       provider,
       githubReviewStatus: githubContext?.status || undefined,
     });
-  } catch (error) {
-    console.error("Chat route error:", error);
+  } catch {
+    reportIntegrationFailure('chat', 'request');
 
     return NextResponse.json(
       {
