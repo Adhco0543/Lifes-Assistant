@@ -1,4 +1,5 @@
 import { readGitHubOAuthState } from '../../../../../lib/githubOAuthState';
+import { reportIntegrationFailure } from '../../../../../lib/integrationDiagnostics';
 import { assertOauthNonceCookie, clearOauthNonceCookie } from '../../../../../lib/oauthNonceCookie';
 import { sealGitHubTokenBundle } from '../../../../../lib/githubTokenVault';
 
@@ -137,12 +138,12 @@ export async function GET(request: Request) {
       sealedBundle,
       connectedAt: Date.now(),
     });
-  } catch (error) {
+  } catch {
+    reportIntegrationFailure('github', 'connect');
     return popupResponse(origin, {
       type: 'life-assistant-github-oauth',
       ok: false,
-      error:
-        error instanceof Error ? error.message : 'GitHub connection failed.',
+      error: 'GitHub connection could not be completed. Please retry.',
     });
   }
 }
