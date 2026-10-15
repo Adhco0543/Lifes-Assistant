@@ -49,8 +49,8 @@ export async function getGitHubAccessToken(
   }
 
   const refreshed = await response.json();
-  if (!refreshed.access_token) {
-    throw new Error(refreshed.error_description || 'GitHub token refresh failed.');
+  if (typeof refreshed?.access_token !== 'string' || !refreshed.access_token) {
+    throw new Error('GitHub token refresh failed. Reconnect your account.');
   }
 
   const nextBundle = {
