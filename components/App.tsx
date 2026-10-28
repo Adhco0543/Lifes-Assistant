@@ -23,6 +23,7 @@ import ProjectsCenter from './ProjectsCenter';
 import GlobalRadarScanner from './GlobalRadarScanner';
 import RadarCenter from './RadarCenter';
 import ConnectionsHub from './ConnectionsHub';
+import SpatialWorkspace from './SpatialWorkspace';
 import type { OpenLoop } from '../lib/firebaseBackend';
 
 type ViewType =
@@ -35,6 +36,7 @@ type ViewType =
   | 'notes'
   | 'email'
   | 'materials'
+  | 'spatial'
   | 'settings'
   | 'system'
   | 'receipts'
@@ -65,6 +67,7 @@ const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'notes', label: 'Notes', icon: '✎' },
   { id: 'email', label: 'Email drafts', icon: '↗' },
   { id: 'materials', label: 'Materials', icon: '◇' },
+  { id: 'spatial', label: 'Spatial Workspace', icon: '⌖' },
 ];
 
 const VIEW_LABELS: Partial<Record<ViewType, string>> = {
@@ -76,6 +79,7 @@ const VIEW_LABELS: Partial<Record<ViewType, string>> = {
   notes: 'Notes',
   email: 'Email drafts',
   materials: 'Materials',
+  spatial: 'Spatial workspace',
   receipts: 'Action ledger',
   memory: 'Memory',
   brief: 'Focus brief',
@@ -486,6 +490,9 @@ export const App: React.FC = () => {
           {currentView === 'notes' && <AINoteEditor userId={effectiveUserId} />}
           {currentView === 'email' && <AIEmailComposer userId={effectiveUserId} />}
           {currentView === 'materials' && <MaterialEstimator userId={effectiveUserId} />}
+          {currentView === 'spatial' && (
+            <SpatialWorkspace userId={effectiveUserId} onNavigate={navigate} />
+          )}
           {currentView === 'settings' && <SettingsHub userId={effectiveUserId} />}
           {currentView === 'system' && <SystemCheck />}
           {currentView === 'receipts' && <ActionLedger />}
