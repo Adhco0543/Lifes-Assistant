@@ -737,8 +737,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             <span className="kicker">ARCHITECTURAL AR</span>
             <h1>Spatial Workspace</h1>
             <p>
-              Measure a room with WebXR, preview dimensioned items in the live AR view,
-              then carry the saved room plan into Life&apos;s Assistant.
+              Record room dimensions, place and remove items from the measured plan, and carry the saved space into Life&apos;s Assistant.
             </p>
           </div>
           <div className="header-actions">
@@ -748,6 +747,21 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             </button>
           </div>
         </header>
+
+        <div className={`scan-guidance ${ar.supported ? 'scan-guidance-xr' : ''}`} role="status">
+          <strong>{ar.supported === null
+            ? 'Checking AR support for this browser'
+            : ar.supported
+              ? 'AR point measuring is available'
+              : 'Automatic room scanning is unavailable here'}</strong>
+          <span>
+            {ar.supported === null
+              ? 'Camera and photo tools save reference images only; they do not calculate dimensions. You can enter tape measurements below to build a scaled plan.'
+              : ar.supported
+                ? 'This web workspace does not detect the whole room automatically. Start AR and set two endpoints for each dimension, or enter tape measurements below. Camera and photo tools save reference images only.'
+                : 'Camera and photo tools save reference images only; they do not calculate dimensions. Enter measured length and width below to build a scaled plan and calculate area. On a compatible device, AR can measure between two selected points.'}
+          </span>
+        </div>
 
         <div className="capability-row" aria-label="Device capability status">
           <span className={capabilities.camera ? 'cap ok' : 'cap'}>
@@ -768,8 +782,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           <div className="viewer-panel">
             <div className="viewer-toolbar">
               {ar.supported && !ar.active && (
-                <button type="button" className="tool-button ar-launch" title="Measure with two tracked surface points or place a room item in AR." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => { setArAction('measure'); arActionRef.current = 'measure'; void startAR(); }}>
-                  {ar.starting ? 'Starting AR…' : 'Start AR measure'}
+                <button type="button" className="tool-button ar-launch" title="Measure one distance by selecting its two endpoints, or place a room item in AR." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => { setArAction('measure'); arActionRef.current = 'measure'; void startAR(); }}>
+                  {ar.starting ? 'Starting AR…' : 'Measure two points in AR'}
                 </button>
               )}
               {ar.active && (
@@ -838,8 +852,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                     <span />
                     <span />
                   </div>
-                  <strong>Open the camera or choose a room photo</strong>
-                  <small>The workspace still works without WebAR or a depth sensor.</small>
+                  <strong>Camera and photos are visual references</strong>
+                  <small>Enter tape measurements to create the scaled room plan and dimensions.</small>
                 </div>
               )}
 
@@ -1322,6 +1336,25 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           gap: 8px;
           margin-bottom: 12px;
         }
+        .scan-guidance {
+          display: grid;
+          gap: 4px;
+          margin: 0 0 12px;
+          padding: 12px 14px;
+          border: 1px solid rgba(236, 184, 105, .3);
+          border-radius: 12px;
+          background: rgba(105, 76, 38, .18);
+          color: #d8c9b2;
+          font-size: .76rem;
+          line-height: 1.5;
+        }
+        .scan-guidance strong { color: #f0d2a5; font-size: .8rem; }
+        .scan-guidance-xr {
+          border-color: rgba(96, 214, 161, .24);
+          background: rgba(36, 81, 60, .18);
+          color: #b8d4c6;
+        }
+        .scan-guidance-xr strong { color: #9de0bb; }
         .cap {
           min-height: 54px;
           border: 1px solid #343434;
