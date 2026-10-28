@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validateEmailSendRequest, parseEmailProviderId } from '../lib/emailApiContracts.ts';
 import { parseFirebaseLookupUser } from '../lib/serverAuth.ts';
 import { parseTranscriptionResult } from '../lib/transcriptionContracts.ts';
-import { parseRadarApiResponse } from '../lib/radarApiContracts.ts';
+import { parseRadarApiResponse, parseRadarApiResponseSafe } from '../lib/radarApiContracts.ts';
 
 test('email endpoint contract accepts bounded payloads and rejects malformed input', () => {
   const valid = validateEmailSendRequest({
@@ -63,4 +63,16 @@ test('Life Radar client response parser filters malformed loops and rejects bad 
     openLoops: [{ title: 'Call supplier', status: 'waiting', priority: 'medium', dueDate: '2026-10-30' }],
     resolveLoopIds: ['loop-1'],
   });
+});
+
+test('radar parse fallback never throws and returns an empty result', () => {
+  for (const value of [null, undefined, [], 'bad', 7, { openLoops: 'x' }, { resolveLoopIds: {} }]) {
+    assert.deepEqual(parseRadarApiResponseSafe(value), {
+      response: { openLoops: [], resolveLoopIds: [] },
+      valid: false,
+    });
+  }
+  const ok = parseRadarApiResponseSafe({ openLoops: [], resolveLoopIds: ['a'] });
+  assert.equal(ok.valid, true);
+  assert.deepEqual(ok.response.resolveLoopIds, ['a']);
 });

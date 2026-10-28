@@ -17,6 +17,7 @@ type WebXRLayer = {
   getViewport: (view: WebXRView) => WebXRViewport;
 };
 type WebXRSession = EventTarget & {
+  visibilityState?: string;
   requestReferenceSpace: (type: string) => Promise<object>;
   requestHitTestSource: (options: { space: object }) => Promise<WebXRHitSource>;
   requestAnimationFrame: (callback: (time: number, frame: WebXRFrame) => void) => number;
@@ -40,6 +41,7 @@ export type WebXRARController = {
   setAnchor: (point: WebXRPoint | null) => void;
   setObjects: (objects: WebXRPlacedBox[]) => void;
   end: () => Promise<void>;
+  isEnded: () => boolean;
 };
 
 export type WebXRPlacedBox = {
@@ -168,6 +170,14 @@ function projectToClip(view: WebXRView, point: WebXRPoint): [number, number, num
   return clipW > 0 ? [clipX / clipW, clipY / clipW, clipZ / clipW, 1] : null;
 }
 
+/**
+ * A tap that lands on an overlay control or any element other than the overlay
+ * root itself (including third-party floating widgets) is not an AR placement tap.
+ */
+export function isOverlayInteractionTarget(target: EventTarget | null, passthrough: unknown[]): boolean {
+  return Boolean(target) && !passthrough.includes(target);
+}
+
 export async function startWebXRARSession(options: {
   canvas: HTMLCanvasElement;
   overlayRoot: HTMLElement;
@@ -192,14 +202,61 @@ export async function startWebXRARSession(options: {
   let placedObjects: WebXRPlacedBox[] = [];
   let anchorPoint: WebXRPoint | null = null;
   let lastSurfaceState = false;
-  const onSelect = () => options.onSelect(latestHit, latestHitTransform);
+  let endPromise: Promise<void> | null = null;
+  const overlayTarget = options.overlayRoot as Partial<EventTarget> | null;
+  const onSelect = () => {
+    if (ended) return;
+    try {
+      options.onSelect(latestHit, latestHitTransform);
+    } catch {
+      // A failing select handler must never leave the session stuck.
+    }
+  };
+  // Taps on overlay controls and third-party widgets must not become AR placement taps.
+  const onBeforeSelect = (event: Event) => {
+    const passthrough = [
+      overlayTarget,
+      options.canvas,
+      typeof document !== 'undefined' ? document.body : null,
+      typeof document !== 'undefined' ? document.documentElement : null,
+    ];
+    if (isOverlayInteractionTarget(event.target, passthrough)) event.preventDefault();
+  };
+  const onSessionVisibility = () => {
+    if (session.visibilityState === 'hidden') void endSession();
+  };
   const onSessionEnd = () => {
     if (ended) return;
     ended = true;
     session.removeEventListener('select', onSelect);
     session.removeEventListener('end', onSessionEnd);
-    options.onSurfaceChange(false);
-    options.onEnd();
+    session.removeEventListener('visibilitychange', onSessionVisibility);
+    if (typeof overlayTarget?.removeEventListener === 'function') {
+      overlayTarget.removeEventListener('beforexrselect', onBeforeSelect);
+    }
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('beforexrselect', onBeforeSelect);
+    }
+    try {
+      options.onSurfaceChange(false);
+    } finally {
+      options.onEnd();
+    }
+  };
+  const endSession = (): Promise<void> => {
+    if (ended) return Promise.resolve();
+    if (!endPromise) {
+      endPromise = (async () => {
+        try {
+          await session.end();
+        } catch {
+          // A session that fails to end cleanly is still treated as ended locally.
+        } finally {
+          onSessionEnd();
+        }
+      })();
+    }
+    return endPromise;
   };
 
   try {
@@ -305,6 +362,13 @@ export async function startWebXRARSession(options: {
 
     session.addEventListener('select', onSelect);
     session.addEventListener('end', onSessionEnd);
+    session.addEventListener('visibilitychange', onSessionVisibility);
+    if (typeof overlayTarget?.addEventListener === 'function') {
+      overlayTarget.addEventListener('beforexrselect', onBeforeSelect);
+    }
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('beforexrselect', onBeforeSelect);
+    }
     session.requestAnimationFrame(frame);
 
     return {
@@ -312,15 +376,11 @@ export async function startWebXRARSession(options: {
       getLatestHitTransform: () => latestHitTransform,
       setAnchor: (point) => { anchorPoint = point; },
       setObjects: (objects) => { placedObjects = objects; },
-      end: async () => {
-        if (ended) return;
-        await session.end().catch(() => undefined);
-        onSessionEnd();
-      },
+      end: endSession,
+      isEnded: () => ended,
     };
   } catch (error) {
-    await session.end().catch(() => undefined);
-    onSessionEnd();
+    await endSession();
     throw error;
   }
 }

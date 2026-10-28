@@ -53,3 +53,12 @@ export function parseRadarApiResponse(value: unknown): RadarApiResponse {
 
   return { openLoops, resolveLoopIds };
 }
+
+/** Never throws: a malformed radar response falls back to an empty result. */
+export function parseRadarApiResponseSafe(value: unknown): { response: RadarApiResponse; valid: boolean } {
+  try {
+    return { response: parseRadarApiResponse(value), valid: true };
+  } catch {
+    return { response: { openLoops: [], resolveLoopIds: [] }, valid: false };
+  }
+}

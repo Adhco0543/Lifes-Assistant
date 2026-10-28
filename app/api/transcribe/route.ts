@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
+import { isFileTooLarge, readLimitedFormData } from "../../../lib/requestLimits";
 import { verifyFirebaseRequest } from "../../../lib/serverAuth";
 import { parseTranscriptionResult } from "../../../lib/transcriptionContracts";
 
@@ -16,12 +17,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    const contentLength = Number(request.headers.get("content-length") || 0);
-    if (contentLength > 26 * 1024 * 1024) {
-      return NextResponse.json({ error: "Audio file is too large." }, { status: 413 });
+    const limited = await readLimitedFormData(request, 26 * 1024 * 1024);
+    if (!limited.ok) {
+      return NextResponse.json(
+        { error: limited.status === 413 ? "Audio file is too large." : "Choose an audio file to transcribe." },
+        { status: limited.status }
+      );
     }
-
-    const formData = await request.formData();
+    const formData = limited.value;
     const audioValue = formData.get("audio");
 
     if (!audioValue || typeof audioValue === "string" || audioValue.size === 0) {
@@ -32,7 +35,7 @@ export async function POST(request: NextRequest) {
     }
 
     const audioFile = audioValue;
-    if (audioFile.size > 25 * 1024 * 1024) {
+    if (isFileTooLarge(audioFile, 25 * 1024 * 1024)) {
       return NextResponse.json({ error: "Audio file is too large." }, { status: 413 });
     }
 

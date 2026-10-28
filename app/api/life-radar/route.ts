@@ -3,6 +3,7 @@ import { getVercelOidcToken } from "@vercel/oidc";
 import { verifyFirebaseRequest } from "../../../lib/serverAuth";
 import { parseResponsesApiResult } from "../../../lib/chatApiContracts";
 import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
+import { readLimitedJson } from "../../../lib/requestLimits";
 
 type RadarLoop = {
   title: string;
@@ -21,12 +22,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    const contentLength = Number(req.headers.get("content-length") || 0);
-    if (contentLength > 32_000) {
+    const limited = await readLimitedJson(req, 32_000);
+    if (!limited.ok && limited.status === 413) {
       return NextResponse.json({ error: "Radar request is too large." }, { status: 413 });
     }
-
-    const body = await req.json().catch(() => null);
+    const body = limited.ok ? (limited.value as any) : null;
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json({ error: "Invalid radar request." }, { status: 400 });
     }

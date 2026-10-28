@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { validateEmailSendRequest, parseEmailProviderId } from '../../../../lib/emailApiContracts';
 import { reportIntegrationFailure } from '../../../../lib/integrationDiagnostics';
+import { readLimitedJson } from '../../../../lib/requestLimits';
 import { verifyFirebaseRequest } from '../../../../lib/serverAuth';
 
 export async function POST(request: Request) {
@@ -8,12 +9,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   }
 
-  const contentLength = Number(request.headers.get('content-length') || 0);
-  if (contentLength > 64_000) {
-    return NextResponse.json({ error: 'Email is too large to send.' }, { status: 413 });
+  const body = await readLimitedJson(request, 64_000);
+  if (!body.ok) {
+    return NextResponse.json(
+      { error: body.status === 413 ? 'Email is too large to send.' : 'Invalid email request.' },
+      { status: body.status }
+    );
   }
 
-  const validation = validateEmailSendRequest(await request.json().catch(() => null));
+  const validation = validateEmailSendRequest(body.value);
   if (!validation.valid) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
