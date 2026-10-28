@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { verifyFirebaseRequest } from "../../../lib/serverAuth";
+import { parseResponsesApiResult } from "../../../lib/chatApiContracts";
+import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
 
 type RadarLoop = {
   title: string;
@@ -13,24 +15,25 @@ type RadarLoop = {
   dueDate?: string;
 };
 
-type ResponsesApiResult = {
-  output_text?: string;
-  output?: Array<{
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
-  }>;
-};
-
 export async function POST(req: Request) {
   try {
     if (!(await verifyFirebaseRequest(req))) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
 
-    const body = await req.json();
-    const message = typeof body?.message === "string" ? body.message.trim() : "";
+    const contentLength = Number(req.headers.get("content-length") || 0);
+    if (contentLength > 32_000) {
+      return NextResponse.json({ error: "Radar request is too large." }, { status: 413 });
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Invalid radar request." }, { status: 400 });
+    }
+    const message = typeof body.message === "string" ? body.message.trim() : "";
+    if (message.length > 12_000) {
+      return NextResponse.json({ error: "Radar message is too large." }, { status: 400 });
+    }
     const localDate =
       typeof body?.localDate === "string" ? body.localDate.slice(0, 10) : "";
     const timeZone =
@@ -100,15 +103,11 @@ export async function POST(req: Request) {
           input,
           max_output_tokens: 450,
         }),
+        signal: AbortSignal.timeout(20_000),
       });
 
       if (!response.ok) {
-        const detail = await response.text();
-        console.error(
-          "Life Radar direct OpenAI error:",
-          response.status,
-          detail.slice(0, 500)
-        );
+        reportIntegrationFailure("openai", "request", response.status);
         response = null;
       }
     }
@@ -132,19 +131,15 @@ export async function POST(req: Request) {
               input,
               max_output_tokens: 450,
             }),
+            signal: AbortSignal.timeout(20_000),
           });
         }
-      } catch (error) {
-        console.warn("Life Radar AI Gateway request could not start:", error);
+      } catch {
+        reportIntegrationFailure("gateway", "request");
       }
 
       if (response && !response.ok) {
-        const detail = await response.text();
-        console.error(
-          "Life Radar AI Gateway error:",
-          response.status,
-          detail.slice(0, 500)
-        );
+        reportIntegrationFailure("gateway", "request", response.status);
         response = null;
       }
     }
@@ -153,21 +148,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ openLoops: [] });
     }
 
-    const result = (await response.json()) as ResponsesApiResult;
+    const result = parseResponsesApiResult(await response.json().catch(() => null));
     const raw = extractOutputText(result);
     const parsed = parseRadarJson(raw);
+    const parsedObject = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
 
     return NextResponse.json({
-      openLoops: sanitizeLoops(parsed?.openLoops),
-      resolveLoopIds: sanitizeResolveIds(parsed?.resolveLoopIds, activeLoops),
+      openLoops: sanitizeLoops(parsedObject.openLoops),
+      resolveLoopIds: sanitizeResolveIds(parsedObject.resolveLoopIds, activeLoops),
     });
-  } catch (error) {
-    console.error("Life Radar route error:", error);
+  } catch {
+    reportIntegrationFailure("radar", "parse-response");
     return NextResponse.json({ openLoops: [] });
   }
 }
 
-function extractOutputText(result: ResponsesApiResult): string {
+function extractOutputText(result: ReturnType<typeof parseResponsesApiResult>): string {
   if (typeof result.output_text === "string" && result.output_text.trim()) {
     return result.output_text.trim();
   }
@@ -185,7 +183,7 @@ function extractOutputText(result: ResponsesApiResult): string {
   );
 }
 
-function parseRadarJson(raw: string): any {
+function parseRadarJson(raw: string): unknown {
   if (!raw) return null;
 
   const cleaned = raw
