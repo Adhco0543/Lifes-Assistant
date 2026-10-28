@@ -109,6 +109,14 @@ test('AR item boxes use hit-pose transforms and do not persist session-only posi
   assert.deepEqual(boxCornersInWorld(box)[0], { x: 9, y: 20, z: 28 });
   assert.equal(boxCornersInWorld({ ...box, transform: [1, 2] }).length, 0);
 
+  const wallTransform = [
+    0, 0, -1, 0,
+    1, 0, 0, 0,
+    0, -1, 0, 0,
+    0, 0, 0, 1,
+  ];
+  assert.deepEqual(boxCornersInWorld({ ...box, transform: wallTransform })[0], { x: 0, y: -1.5, z: 1 });
+
   const item = {
     id: 'cabinet', label: 'Cabinet', category: 'cabinet',
     xInches: 12, yInches: 24, widthInches: 24, depthInches: 24,

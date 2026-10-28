@@ -76,6 +76,27 @@ export function boxCornersInWorld(box: WebXRPlacedBox): WebXRPoint[] {
     [halfWidth, height, halfDepth], [-halfWidth, height, halfDepth],
   ];
   const matrix = box.transform;
+  const normalLength = Math.hypot(matrix[4], matrix[5], matrix[6]);
+  if (normalLength < 1e-6) return [];
+  const normal = [matrix[4] / normalLength, matrix[5] / normalLength, matrix[6] / normalLength];
+  if (Math.abs(normal[1]) < 0.75) {
+    const right = [normal[2], 0, -normal[0]];
+    const rightLength = Math.hypot(...right);
+    if (rightLength < 1e-6) return [];
+    right[0] /= rightLength;
+    right[2] /= rightLength;
+    const wallCorners: Array<[number, number, number]> = [
+      [-halfWidth, -height / 2, 0], [halfWidth, -height / 2, 0],
+      [halfWidth, height / 2, 0], [-halfWidth, height / 2, 0],
+      [-halfWidth, -height / 2, box.depthMeters], [halfWidth, -height / 2, box.depthMeters],
+      [halfWidth, height / 2, box.depthMeters], [-halfWidth, height / 2, box.depthMeters],
+    ];
+    return wallCorners.map(([x, y, z]) => ({
+      x: matrix[12] + right[0] * x + normal[0] * z,
+      y: matrix[13] + y + normal[1] * z,
+      z: matrix[14] + right[2] * x + normal[2] * z,
+    }));
+  }
   return localCorners.map(([x, y, z]) => ({
     x: matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
     y: matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
