@@ -10,11 +10,15 @@ import {
   clampPin,
   formatMeasurement,
   measurementToInches,
+  placeSpatialItem,
+  spatialItemsOverlap,
   MAX_SPATIAL_IMAGE_DATA_URL_LENGTH,
   parseSpatialWorkspaceRecord,
   summarizeSpatialWorkspace,
   type SpatialMeasurement,
   type SpatialMeasurementKind,
+  type SpatialItem,
+  type SpatialItemCategory,
   type SpatialNote,
   type SpatialNoteCategory,
   type SpatialWorkspaceRecord,
@@ -64,6 +68,15 @@ const NOTE_TYPES: Array<{ value: SpatialNoteCategory; label: string }> = [
   { value: 'damage', label: 'Damage / concern' },
   { value: 'material', label: 'Material' },
   { value: 'idea', label: 'Idea' },
+];
+
+const SPATIAL_ITEM_TYPES: Array<{ value: SpatialItemCategory; label: string }> = [
+  { value: 'cabinet', label: 'Cabinet / counter' },
+  { value: 'appliance', label: 'Appliance' },
+  { value: 'fixture', label: 'Fixture' },
+  { value: 'furniture', label: 'Furniture' },
+  { value: 'opening', label: 'Door / window' },
+  { value: 'custom', label: 'Other item' },
 ];
 
 const MAX_IMAGE_FILE_BYTES = 20 * 1024 * 1024;
@@ -132,6 +145,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const [recordId, setRecordId] = useState('');
   const [measurements, setMeasurements] = useState<SpatialMeasurement[]>([]);
   const [notes, setNotes] = useState<SpatialNote[]>([]);
+  const [items, setItems] = useState<SpatialItem[]>([]);
   const [savedSpaces, setSavedSpaces] = useState<SavedSpace[]>([]);
   const [status, setStatus] = useState('Ready to map a space.');
   const [cameraActive, setCameraActive] = useState(false);
@@ -151,6 +165,12 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const [noteText, setNoteText] = useState('');
   const [noteCategory, setNoteCategory] = useState<SpatialNoteCategory>('work');
   const [arPointStep, setArPointStep] = useState<0 | 1>(0);
+  const [itemCategory, setItemCategory] = useState<SpatialItemCategory>('fixture');
+  const [itemLabel, setItemLabel] = useState('Vanity');
+  const [itemWidthInches, setItemWidthInches] = useState('30');
+  const [itemDepthInches, setItemDepthInches] = useState('21');
+  const [itemHeightInches, setItemHeightInches] = useState('34');
+  const [isPlacingItem, setIsPlacingItem] = useState(false);
 
   const addArPoint = useCallback((point: WebXRPoint) => {
     const firstPoint = firstArPointRef.current;
@@ -185,6 +205,14 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const ar = useWebXRAR(addArPoint);
 
   const metrics = useMemo(() => calculateRoomMetrics(measurements), [measurements]);
+  const roomLengthInches = [...measurements].reverse().find((measurement) => measurement.kind === 'length')?.totalInches || 0;
+  const roomWidthInches = [...measurements].reverse().find((measurement) => measurement.kind === 'width')?.totalInches || 0;
+  const planIsTransposed = roomLengthInches < roomWidthInches;
+  const planLengthInches = planIsTransposed ? roomWidthInches : roomLengthInches;
+  const planWidthInches = planIsTransposed ? roomLengthInches : roomWidthInches;
+  const planAspect = planLengthInches > 0 && planWidthInches > 0
+    ? planLengthInches / planWidthInches
+    : 1;
 
   const currentRecord = useCallback((): SpatialWorkspaceRecord => ({
     title: title.trim() || 'Untitled space',
@@ -192,9 +220,10 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     ...(imageDataUrl ? { imageDataUrl } : {}),
     measurements,
     notes,
+    items,
     createdAt,
     updatedAt: Date.now(),
-  }), [createdAt, imageDataUrl, measurements, notes, roomType, title]);
+  }), [createdAt, imageDataUrl, items, measurements, notes, roomType, title]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -402,6 +431,74 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setStatus('Measurement added.');
   };
 
+  const beginPlacingItem = () => {
+    const width = Number(itemWidthInches);
+    const depth = Number(itemDepthInches);
+    const height = Number(itemHeightInches);
+    if (roomLengthInches <= 0 || roomWidthInches <= 0) {
+      setStatus('Measure the room length and width before placing items on its plan.');
+      return;
+    }
+    if (!itemLabel.trim() || !Number.isFinite(width) || !Number.isFinite(depth) || width <= 0 || depth <= 0) {
+      setStatus('Add an item name and valid footprint dimensions first.');
+      return;
+    }
+    if (items.length >= 100) {
+      setStatus('This room plan has reached its 100-item limit.');
+      return;
+    }
+    if (width > roomLengthInches || depth > roomWidthInches) {
+      setStatus('That footprint is larger than the measured room. Check its size or room dimensions.');
+      return;
+    }
+    if (itemHeightInches.trim() && (!Number.isFinite(height) || height <= 0)) {
+      setStatus('Enter a valid height or leave the height blank.');
+      return;
+    }
+    setIsPlacingItem(true);
+    setStatus(`Click the room plan to place ${itemLabel.trim()}.`);
+  };
+
+  const finishItemPlacement = (centerX: number, centerY: number) => {
+    if (!isPlacingItem || roomLengthInches <= 0 || roomWidthInches <= 0) return;
+    const height = Number(itemHeightInches);
+    const item = placeSpatialItem({
+      id: makeId('space-item'),
+      label: itemLabel.trim().slice(0, 80),
+      category: itemCategory,
+      widthInches: Number(itemWidthInches),
+      depthInches: Number(itemDepthInches),
+      ...(itemHeightInches.trim() ? { heightInches: height } : {}),
+    }, centerX, centerY, roomLengthInches, roomWidthInches);
+    if (!item) {
+      setIsPlacingItem(false);
+      setStatus('That item does not fit inside the measured room.');
+      return;
+    }
+    if (items.some((existing) => spatialItemsOverlap(existing, item))) {
+      setIsPlacingItem(false);
+      setStatus('That footprint overlaps another item. Choose an open area or remove the item in the way.');
+      return;
+    }
+    setItems((current) => [...current, item]);
+    setIsPlacingItem(false);
+    setStatus(`${item.label} added to the room plan. Click it on the plan or its list entry to remove it.`);
+  };
+
+  const placeItemOnPlan = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPlacingItem || roomLengthInches <= 0 || roomWidthInches <= 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const planX = ((event.clientX - rect.left) / rect.width) * planLengthInches;
+    const planY = ((event.clientY - rect.top) / rect.height) * planWidthInches;
+    finishItemPlacement(planIsTransposed ? planY : planX, planIsTransposed ? planX : planY);
+  };
+
+  const removeSpatialItem = (id: string) => {
+    const removed = items.find((item) => item.id === id);
+    setItems((current) => current.filter((item) => item.id !== id));
+    setStatus(removed ? `${removed.label} removed from the room plan.` : 'Room item removed.');
+  };
+
   const pinNote = (event: React.MouseEvent<HTMLDivElement>) => {
     const text = noteText.trim();
     if (!text) {
@@ -460,8 +557,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
       }
 
       setStatus(record.imageDataUrl
-        ? 'Workspace saved with its room photo, measurements, and notes.'
-        : 'Workspace saved with its measurements and notes. No room photo was attached.');
+        ? 'Workspace saved with its room photo, measurements, notes, and layout items.'
+        : 'Workspace saved with its measurements, notes, and layout items. No room photo was attached.');
       return record;
     } finally {
       savingRef.current = false;
@@ -505,7 +602,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     try {
       await firebaseBackend.saveDraft('handoff-quote', {
         projectDescription: summarizeSpatialWorkspace(record),
-        notes: 'Measurements were entered as verified field dimensions in Spatial Workspace.',
+        notes: record.measurements.some((measurement) => measurement.source === 'webxr-hit-test')
+          ? 'Room dimensions include WebXR AR estimates. Verify them on site before pricing or ordering.'
+          : 'Room dimensions were entered as verified field dimensions in Spatial Workspace.',
         items: [],
         source: 'Spatial Workspace',
       });
@@ -537,12 +636,14 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setRoomType(space.data.roomType);
     setMeasurements(space.data.measurements);
     setNotes(space.data.notes);
+    setItems(space.data.items);
     setImageDataUrl(space.data.imageDataUrl || '');
     setPhotoUrl(space.data.imageDataUrl || '');
     setCreatedAt(space.data.createdAt);
     setFeet('');
     setInches('');
     setNoteText('');
+    setIsPlacingItem(false);
     setStatus('Saved space loaded.');
   };
 
@@ -554,12 +655,14 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setRoomType('Room');
     setMeasurements([]);
     setNotes([]);
+    setItems([]);
     setImageDataUrl('');
     setPhotoUrl('');
     setCreatedAt(Date.now());
     setFeet('');
     setInches('');
     setNoteText('');
+    setIsPlacingItem(false);
     setStatus('New spatial workspace ready.');
   };
 
@@ -843,6 +946,129 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
               )}
             </div>
 
+            <div className="panel room-layout-panel">
+              <div className="panel-title">
+                <span>LAYOUT</span>
+                <strong>Place room items</strong>
+              </div>
+              <p className="layout-copy">Add cabinets, fixtures, appliances, furniture, doors, or windows to a plan scaled from the measured room.</p>
+              {roomLengthInches <= 0 || roomWidthInches <= 0 ? (
+                <div className="layout-empty">Record both room length and width to unlock the measured-space plan.</div>
+              ) : (
+                <>
+                  <div className="plan-measurements">
+                    <span>{planIsTransposed ? 'Room width' : 'Room length'} <b>{formatMeasurement(planLengthInches)}</b></span>
+                    <span>{planIsTransposed ? 'Room length' : 'Room width'} <b>{formatMeasurement(planWidthInches)}</b></span>
+                  </div>
+                  <div className="plan-wrap">
+                    <div
+                      className={`room-plan${isPlacingItem ? ' placing' : ''}`}
+                      style={{
+                        width: `min(100%, ${Math.min(400, Math.max(150, 320 * planAspect))}px)`,
+                        aspectRatio: `${planLengthInches} / ${planWidthInches}`,
+                      }}
+                      onClick={placeItemOnPlan}
+                      role="group"
+                      tabIndex={0}
+                      aria-label={`Measured room layout, ${formatMeasurement(roomLengthInches)} long by ${formatMeasurement(roomWidthInches)} wide${isPlacingItem ? '. Click to place the selected item.' : ''}`}
+                      onKeyDown={(event) => {
+                        if (isPlacingItem && (event.key === 'Enter' || event.key === ' ')) {
+                          event.preventDefault();
+                          finishItemPlacement(roomLengthInches / 2, roomWidthInches / 2);
+                        }
+                      }}
+                    >
+                      <div className="room-plan-grid" aria-hidden="true" />
+                      {items.map((item) => {
+                        const left = planIsTransposed
+                          ? item.yInches / roomWidthInches
+                          : item.xInches / roomLengthInches;
+                        const top = planIsTransposed
+                          ? item.xInches / roomLengthInches
+                          : item.yInches / roomWidthInches;
+                        const itemWidth = planIsTransposed
+                          ? item.depthInches / roomWidthInches
+                          : item.widthInches / roomLengthInches;
+                        const itemHeight = planIsTransposed
+                          ? item.widthInches / roomLengthInches
+                          : item.depthInches / roomWidthInches;
+                        return (
+                          <button
+                            type="button"
+                            className={`room-item room-item-${item.category}`}
+                            key={item.id}
+                            style={{
+                              left: `${left * 100}%`,
+                              top: `${top * 100}%`,
+                              width: `${itemWidth * 100}%`,
+                              height: `${itemHeight * 100}%`,
+                            }}
+                            title={`Remove ${item.label} · ${formatMeasurement(item.widthInches)} × ${formatMeasurement(item.depthInches)}`}
+                            aria-label={`Remove ${item.label}, ${formatMeasurement(item.widthInches)} by ${formatMeasurement(item.depthInches)}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (isPlacingItem) {
+                                setStatus('Choose an open area of the plan to place this item.');
+                                return;
+                              }
+                              removeSpatialItem(item.id);
+                            }}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="item-form">
+                    <label>
+                      Item type
+                      <select value={itemCategory} onChange={(event) => setItemCategory(event.target.value as SpatialItemCategory)}>
+                        {SPATIAL_ITEM_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Name
+                      <input value={itemLabel} maxLength={80} onChange={(event) => setItemLabel(event.target.value)} placeholder="Example: Base cabinet" />
+                    </label>
+                    <div className="item-size-grid">
+                      <label>
+                        Width (in)
+                        <input type="number" inputMode="decimal" min="0.1" step="0.1" value={itemWidthInches} onChange={(event) => setItemWidthInches(event.target.value)} />
+                      </label>
+                      <label>
+                        Depth (in)
+                        <input type="number" inputMode="decimal" min="0.1" step="0.1" value={itemDepthInches} onChange={(event) => setItemDepthInches(event.target.value)} />
+                      </label>
+                      <label>
+                        Height (in)
+                        <input type="number" inputMode="decimal" min="0.1" step="0.1" value={itemHeightInches} onChange={(event) => setItemHeightInches(event.target.value)} placeholder="Optional" />
+                      </label>
+                    </div>
+                    <div className="placement-actions">
+                      <button type="button" className="add-button" disabled={isSaving} onClick={beginPlacingItem}>
+                        {isPlacingItem ? 'Choose plan location' : 'Place on plan'}
+                      </button>
+                      {isPlacingItem && <button type="button" className="cancel-place" onClick={() => { setIsPlacingItem(false); setStatus('Item placement cancelled.'); }}>Cancel</button>}
+                    </div>
+                  </div>
+                  <p className="plan-hint" role="status" aria-live="polite">
+                    {isPlacingItem ? 'Tap an open area to place the footprint. Items stay inside the room boundary and cannot overlap.' : 'Tap an item on the plan to remove it.'}
+                  </p>
+                </>
+              )}
+              {items.length > 0 && (
+                <ul className="room-item-list" aria-label="Items in this room">
+                  {items.map((item) => (
+                    <li key={item.id}>
+                      <span><b>{item.label}</b><small>{item.category} · {formatMeasurement(item.widthInches)} × {formatMeasurement(item.depthInches)}</small></span>
+                      <button type="button" aria-label={`Remove ${item.label}`} onClick={() => removeSpatialItem(item.id)}>Remove</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className="panel">
               <div className="panel-title">
                 <span>ANNOTATE</span>
@@ -912,7 +1138,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 <span>{space.data.roomType.toUpperCase()}</span>
                 <strong>{space.data.title}</strong>
                 <small>
-                  {space.data.measurements.length} measurements · {space.data.notes.length} notes
+                  {space.data.measurements.length} measurements · {space.data.items.length} items · {space.data.notes.length} notes
                 </small>
               </button>
             ))}
@@ -1286,6 +1512,65 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .metrics span { color: #999; font-size: .58rem; }
         .metrics b { color: #d9d9d9; margin-top: 3px; font-size: .76rem; }
         .ar-warning { margin: 9px 0 0; color: #e5c681; font-size: .64rem; line-height: 1.45; }
+        .layout-copy { margin: -3px 0 10px; color: #929292; font-size: .64rem; line-height: 1.5; }
+        .layout-empty { border: 1px dashed #414141; border-radius: 11px; padding: 14px; color: #9d9d9d; font-size: .68rem; line-height: 1.5; }
+        .plan-measurements { display: flex; justify-content: space-between; gap: 10px; margin: 8px 0 7px; color: #909090; font-size: .58rem; }
+        .plan-measurements span { display: grid; gap: 2px; }
+        .plan-measurements span:last-child { text-align: right; }
+        .plan-measurements b { color: #d8e3eb; font-size: .67rem; }
+        .plan-wrap { display: flex; justify-content: center; overflow: hidden; padding: 4px 0; }
+        .room-plan {
+          position: relative;
+          flex: 0 0 auto;
+          overflow: hidden;
+          border: 2px solid #a9bdcc;
+          border-radius: 4px;
+          background: #1c2327;
+          box-shadow: 0 0 0 5px rgba(148, 179, 202, .06), inset 0 0 20px rgba(97, 137, 160, .08);
+          cursor: default;
+          outline: none;
+          touch-action: manipulation;
+        }
+        .room-plan:focus-visible { outline: 2px solid #9cc8ff; outline-offset: 4px; }
+        .room-plan.placing { border-color: #80ddb1; cursor: crosshair; box-shadow: 0 0 0 5px rgba(96, 214, 161, .13); }
+        .room-plan-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5; background-image: linear-gradient(rgba(132, 167, 186, .14) 1px, transparent 1px), linear-gradient(90deg, rgba(132, 167, 186, .14) 1px, transparent 1px); background-size: 12.5% 12.5%; }
+        .room-item {
+          position: absolute;
+          z-index: 1;
+          min-width: min(34px, 100%);
+          min-height: 24px;
+          display: grid;
+          place-items: center;
+          padding: 2px 4px;
+          overflow: hidden;
+          border: 1px solid rgba(238, 246, 250, .66);
+          border-radius: 5px;
+          color: #eff7f9;
+          background: rgba(74, 137, 149, .78);
+          box-shadow: 0 3px 8px rgba(0,0,0,.22);
+          font-size: .54rem;
+          line-height: 1.15;
+          text-align: center;
+          text-overflow: ellipsis;
+          cursor: pointer;
+        }
+        .room-item:hover { filter: brightness(1.22); }
+        .room-item-cabinet { background: rgba(111, 128, 172, .86); }
+        .room-item-appliance { background: rgba(112, 139, 154, .9); }
+        .room-item-fixture { background: rgba(56, 143, 127, .88); }
+        .room-item-furniture { background: rgba(160, 124, 84, .88); }
+        .room-item-opening { background: rgba(157, 100, 110, .9); }
+        .placement-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+        .placement-actions .add-button { flex: 1; }
+        .cancel-place { min-height: 38px; padding: 0 12px; border: 1px solid #414141; border-radius: 10px; color: #ddd; background: #2d2d2d; cursor: pointer; }
+        .item-size-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+        .plan-hint { margin: 7px 0 0; color: #9ac8b2; font-size: .61rem; line-height: 1.45; }
+        .room-item-list { display: grid; gap: 5px; margin: 10px 0 0; padding: 0; list-style: none; }
+        .room-item-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #303030; padding-top: 7px; }
+        .room-item-list li > span { min-width: 0; display: grid; gap: 2px; }
+        .room-item-list b { overflow: hidden; color: #d7d7d7; font-size: .65rem; text-overflow: ellipsis; white-space: nowrap; }
+        .room-item-list small { color: #8f8f8f; font-size: .58rem; }
+        .room-item-list button { flex: 0 0 auto; border: 0; color: #f0a9a9; background: transparent; font-size: .61rem; cursor: pointer; }
         .note-list {
           display: grid;
           gap: 6px;

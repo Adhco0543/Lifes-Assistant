@@ -26,12 +26,34 @@ export type SpatialNote = {
   y: number;
 };
 
+export type SpatialItemCategory =
+  | 'cabinet'
+  | 'appliance'
+  | 'fixture'
+  | 'furniture'
+  | 'opening'
+  | 'custom';
+
+export type SpatialItem = {
+  id: string;
+  label: string;
+  category: SpatialItemCategory;
+  /** Distance from the plan's left edge, in inches. */
+  xInches: number;
+  /** Distance from the plan's top edge, in inches. */
+  yInches: number;
+  widthInches: number;
+  depthInches: number;
+  heightInches?: number;
+};
+
 export type SpatialWorkspaceRecord = {
   title: string;
   roomType: string;
   imageDataUrl?: string;
   measurements: SpatialMeasurement[];
   notes: SpatialNote[];
+  items: SpatialItem[];
   createdAt: number;
   updatedAt: number;
 };
@@ -48,6 +70,7 @@ export type SpatialMaterialHandoff = {
   projectName?: string;
   measurements?: Partial<RoomMetrics>;
   measurementWarning?: string;
+  layoutItems?: SpatialItem[];
 };
 
 const finite = (value: unknown): number => {
@@ -57,6 +80,7 @@ const finite = (value: unknown): number => {
 
 const MAX_MEASUREMENTS = 200;
 const MAX_NOTES = 200;
+const MAX_SPATIAL_ITEMS = 100;
 export const MAX_SPATIAL_IMAGE_DATA_URL_LENGTH = 450_000;
 
 export function isSafeSpatialImageDataUrl(value: unknown): value is string {
@@ -78,6 +102,37 @@ export function formatMeasurement(totalInches: number): string {
 
 export function clampPin(value: number): number {
   return Math.min(100, Math.max(0, finite(value)));
+}
+
+export function placeSpatialItem(
+  item: Omit<SpatialItem, 'xInches' | 'yInches'>,
+  centerXInches: number,
+  centerYInches: number,
+  roomLengthInches: number,
+  roomWidthInches: number,
+): SpatialItem | null {
+  const length = finite(roomLengthInches);
+  const width = finite(roomWidthInches);
+  const itemWidth = finite(item.widthInches);
+  const itemDepth = finite(item.depthInches);
+  if (
+    length <= 0 || width <= 0 || itemWidth <= 0 || itemDepth <= 0 ||
+    itemWidth > length || itemDepth > width
+  ) return null;
+
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return {
+    ...item,
+    xInches: round(Math.min(length - itemWidth, Math.max(0, finite(centerXInches) - itemWidth / 2))),
+    yInches: round(Math.min(width - itemDepth, Math.max(0, finite(centerYInches) - itemDepth / 2))),
+  };
+}
+
+export function spatialItemsOverlap(a: SpatialItem, b: SpatialItem): boolean {
+  return a.xInches < b.xInches + b.widthInches &&
+    a.xInches + a.widthInches > b.xInches &&
+    a.yInches < b.yInches + b.depthInches &&
+    a.yInches + a.depthInches > b.yInches;
 }
 
 export function calculateRoomMetrics(measurements: SpatialMeasurement[]): RoomMetrics {
@@ -111,26 +166,38 @@ export function summarizeSpatialWorkspace(record: SpatialWorkspaceRecord): strin
   const notes = record.notes.length
     ? record.notes.map((note) => `[${note.category}] ${note.text}`).join('; ')
     : 'No spatial notes saved yet';
+  const roomItems = record.items || [];
+  const items = roomItems.length
+    ? roomItems
+        .map((item) => `${item.label} (${item.category}, ${formatMeasurement(item.widthInches)} × ${formatMeasurement(item.depthInches)} footprint at ${formatMeasurement(item.xInches)} from left, ${formatMeasurement(item.yInches)} from top)`)
+        .join('; ')
+    : 'No room items placed';
 
   return [
     `Spatial workspace: ${record.title}`,
     `Room type: ${record.roomType || 'Unspecified'}`,
     `Measurements: ${measurements}`,
     `Notes: ${notes}`,
+    `Room items: ${items}`,
   ].join('\n');
 }
 
 export function buildMaterialHandoff(record: SpatialWorkspaceRecord) {
   const metrics = calculateRoomMetrics(record.measurements);
   const hasArEstimate = record.measurements.some((measurement) => measurement.source === 'webxr-hit-test');
+  const itemNotes = (record.items || []).map((item) =>
+    `Planned ${item.category}: ${item.label}, ${formatMeasurement(item.widthInches)} × ${formatMeasurement(item.depthInches)} footprint, positioned ${formatMeasurement(item.xInches)} from the plan origin.`
+  );
 
   return {
     projectName: record.title,
     measurements: metrics,
+    layoutItems: record.items || [],
     ...(hasArEstimate ? { measurementWarning: 'These dimensions include WebXR AR estimates. Verify them with a tape before pricing or ordering materials.' } : {}),
     source: 'Spatial Workspace',
     notes: [
       ...record.notes.map((note) => note.text),
+      ...itemNotes,
       ...(hasArEstimate ? ['Includes WebXR AR estimates. Verify all dimensions on site before ordering materials.'] : []),
     ],
   };
@@ -158,7 +225,11 @@ export function parseSpatialMaterialHandoff(value: unknown): SpatialMaterialHand
     }
   }
 
-  if (!projectName && !Object.keys(parsedMeasurements).length) return null;
+  const layoutItems = Array.isArray(source.layoutItems)
+    ? parseSpatialWorkspaceRecord({ items: source.layoutItems })?.items || []
+    : [];
+
+  if (!projectName && !Object.keys(parsedMeasurements).length && !layoutItems.length) return null;
 
   return {
     ...(projectName ? { projectName } : {}),
@@ -166,6 +237,7 @@ export function parseSpatialMaterialHandoff(value: unknown): SpatialMaterialHand
     ...(typeof source.measurementWarning === 'string' && source.measurementWarning.length <= 300
       ? { measurementWarning: source.measurementWarning }
       : {}),
+    ...(layoutItems.length ? { layoutItems } : {}),
   };
 }
 
@@ -179,6 +251,7 @@ export function parseSpatialWorkspaceRecord(
     ? source.measurements
     : [];
   const rawNotes = Array.isArray(source.notes) ? source.notes : [];
+  const rawItems = Array.isArray(source.items) ? source.items : [];
 
   const measurements: SpatialMeasurement[] = rawMeasurements
     .slice(0, MAX_MEASUREMENTS)
@@ -228,6 +301,34 @@ export function parseSpatialWorkspaceRecord(
     })
     .filter((item) => Boolean(item.text.trim()));
 
+  const items: SpatialItem[] = rawItems
+    .slice(0, MAX_SPATIAL_ITEMS)
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === 'object' && !Array.isArray(item))
+    )
+    .map((item, index): SpatialItem => {
+      const category: SpatialItemCategory =
+        item.category === 'cabinet' ||
+        item.category === 'appliance' ||
+        item.category === 'fixture' ||
+        item.category === 'furniture' ||
+        item.category === 'opening'
+          ? item.category
+          : 'custom';
+      const heightInches = finite(item.heightInches);
+      return {
+        id: String(item.id || `item-${index}`),
+        label: String(item.label || 'Room item').trim().slice(0, 80) || 'Room item',
+        category,
+        xInches: Math.min(1_000_000, Math.max(0, finite(item.xInches))),
+        yInches: Math.min(1_000_000, Math.max(0, finite(item.yInches))),
+        widthInches: Math.min(1_000_000, Math.max(0, finite(item.widthInches))),
+        depthInches: Math.min(1_000_000, Math.max(0, finite(item.depthInches))),
+        ...(heightInches > 0 ? { heightInches: Math.min(1_000_000, heightInches) } : {}),
+      };
+    })
+    .filter((item) => item.widthInches > 0 && item.depthInches > 0);
+
   const now = Date.now();
 
   return {
@@ -238,6 +339,7 @@ export function parseSpatialWorkspaceRecord(
       : {}),
     measurements,
     notes,
+    items,
     createdAt: finite(source.createdAt) || now,
     updatedAt: finite(source.updatedAt) || now,
   };

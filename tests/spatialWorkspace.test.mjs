@@ -7,6 +7,8 @@ import {
   formatMeasurement,
   isSafeSpatialImageDataUrl,
   measurementToInches,
+  placeSpatialItem,
+  spatialItemsOverlap,
   parseSpatialMaterialHandoff,
   parseSpatialWorkspaceRecord,
   summarizeSpatialWorkspace,
@@ -25,6 +27,7 @@ const room = {
   notes: [
     { id: 'n1', text: 'Widen doorway', category: 'work', x: 42, y: 58 },
   ],
+  items: [],
   createdAt: 1,
   updatedAt: 2,
 };
@@ -59,6 +62,39 @@ test('material handoff and summary preserve spatial context', () => {
   assert.equal(handoff.projectName, 'Bathroom');
   assert.equal(handoff.measurements.area, 120);
   assert.match(summarizeSpatialWorkspace(room), /Widen doorway/);
+});
+
+test('room items are placed inside measured bounds and carried into workspace handoffs', () => {
+  const placed = placeSpatialItem({
+    id: 'vanity',
+    label: 'Vanity',
+    category: 'fixture',
+    widthInches: 30,
+    depthInches: 21,
+  }, 0, 0, 120, 144);
+  assert.deepEqual(placed, {
+    id: 'vanity',
+    label: 'Vanity',
+    category: 'fixture',
+    widthInches: 30,
+    depthInches: 21,
+    xInches: 0,
+    yInches: 0,
+  });
+  assert.equal(placeSpatialItem({
+    id: 'oversized', label: 'Island', category: 'furniture', widthInches: 150, depthInches: 36,
+  }, 60, 72, 120, 144), null);
+  assert.equal(spatialItemsOverlap(placed, {
+    id: 'nearby', label: 'Cabinet', category: 'cabinet', xInches: 30, yInches: 0, widthInches: 24, depthInches: 21,
+  }), false);
+  assert.equal(spatialItemsOverlap(placed, {
+    id: 'overlap', label: 'Cabinet', category: 'cabinet', xInches: 29, yInches: 0, widthInches: 24, depthInches: 21,
+  }), true);
+
+  const plan = { ...room, items: [placed] };
+  assert.match(summarizeSpatialWorkspace(plan), /Vanity \(fixture, 2' 6" × 1' 9" footprint at/);
+  assert.ok(buildMaterialHandoff(plan).notes.some((note) => /Planned fixture: Vanity/.test(note)));
+  assert.equal(parseSpatialMaterialHandoff(buildMaterialHandoff(plan)).layoutItems[0].label, 'Vanity');
 });
 
 test('WebXR point distances convert meters to inches and mark estimates in handoffs', () => {
@@ -98,6 +134,10 @@ test('saved spatial data is normalized before reuse', () => {
     notes: [
       { id: 'n', text: 'Door', category: 'idea', x: 140, y: -8 },
     ],
+    items: [
+      { id: 'cabinet', label: 'Base cabinet', category: 'cabinet', xInches: -5, yInches: 11, widthInches: 24, depthInches: 24, heightInches: 34 },
+      { id: 'invalid', label: 'No footprint', category: 'fixture', xInches: 0, yInches: 0, widthInches: 0, depthInches: 24 },
+    ],
     createdAt: 10,
     updatedAt: 20,
   });
@@ -107,6 +147,9 @@ test('saved spatial data is normalized before reuse', () => {
   assert.equal(parsed.measurements[0].source, 'webxr-hit-test');
   assert.equal(parsed.notes[0].x, 100);
   assert.equal(parsed.notes[0].y, 0);
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].widthInches, 24);
+  assert.equal(parsed.items[0].heightInches, 34);
 });
 
 test('saved records reject invalid roots and only retain bounded image data', () => {

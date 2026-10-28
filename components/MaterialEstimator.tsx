@@ -5,7 +5,7 @@ import { useAppIntegration, useResponsive } from '../lib/hooks';
 import { businessProfileManager, BusinessProfile } from '../lib/businessProfile';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
-import { parseSpatialMaterialHandoff } from '../lib/spatialWorkspace';
+import { formatMeasurement, parseSpatialMaterialHandoff, type SpatialItem } from '../lib/spatialWorkspace';
 import { RichMedia } from './Richmedia';
 
 interface MaterialEstimatorProps {
@@ -32,6 +32,7 @@ interface Estimate {
   tax: number;
   total: number;
   measurementWarning?: string;
+  layoutItems?: SpatialItem[];
   createdAt: number;
   cloud?: boolean;
 }
@@ -49,6 +50,11 @@ interface MeasurementData {
   volume: number;
 }
 
+function csvCell(value: string | number): string {
+  const cell = String(value);
+  return /[",\r\n]/.test(cell) ? `"${cell.replaceAll('"', '""')}"` : cell;
+}
+
 export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) => {
   const { isMobile } = useResponsive();
   const integration = useAppIntegration(userId);
@@ -57,6 +63,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
   const [view, setView] = useState<'input' | 'estimate' | 'history'>('input');
   const [projectName, setProjectName] = useState('');
   const [spatialHandoffWarning, setSpatialHandoffWarning] = useState('');
+  const [spatialLayoutItems, setSpatialLayoutItems] = useState<SpatialItem[]>([]);
   const [workspaceProjectId, setWorkspaceProjectId] = useState('');
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [measurements, setMeasurements] = useState<MeasurementData>({
@@ -166,6 +173,10 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
               workspaceProjectId: typeof data.workspaceProjectId === 'string' ? data.workspaceProjectId : '',
               workspaceProjectName: typeof data.workspaceProjectName === 'string' ? data.workspaceProjectName : '',
               materials: Array.isArray(data.materials) ? (data.materials as Material[]) : [],
+              layoutItems: parseSpatialMaterialHandoff({
+                projectName: data.projectName,
+                layoutItems: data.layoutItems,
+              })?.layoutItems || [],
               subtotal: Number(data.subtotal || 0),
               tax: Number(data.tax || 0),
               total: Number(data.total || 0),
@@ -189,6 +200,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                 projectName: localEstimate.projectName,
                 workspaceProjectId: localEstimate.workspaceProjectId || '',
                 workspaceProjectName: localEstimate.workspaceProjectName || '',
+                ...(localEstimate.layoutItems?.length ? { layoutItems: localEstimate.layoutItems } : {}),
                 materials: localEstimate.materials || [],
                 subtotal: Number(localEstimate.subtotal || 0),
                 tax: Number(localEstimate.tax || 0),
@@ -239,6 +251,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
 
         if (parsed.projectName) setProjectName(parsed.projectName);
         setSpatialHandoffWarning(parsed.measurementWarning || '');
+        setSpatialLayoutItems(parsed.layoutItems || []);
         if (parsed.measurements) {
           setMeasurements((current) => ({ ...current, ...parsed.measurements }));
         }
@@ -341,6 +354,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       workspaceProjectId,
       workspaceProjectName,
       ...(spatialHandoffWarning ? { measurementWarning: spatialHandoffWarning } : {}),
+      ...(spatialLayoutItems.length ? { layoutItems: spatialLayoutItems } : {}),
       materials,
       subtotal,
       tax,
@@ -386,7 +400,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       materialCount: materials.length,
       total: estimate.total,
     });
-  }, [projectName, workspaceProjectId, projects, materials, estimates, userId, integration, spatialHandoffWarning]);
+  }, [projectName, workspaceProjectId, projects, materials, estimates, userId, integration, spatialHandoffWarning, spatialLayoutItems]);
 
   /**
    * Delete estimate
@@ -430,13 +444,20 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
   const handleExportEstimate = useCallback(
     (estimate: Estimate) => {
       let csv = 'Material Estimate\n';
-      csv += `Project: ${estimate.projectName}\n`;
+      csv += `Project: ${csvCell(estimate.projectName)}\n`;
       csv += `Date: ${new Date(estimate.createdAt).toLocaleDateString()}\n\n`;
-      if (estimate.measurementWarning) csv += `Measurement note: ${estimate.measurementWarning}\n\n`;
+      if (estimate.measurementWarning) csv += `Measurement note: ${csvCell(estimate.measurementWarning)}\n\n`;
+      if (estimate.layoutItems?.length) {
+        csv += 'Planned room items\nItem,Category,Width,Depth,Height,Left from plan origin,Top from plan origin\n';
+        estimate.layoutItems.forEach((item) => {
+          csv += [item.label, item.category, formatMeasurement(item.widthInches), formatMeasurement(item.depthInches), item.heightInches ? formatMeasurement(item.heightInches) : '', formatMeasurement(item.xInches), formatMeasurement(item.yInches)].map(csvCell).join(',') + '\n';
+        });
+        csv += '\n';
+      }
       csv += 'Material,Quantity,Unit,Unit Price,Total\n';
 
       estimate.materials.forEach((m) => {
-        csv += `${m.name},${m.quantity},${m.unit},$${m.unitPrice.toFixed(2)},$${m.total.toFixed(2)}\n`;
+        csv += [m.name, m.quantity, m.unit, `$${m.unitPrice.toFixed(2)}`, `$${m.total.toFixed(2)}`].map(csvCell).join(',') + '\n';
       });
 
       csv += `\nSubtotal,$${estimate.subtotal.toFixed(2)}\n`;
@@ -559,6 +580,16 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                   {measurements.volume > 0 && (
                     <p>Volume: {measurements.volume.toFixed(2)} cu ft</p>
                   )}
+                </div>
+              )}
+              {spatialLayoutItems.length > 0 && (
+                <div className="spatial-layout-items">
+                  <strong>Planned items from Spatial Workspace</strong>
+                  <ul>
+                    {spatialLayoutItems.map((item) => (
+                      <li key={item.id}>{item.label} · {formatMeasurement(item.widthInches)} × {formatMeasurement(item.depthInches)} · {formatMeasurement(item.xInches)} from left / {formatMeasurement(item.yInches)} from top</li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
@@ -718,6 +749,12 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
               {selectedEstimate.measurementWarning && (
                 <p className="spatial-warning" role="alert">{selectedEstimate.measurementWarning}</p>
               )}
+              {selectedEstimate.layoutItems?.length ? (
+                <div className="estimate-layout-items">
+                  <strong>Planned room items</strong>
+                  <p>{selectedEstimate.layoutItems.map((item) => `${item.label} (${formatMeasurement(item.widthInches)} × ${formatMeasurement(item.depthInches)}, ${formatMeasurement(item.xInches)} from left and ${formatMeasurement(item.yInches)} from top)`).join(' · ')}</p>
+                </div>
+              ) : null}
             </div>
 
             <table className="estimate-table">
@@ -789,7 +826,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                       {est.workspaceProjectName ? est.workspaceProjectName + ' · ' : ''}
                       {new Date(est.createdAt).toLocaleDateString()}
                     </p>
-                    <p className="card-count">{est.materials.length} materials</p>
+                    <p className="card-count">{est.materials.length} materials{est.layoutItems?.length ? ` · ${est.layoutItems.length} room items` : ''}</p>
                     {est.measurementWarning && (
                       <p className="spatial-warning" role="alert">{est.measurementWarning}</p>
                     )}
@@ -964,6 +1001,20 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
           color: #333;
           font-weight: 600;
         }
+
+        .spatial-layout-items, .estimate-layout-items {
+          border: 1px solid #d4dce1;
+          border-radius: .65rem;
+          background: #f4f7f8;
+          padding: .85rem 1rem;
+          color: #34424b;
+        }
+
+        .spatial-layout-items strong, .estimate-layout-items strong { display: block; font-size: .83rem; }
+        .spatial-layout-items ul { margin: .45rem 0 0; padding-left: 1.1rem; color: #56656e; font-size: .78rem; }
+        .spatial-layout-items li + li { margin-top: .25rem; }
+        .estimate-layout-items { margin: 0 0 1rem; }
+        .estimate-layout-items p { margin: .4rem 0 0; color: #56656e; font-size: .82rem; line-height: 1.5; }
 
         .material-form {
           background: #f9f9f9;
