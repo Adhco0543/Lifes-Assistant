@@ -322,7 +322,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         return [...existing.slice(0, Math.max(0, 100 - scan.items.length)), ...scan.items];
       });
       setTitle((current) => current === 'New room scan' ? 'Scanned room' : current);
-      setStatus(`Room scan added: ${scan.items.length} detected item${scan.items.length === 1 ? '' : 's'} and room dimensions. Review the plan and remove anything that was misidentified.`);
+      setStatus(`Scan added: ${formatMeasurement(scan.roomLengthInches)} × ${formatMeasurement(scan.roomWidthInches)} room, ${scan.items.length} detected item${scan.items.length === 1 ? '' : 's'}. Tap an item to remove it, or add your own below.`);
     };
 
     window.addEventListener('lifeassistant:room-scan', importNativeScan);
@@ -772,10 +772,12 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
       <div className="spatial-inner">
         <header className="spatial-header">
           <div>
-            <span className="kicker">ARCHITECTURAL AR</span>
+            <span className="kicker">MEASURED SPACE</span>
             <h1>Spatial Workspace</h1>
             <p>
-              Record room dimensions, place and remove items from the measured plan, and carry the saved space into Life&apos;s Assistant.
+              {nativeRoomScannerAvailable
+                ? 'Scan a room, then add or remove items directly on its measured plan.'
+                : 'Enter room dimensions, then add or remove items directly on the measured plan.'}
             </p>
           </div>
           <div className="header-actions">
@@ -786,59 +788,36 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           </div>
         </header>
 
-        <div className={`scan-guidance ${ar.supported || nativeRoomScannerAvailable ? 'scan-guidance-xr' : ''}`} role="status">
-          <strong>{ar.supported === null
-            ? nativeRoomScannerAvailable
-              ? 'Full-room scanning is available'
-              : 'Checking AR support for this browser'
-            : nativeRoomScannerAvailable
-              ? 'Full-room scanning is available'
-              : ar.supported
-              ? 'AR point measuring is available'
-              : 'Automatic room scanning is unavailable here'}</strong>
+        <section className={`scan-guidance ${ar.supported || nativeRoomScannerAvailable ? 'scan-guidance-xr' : ''}`} aria-label="Room scanning">
+          <strong>{nativeRoomScannerAvailable ? 'Scan a room' : 'Measure the room'}</strong>
           <span>
             {nativeRoomScannerAvailable
-              ? 'Scan the whole room with Apple RoomPlan, then import its dimensions and detected items into this measured-space plan. You can remove detected items or add your own.'
+              ? 'Tap Scan room and move slowly so the camera sees each wall and corner. Dimensions and detected items will appear in the plan automatically.'
               : ar.supported === null
-              ? 'Camera and photo tools save reference images only; they do not calculate dimensions. You can enter tape measurements below to build a scaled plan.'
+              ? 'Enter the room length and width below to create a scaled plan. Camera and photos are references only.'
               : ar.supported
-                ? 'This web workspace does not detect the whole room automatically. Start AR and set two endpoints for each dimension, or enter tape measurements below. Camera and photo tools save reference images only.'
-                : 'Camera and photo tools save reference images only; they do not calculate dimensions. Enter measured length and width below to build a scaled plan and calculate area. On a compatible device, AR can measure between two selected points.'}
+                ? 'This browser cannot scan the whole room. Enter its length and width below, or use optional AR tools for one distance at a time.'
+                : 'This browser cannot scan the whole room. Enter its length and width below to create a scaled plan.'}
           </span>
-        </div>
-
-        <div className="capability-row" aria-label="Device capability status">
-          {nativeRoomScannerAvailable && <span className="cap ok"><b>RoomPlan</b>Native scanner ready</span>}
-          <span className={capabilities.camera ? 'cap ok' : 'cap'}>
-            <b>Camera</b>{capabilities.camera ? 'Ready' : 'Unavailable'}
-          </span>
-          <span className={capabilities.secureContext ? 'cap ok' : 'cap'}>
-            <b>HTTPS</b>{capabilities.secureContext ? 'Secure' : 'Required'}
-          </span>
-          <span className={ar.supported ? 'cap ok' : 'cap'}>
-            <b>WebXR AR</b>{ar.supported === null ? 'Checking…' : ar.supported ? 'Available' : 'Browser fallback'}
-          </span>
-          <span className={ar.surfaceAvailable ? 'cap ok' : 'cap'}>
-            <b>AR hit test</b>{ar.active ? ar.surfaceAvailable ? 'Surface found' : 'Searching' : ar.supported ? 'Checked at start' : ar.supported === null ? 'Checking…' : 'Unavailable'}
-          </span>
-        </div>
+          {nativeRoomScannerAvailable && (
+            <button type="button" className="scan-room-button" disabled={isSaving} onClick={() => {
+              const roomScanner = (window as NativeRoomScannerWindow).webkit?.messageHandlers?.roomScanner;
+              if (!roomScanner) {
+                setStatus('The room scanner is unavailable. Reopen this workspace in the Life’s Assistant iOS app.');
+                return;
+              }
+              roomScanner.postMessage('start');
+              setStatus('Room scanner opened. Finish the scan to add dimensions and detected items here.');
+            }}>Scan room</button>
+          )}
+        </section>
 
         <section className="workspace-grid">
           <div className="viewer-panel">
             <div className="viewer-toolbar">
-              {nativeRoomScannerAvailable && (
-                <button type="button" className="tool-button ar-launch" disabled={isSaving} title="Scan this room with Apple RoomPlan on a LiDAR-equipped iPhone or iPad." onClick={() => {
-                  const roomScanner = (window as NativeRoomScannerWindow).webkit?.messageHandlers?.roomScanner;
-                  if (!roomScanner) {
-                    setStatus('The native room scanner is not connected. Close and reopen this screen in Life’s Assistant.');
-                    return;
-                  }
-                  roomScanner.postMessage('start');
-                  setStatus('Opening the native room scanner…');
-                }}>
-                  Scan whole room
-                </button>
-              )}
+              <details className="optional-tools">
+                <summary>More tools</summary>
+                <div className="optional-tool-list">
               {ar.supported && !ar.active && (
                 <button type="button" className="tool-button ar-launch" title="Measure one distance by selecting its two endpoints, or place a room item in AR." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => { setArAction('measure'); arActionRef.current = 'measure'; void startAR(); }}>
                   {ar.starting ? 'Starting AR…' : 'Measure two points in AR'}
@@ -864,6 +843,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 Use photo
                 <input type="file" accept="image/*" capture="environment" disabled={ar.active} onChange={handlePhoto} />
               </label>
+                </div>
+              </details>
             </div>
 
             <div
@@ -1210,13 +1191,13 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                     </div>
                     <div className="placement-actions">
                       <button type="button" className="add-button" disabled={isSaving} onClick={beginPlacingItem}>
-                        {isPlacingItem ? 'Choose plan location' : 'Place on plan'}
+                        {isPlacingItem ? 'Tap plan to place item' : 'Add item to plan'}
                       </button>
                       {isPlacingItem && <button type="button" className="cancel-place" onClick={() => { setIsPlacingItem(false); setStatus('Item placement cancelled.'); }}>Cancel</button>}
                     </div>
                   </div>
                   <p className="plan-hint" role="status" aria-live="polite">
-                    {isPlacingItem ? 'Tap an open area to place the footprint. Items stay inside the room boundary and cannot overlap.' : 'Tap an item on the plan to remove it.'}
+                    {isPlacingItem ? 'Tap an open area to place the item. Items stay inside the room boundary and cannot overlap.' : 'Tap an item on the plan to remove it.'}
                   </p>
                 </>
               )}
@@ -1407,6 +1388,29 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           line-height: 1.5;
         }
         .scan-guidance strong { color: #f0d2a5; font-size: .8rem; }
+        .scan-room-button {
+          justify-self: start;
+          min-height: 44px;
+          margin-top: 6px;
+          border: 0;
+          border-radius: 11px;
+          padding: 0 18px;
+          background: #9de0bb;
+          color: #10251b;
+          font-size: .82rem;
+          font-weight: 800;
+          cursor: pointer;
+        }
+        .optional-tools { width: 100%; }
+        .optional-tools summary {
+          width: fit-content;
+          padding: 7px 10px;
+          color: #aaa;
+          font-size: .72rem;
+          cursor: pointer;
+          user-select: none;
+        }
+        .optional-tool-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 2px 2px; }
         .scan-guidance-xr {
           border-color: rgba(96, 214, 161, .24);
           background: rgba(36, 81, 60, .18);
