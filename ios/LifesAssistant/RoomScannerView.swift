@@ -2,13 +2,23 @@ import RoomPlan
 import SwiftUI
 
 @MainActor
-final class RoomCaptureController: NSObject, ObservableObject, RoomCaptureViewDelegate {
+final class RoomCaptureController: NSObject, ObservableObject, @preconcurrency RoomCaptureViewDelegate {
     @Published private(set) var isCapturing = false
     @Published private(set) var isProcessing = false
     @Published private(set) var result: RoomScanPayload?
     @Published var errorMessage: String?
 
     private weak var captureView: RoomCaptureView?
+
+    override init() {
+        super.init()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init()
+    }
+
+    func encode(with coder: NSCoder) { }
 
     func attach(_ view: RoomCaptureView) {
         captureView = view
