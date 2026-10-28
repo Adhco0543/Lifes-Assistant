@@ -10,6 +10,8 @@ import { parseChatApiResponse } from '../lib/chatApiContracts';
 import type { ChatApiResponse } from '../lib/chatApiContracts';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 import { parseRadarApiResponse } from '../lib/radarApiContracts';
+import { ChatHistoryPanel } from './ChatHistoryPanel';
+import { ChatMessageList } from './ChatMessageList';
 
 interface AdvancedChatProps {
   userId?: string;
@@ -964,88 +966,18 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       )}
 
       {historyOpen && (
-        <section className="history-browser" aria-label="Saved conversations">
-          <div className="history-browser-heading">
-            <div>
-              <strong>Saved conversations</strong>
-              <p>Select a conversation to open its saved messages.</p>
-            </div>
-            <button type="button" className="new-chat-btn" onClick={createNewConversation}>
-              + New chat
-            </button>
-          </div>
-          {conversationLoadError && (
-            <p className="history-error" role="alert">{conversationLoadError}</p>
-          )}
-          {conversations.length === 0 ? (
-            <p className="history-empty">No saved conversations found for this account.</p>
-          ) : (
-            <div className="history-list">
-              {conversations.map((conv) => (
-                <button
-                  type="button"
-                  key={conv.id}
-                  disabled={Boolean(loadingConversationId)}
-                  className={`history-item ${conv.id === currentConversationId ? 'active' : ''}`}
-                  onClick={() => void loadConversation(conv.id, conv.title)}
-                >
-                  <span className="history-item-main">
-                    <strong>{conv.title || 'Untitled conversation'}</strong>
-                    <small>{new Date(conv.updatedAt || conv.createdAt).toLocaleString()} · {conv.messageCount || 0} saved messages</small>
-                  </span>
-                  <span className="history-item-open">
-                    {loadingConversationId === conv.id ? 'Opening…' : 'Open →'}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+        <ChatHistoryPanel
+          conversations={conversations}
+          currentConversationId={currentConversationId}
+          loadingConversationId={loadingConversationId}
+          error={conversationLoadError}
+          onNewChat={createNewConversation}
+          onOpenConversation={(id, title) => void loadConversation(id, title)}
+        />
       )}
 
       <div className="chat-main" style={historyOpen ? { display: 'none' } : undefined}>
-        <div className="messages-wrapper">
-          <div className="messages-container">
-            {messages.length === 0 ? (
-              <div className="empty-state">
-                <h3>Welcome 👋</h3>
-                <p>Ask anything, attach a file, or take a photo to identify, cook, clean, troubleshoot, or plan.</p>
-              </div>
-            ) : (
-              messages.map((msg) => (
-                <div key={msg.id} className={`message message-${msg.role}`}>
-                  <div className="message-bubble">
-                    {msg.content.split('\n').map((line, idx) => (
-                      <div key={idx}>{line}</div>
-                    ))}
-                    {msg.attachments?.length ? (
-                      <div className="message-attachments">
-                        {msg.attachments.map((attachment, index) => (
-                          <span className="message-attachment" key={attachment.name + '-' + index}>
-                            📎 {attachment.name}
-                            <small>{formatFileSize(attachment.size)}</small>
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ))
-            )}
-
-            {isLoading && (
-              <div className="message message-assistant">
-                <div className="message-bubble typing">
-                  <span className="typing-dot" />
-                  <span className="typing-dot" />
-                  <span className="typing-dot" />
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
+        <ChatMessageList messages={messages} isLoading={isLoading} endRef={messagesEndRef} />
 
         {pendingAction && pendingAction.type && pendingAction.type !== 'chat' && (
           <div className="action-card">
@@ -1335,57 +1267,6 @@ const styles = `
     cursor: pointer;
   }
   .history-toggle-btn:hover { background: #444; }
-  .history-browser {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 18px;
-    background: #202020;
-  }
-  .history-browser-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-  .history-browser-heading strong { font-size: 1rem; }
-  .history-browser-heading p { margin: 5px 0 0; color: #999; font-size: .76rem; }
-  .new-chat-btn {
-    border: 1px solid #525252;
-    border-radius: 9px;
-    padding: 10px 12px;
-    background: #343434;
-    color: #fff;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .history-list { display: flex; flex-direction: column; gap: 8px; }
-  .history-item {
-    width: 100%;
-    min-height: 66px;
-    padding: 12px 14px;
-    border: 1px solid #393939;
-    border-radius: 12px;
-    background: #2a2a2a;
-    color: #eee;
-    text-align: left;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-  }
-  .history-item:hover { background: #333; border-color: #555; }
-  .history-item.active { border-color: #777; }
-  .history-item:disabled { cursor: wait; opacity: .75; }
-  .history-item-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .history-item-main strong { overflow-wrap: anywhere; font-size: .85rem; }
-  .history-item-main small { color: #aaa; font-size: .7rem; }
-  .history-item-open { flex-shrink: 0; font-size: .75rem; color: #ddd; }
-  .history-error { color: #ffc1b9; background: #422a2a; border-radius: 8px; padding: 10px; }
-  .history-empty { color: #aaa; font-size: .8rem; }
-
   .chat-main {
     flex: 1;
     min-height: 0;
@@ -1396,112 +1277,6 @@ const styles = `
   .loading-center {
     align-items: center;
     justify-content: center;
-  }
-
-  .messages-wrapper {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 1.25rem 1rem 2rem;
-    background: #212121;
-  }
-
-  .messages-container {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .empty-state {
-    text-align: center;
-    color: rgba(255,255,255,0.75);
-    margin-top: 16vh;
-  }
-
-  .message {
-    display: flex;
-  }
-
-  .message-user {
-    justify-content: flex-end;
-  }
-
-  .message-assistant {
-    justify-content: flex-start;
-  }
-
-  .message-bubble {
-    max-width: 760px;
-    padding: 0.75rem 1rem;
-    border-radius: 0.75rem;
-    word-wrap: break-word;
-    line-height: 1.4;
-    font-size: 0.9rem;
-  }
-
-  .message-user .message-bubble {
-    background: #303030;
-    color: white;
-    border-radius: 18px;
-  }
-
-  .message-assistant .message-bubble {
-    background: transparent;
-    color: #e0e0e0;
-    border: none;
-    border-radius: 0;
-  }
-
-  .message-attachments {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 9px;
-  }
-
-  .message-attachment {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    padding: 6px 8px;
-    border-radius: 9px;
-    background: #252525;
-    border: 1px solid #424242;
-    font-size: .7rem;
-    overflow-wrap: anywhere;
-  }
-
-  .message-attachment small {
-    color: #8b8b8b;
-    white-space: nowrap;
-  }
-
-  .typing {
-    display: flex;
-    gap: 0.3rem;
-  }
-
-  .typing-dot {
-    width: 7px;
-    height: 7px;
-    background: white;
-    border-radius: 50%;
-    opacity: 0.7;
-    animation: pulse 1s infinite ease-in-out;
-  }
-
-  .typing-dot:nth-child(2) {
-    animation-delay: 0.15s;
-  }
-
-  .typing-dot:nth-child(3) {
-    animation-delay: 0.3s;
-  }
-
-  @keyframes pulse {
-    0%, 100% { transform: translateY(0); opacity: 0.4; }
-    50% { transform: translateY(-3px); opacity: 1; }
   }
 
   .action-card {
@@ -1728,10 +1503,6 @@ const styles = `
       height: calc(100vh - 140px);
       right: 8px;
       bottom: 60px;
-    }
-
-    .message-bubble {
-      max-width: 90%;
     }
 
     .chat-header {
