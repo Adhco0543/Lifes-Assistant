@@ -70,7 +70,7 @@ export function measurementToInches(feet: number, inches: number): number {
 }
 
 export function formatMeasurement(totalInches: number): string {
-  const normalized = Math.max(0, finite(totalInches));
+  const normalized = Math.round(Math.max(0, finite(totalInches)) * 100) / 100;
   const feet = Math.floor(normalized / 12);
   const inches = Math.round((normalized - feet * 12) * 100) / 100;
   return `${feet}' ${inches}"`;

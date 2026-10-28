@@ -1061,8 +1061,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .ar-canvas { visibility: hidden; position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
         .ar-canvas.visible { visibility: visible; }
         .xr-dom-overlay { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
-        .ar-controls { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 20px); padding: 8px; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; color: #fff; background: rgba(15,15,15,.82); backdrop-filter: blur(12px); pointer-events: auto; }
-        .ar-controls p { margin: 0 4px; font-size: .72rem; }
+        .ar-controls { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: max-content; max-width: calc(100% - 20px); padding: 8px; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; color: #fff; background: rgba(15,15,15,.82); backdrop-filter: blur(12px); pointer-events: auto; }
+        .ar-controls p { flex-basis: 100%; margin: 0 4px; text-align: center; font-size: .72rem; }
         .ar-controls button { min-height: 38px; padding: 0 11px; border: 1px solid #5b6d62; border-radius: 9px; color: #eafff1; background: #254033; font: inherit; font-size: .7rem; font-weight: 750; white-space: nowrap; cursor: pointer; }
         .ar-controls button:disabled { opacity: .48; cursor: wait; }
         .ar-controls .end-ar-overlay { border-color: #555; color: #eee; background: #333; }

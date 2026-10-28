@@ -32,6 +32,7 @@ const room = {
 test('spatial measurement helpers keep trusted field dimensions stable', () => {
   assert.equal(measurementToInches(10, 6), 126);
   assert.equal(formatMeasurement(126), '10\' 6"');
+  assert.equal(formatMeasurement(23.999), '2\' 0"');
   assert.equal(clampPin(-20), 0);
   assert.equal(clampPin(120), 100);
 });
