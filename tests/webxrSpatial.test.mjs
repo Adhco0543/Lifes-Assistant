@@ -99,3 +99,116 @@ test('WebXR session hit tests place and render dimensioned AR boxes', async () =
     else delete globalThis.XRWebGLLayer;
   }
 });
+
+async function withMockXR(configureSession, run) {
+  const session = new EventTarget();
+  session.requestReferenceSpace = async () => ({});
+  session.requestHitTestSource = async () => ({});
+  session.requestAnimationFrame = () => 1;
+  session.updateRenderState = () => undefined;
+  session.endCalls = 0;
+  session.end = async () => { session.endCalls += 1; session.dispatchEvent(new Event('end')); };
+  configureSession?.(session);
+
+  class MockLayer {
+    constructor() { this.framebuffer = {}; }
+    getViewport() { return { x: 0, y: 0, width: 1, height: 1 }; }
+  }
+  const noop = () => undefined;
+  const gl = new Proxy({
+    createShader: () => ({}), getShaderParameter: () => true, createProgram: () => ({}),
+    getProgramParameter: () => true, createBuffer: () => ({}), getAttribLocation: () => 0,
+    getUniformLocation: () => ({}), makeXRCompatible: async () => undefined,
+  }, { get: (target, key) => (key in target ? target[key] : noop) });
+  const xr = { requestSession: async () => session };
+
+  const names = ['navigator', 'window', 'XRWebGLLayer'];
+  const originals = names.map((name) => Object.getOwnPropertyDescriptor(globalThis, name));
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { xr } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { isSecureContext: true, devicePixelRatio: 1 } });
+  Object.defineProperty(globalThis, 'XRWebGLLayer', { configurable: true, value: MockLayer });
+  const state = { surface: [], ended: 0, selected: 0 };
+  const overlayRoot = new EventTarget();
+  const canvas = { clientWidth: 1, clientHeight: 1, getContext: () => gl };
+  try {
+    const controller = await startWebXRARSession({
+      canvas,
+      overlayRoot,
+      onSurfaceChange: (value) => state.surface.push(value),
+      onSelect: () => { state.selected += 1; },
+      onEnd: () => { state.ended += 1; },
+    });
+    await run({ controller, session, state, overlayRoot });
+  } finally {
+    names.forEach((name, index) => {
+      if (originals[index]) Object.defineProperty(globalThis, name, originals[index]);
+      else delete globalThis[name];
+    });
+  }
+}
+
+test('session end event resets state and reports onEnd once', async () => {
+  await withMockXR(null, async ({ controller, session, state }) => {
+    assert.equal(controller.isEnded(), false);
+    session.dispatchEvent(new Event('end'));
+    session.dispatchEvent(new Event('end'));
+    assert.equal(controller.isEnded(), true);
+    assert.equal(state.ended, 1);
+    assert.deepEqual(state.surface, [false]);
+  });
+});
+
+test('end() is idempotent and only ends the session once', async () => {
+  await withMockXR(null, async ({ controller, session, state }) => {
+    await Promise.all([controller.end(), controller.end()]);
+    await controller.end();
+    assert.equal(session.endCalls, 1);
+    assert.equal(state.ended, 1);
+  });
+});
+
+test('end() rejection still triggers onEnd and does not throw', async () => {
+  await withMockXR((session) => { session.end = async () => { throw new Error('end failed'); }; },
+    async ({ controller, state }) => {
+      await controller.end();
+      assert.equal(controller.isEnded(), true);
+      assert.equal(state.ended, 1);
+      assert.deepEqual(state.surface, [false]);
+    });
+  await withMockXR((session) => { session.end = () => { throw new Error('sync failure'); }; },
+    async ({ controller, state }) => {
+      await controller.end();
+      assert.equal(state.ended, 1);
+    });
+});
+
+test('taps on overlay controls are prevented from becoming AR select taps', async () => {
+  await withMockXR(null, async ({ session, state, overlayRoot }) => {
+    const control = {};
+    const controlTap = new Event('beforexrselect', { cancelable: true });
+    Object.defineProperty(controlTap, 'target', { value: control });
+    overlayRoot.dispatchEvent(controlTap);
+    assert.equal(controlTap.defaultPrevented, true);
+
+    const rootTap = new Event('beforexrselect', { cancelable: true });
+    overlayRoot.dispatchEvent(rootTap);
+    assert.equal(rootTap.defaultPrevented, false);
+
+    session.dispatchEvent(new Event('select'));
+    assert.equal(state.selected, 1);
+  });
+});
+
+test('a hidden session ends itself, and select after end is ignored', async () => {
+  await withMockXR((session) => { session.visibilityState = 'visible'; }, async ({ controller, session, state }) => {
+    session.visibilityState = 'visible-blurred';
+    session.dispatchEvent(new Event('visibilitychange'));
+    assert.equal(controller.isEnded(), false);
+    session.visibilityState = 'hidden';
+    session.dispatchEvent(new Event('visibilitychange'));
+    await controller.end();
+    assert.equal(state.ended, 1);
+    session.dispatchEvent(new Event('select'));
+    assert.equal(state.selected, 0);
+  });
+});

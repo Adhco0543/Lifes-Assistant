@@ -25,6 +25,14 @@ export function useWebXRAR(onPoint: (point: WebXRPoint, transform: number[] | nu
 
   onPointRef.current = onPoint;
 
+  const resetState = useCallback(() => {
+    controllerRef.current = null;
+    startingRef.current = false;
+    setActive(false);
+    setStarting(false);
+    setSurfaceAvailable(false);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     const xr = (navigator as XRCapabilityNavigator).xr;
@@ -52,27 +60,31 @@ export function useWebXRAR(onPoint: (point: WebXRPoint, transform: number[] | nu
         overlayRoot,
         onSurfaceChange: setSurfaceAvailable,
         onSelect: (point, transform) => { if (point) onPointRef.current(point, transform); },
-        onEnd: () => {
-          controllerRef.current = null;
-          setActive(false);
-          setSurfaceAvailable(false);
-        },
+        onEnd: resetState,
       });
-      controllerRef.current = controller;
-      setActive(true);
+      if (controller.isEnded()) {
+        resetState();
+      } else {
+        controllerRef.current = controller;
+        setActive(true);
+      }
     } finally {
       startingRef.current = false;
       setStarting(false);
     }
-  }, []);
+  }, [resetState]);
 
   const stop = useCallback(async () => {
     const controller = controllerRef.current;
-    if (!controller) return;
     controllerRef.current = null;
-    await controller.end();
-    setActive(false);
-    setSurfaceAvailable(false);
+    try {
+      await controller?.end();
+    } catch {
+      // Local state is reset below even when the session fails to end cleanly.
+    } finally {
+      setActive(false);
+      setSurfaceAvailable(false);
+    }
   }, []);
 
   const placeCurrentPoint = useCallback((): boolean => {
@@ -92,10 +104,26 @@ export function useWebXRAR(onPoint: (point: WebXRPoint, transform: number[] | nu
     controllerRef.current?.setAnchor(point);
   }, []);
 
+  useEffect(() => {
+    if (!active) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') void stop();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden' || controllerRef.current?.isEnded()) void stop();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [active, stop]);
+
   useEffect(() => () => {
     const controller = controllerRef.current;
     controllerRef.current = null;
-    if (controller) void controller.end();
+    if (controller) void controller.end().catch(() => undefined);
   }, []);
 
   return {

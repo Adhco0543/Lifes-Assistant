@@ -9,7 +9,7 @@ import { currentChatContext, recallKeywords, compactConversationMessages } from 
 import { parseChatApiResponse } from '../lib/chatApiContracts';
 import type { ChatApiResponse } from '../lib/chatApiContracts';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
-import { parseRadarApiResponse } from '../lib/radarApiContracts';
+import { parseRadarApiResponseSafe } from '../lib/radarApiContracts';
 import { ChatHistoryPanel } from './ChatHistoryPanel';
 import { ChatMessageList } from './ChatMessageList';
 
@@ -458,7 +458,9 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       if (!response.ok) return;
 
-      const data = parseRadarApiResponse(await response.json().catch(() => null));
+      const parsed = parseRadarApiResponseSafe(await response.json().catch(() => null));
+      if (!parsed.valid) reportIntegrationFailure('radar', 'parse-response');
+      const data = parsed.response;
       const detected = Array.isArray(data.openLoops) ? data.openLoops : [];
       const resolvedIds = new Set(
         Array.isArray(data.resolveLoopIds) ? data.resolveLoopIds : []
