@@ -80,9 +80,6 @@ struct ContentView: View {
             }
             .interactiveDismissDisabled()
         }
-        .onAppear {
-            if workspaceURL.isEmpty { urlDraft = "https://lifes-assistant.vercel.app" }
-        }
     }
 
     private var connectionSetup: some View {
@@ -111,7 +108,7 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.55))
-                    TextField("https://…", text: $urlDraft)
+                    TextField("Paste the current review URL", text: $urlDraft)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
@@ -141,7 +138,7 @@ struct ContentView: View {
                 }
                 .disabled(!draftCanOpen)
 
-                Text("For a protected review preview, paste the full Vercel share link. The address is saved only on this device.")
+                Text("Paste the current branch preview link to test native room scanning. For a protected Vercel preview, use the full share link. The address is saved only on this device.")
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
