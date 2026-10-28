@@ -31,6 +31,7 @@ interface Estimate {
   subtotal: number;
   tax: number;
   total: number;
+  measurementWarning?: string;
   createdAt: number;
   cloud?: boolean;
 }
@@ -55,6 +56,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [view, setView] = useState<'input' | 'estimate' | 'history'>('input');
   const [projectName, setProjectName] = useState('');
+  const [spatialHandoffWarning, setSpatialHandoffWarning] = useState('');
   const [workspaceProjectId, setWorkspaceProjectId] = useState('');
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [measurements, setMeasurements] = useState<MeasurementData>({
@@ -167,6 +169,9 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
               subtotal: Number(data.subtotal || 0),
               tax: Number(data.tax || 0),
               total: Number(data.total || 0),
+              ...(typeof data.measurementWarning === 'string' && data.measurementWarning.length <= 300
+                ? { measurementWarning: data.measurementWarning }
+                : {}),
               createdAt: Number(record.createdAt || Date.now()),
               cloud: true,
             };
@@ -233,6 +238,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
         if (!parsed) return;
 
         if (parsed.projectName) setProjectName(parsed.projectName);
+        setSpatialHandoffWarning(parsed.measurementWarning || '');
         if (parsed.measurements) {
           setMeasurements((current) => ({ ...current, ...parsed.measurements }));
         }
@@ -334,6 +340,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       projectName,
       workspaceProjectId,
       workspaceProjectName,
+      ...(spatialHandoffWarning ? { measurementWarning: spatialHandoffWarning } : {}),
       materials,
       subtotal,
       tax,
@@ -379,7 +386,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       materialCount: materials.length,
       total: estimate.total,
     });
-  }, [projectName, workspaceProjectId, projects, materials, estimates, userId, integration]);
+  }, [projectName, workspaceProjectId, projects, materials, estimates, userId, integration, spatialHandoffWarning]);
 
   /**
    * Delete estimate
@@ -425,6 +432,7 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
       let csv = 'Material Estimate\n';
       csv += `Project: ${estimate.projectName}\n`;
       csv += `Date: ${new Date(estimate.createdAt).toLocaleDateString()}\n\n`;
+      if (estimate.measurementWarning) csv += `Measurement note: ${estimate.measurementWarning}\n\n`;
       csv += 'Material,Quantity,Unit,Unit Price,Total\n';
 
       estimate.materials.forEach((m) => {
@@ -506,6 +514,9 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
 
             <div className="form-section">
               <h3>Project Dimensions</h3>
+              {spatialHandoffWarning && (
+                <p className="spatial-warning" role="alert">{spatialHandoffWarning}</p>
+              )}
               <div className="measurements-grid">
                 <div className="form-group">
                   <label>Length (ft)</label>
@@ -704,6 +715,9 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                 {selectedEstimate.workspaceProjectName ? selectedEstimate.workspaceProjectName + ' · ' : ''}
                 {new Date(selectedEstimate.createdAt).toLocaleDateString()}
               </p>
+              {selectedEstimate.measurementWarning && (
+                <p className="spatial-warning" role="alert">{selectedEstimate.measurementWarning}</p>
+              )}
             </div>
 
             <table className="estimate-table">
@@ -776,6 +790,9 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
                       {new Date(est.createdAt).toLocaleDateString()}
                     </p>
                     <p className="card-count">{est.materials.length} materials</p>
+                    {est.measurementWarning && (
+                      <p className="spatial-warning" role="alert">{est.measurementWarning}</p>
+                    )}
                     <div className="card-actions">
                       <button
                         className="btn-view"
@@ -888,6 +905,16 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
           font-size: 1.1rem;
           font-weight: 700;
           color: #333;
+        }
+        .spatial-warning {
+          margin: 0 0 12px;
+          border-left: 3px solid #c89d43;
+          border-radius: 5px;
+          padding: 10px 12px;
+          background: rgba(200,157,67,.12);
+          color: #efdbab;
+          font-size: .82rem;
+          line-height: 1.45;
         }
 
         .form-group {

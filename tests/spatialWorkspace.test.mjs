@@ -11,6 +11,8 @@ import {
   parseSpatialWorkspaceRecord,
   summarizeSpatialWorkspace,
 } from '../lib/spatialWorkspace.ts';
+import { distanceInMeters, metersToInches } from '../lib/webxrSpatial.ts';
+import nextConfig from '../next.config.ts';
 
 const room = {
   title: 'Bathroom',
@@ -44,6 +46,13 @@ test('room metrics derive area and volume only from explicit dimensions', () => 
   });
 });
 
+test('room metrics use the newest recorded value when a dimension is measured again', () => {
+  assert.equal(calculateRoomMetrics([
+    { id: 'old', label: 'Length', kind: 'length', totalInches: 120 },
+    { id: 'new', label: 'Length AR', kind: 'length', totalInches: 180, source: 'webxr-hit-test' },
+  ]).length, 15);
+});
+
 test('material handoff and summary preserve spatial context', () => {
   const handoff = buildMaterialHandoff(room);
   assert.equal(handoff.projectName, 'Bathroom');
@@ -51,12 +60,38 @@ test('material handoff and summary preserve spatial context', () => {
   assert.match(summarizeSpatialWorkspace(room), /Widen doorway/);
 });
 
+test('WebXR point distances convert meters to inches and mark estimates in handoffs', () => {
+  assert.equal(distanceInMeters({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }), 1);
+  assert.equal(metersToInches(1), 39.37);
+  assert.equal(metersToInches(Number.NaN), 0);
+
+  const arRoom = {
+    ...room,
+    measurements: [
+      { id: 'ar-1', label: 'Room length', kind: 'length', totalInches: 120, source: 'webxr-hit-test' },
+      ...room.measurements.slice(1),
+    ],
+  };
+  assert.match(summarizeSpatialWorkspace(arRoom), /AR estimate; verify on site/);
+  const arHandoff = buildMaterialHandoff(arRoom);
+  assert.match(arHandoff.measurementWarning, /verify them with a tape/i);
+  assert.ok(arHandoff.notes.some((note) => /verify all dimensions on site/i.test(note)));
+  assert.match(parseSpatialMaterialHandoff(arHandoff).measurementWarning, /AR estimates/);
+});
+
+test('the app permits same-origin WebXR spatial tracking sessions', async () => {
+  const rules = await nextConfig.headers();
+  const policy = rules.flatMap((rule) => rule.headers)
+    .find((header) => header.key.toLowerCase() === 'permissions-policy');
+  assert.equal(policy?.value, 'xr-spatial-tracking=(self)');
+});
+
 test('saved spatial data is normalized before reuse', () => {
   const parsed = parseSpatialWorkspaceRecord({
     title: 'Hall',
     roomType: 'Hallway',
     measurements: [
-      { id: 'm', label: 'Width', kind: 'width', totalInches: 48 },
+      { id: 'm', label: 'Width', kind: 'width', totalInches: 48, source: 'webxr-hit-test' },
       { id: 'bad', label: 'Bad', kind: 'width', totalInches: -5 },
     ],
     notes: [
@@ -68,6 +103,7 @@ test('saved spatial data is normalized before reuse', () => {
 
   assert.ok(parsed);
   assert.equal(parsed.measurements.length, 1);
+  assert.equal(parsed.measurements[0].source, 'webxr-hit-test');
   assert.equal(parsed.notes[0].x, 100);
   assert.equal(parsed.notes[0].y, 0);
 });

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
+import { useWebXRAR } from './useWebXRAR';
 import {
   buildMaterialHandoff,
   calculateRoomMetrics,
@@ -18,6 +19,7 @@ import {
   type SpatialNoteCategory,
   type SpatialWorkspaceRecord,
 } from '../lib/spatialWorkspace';
+import { distanceInMeters, metersToInches, type WebXRPoint } from '../lib/webxrSpatial';
 
 type SpatialWorkspaceProps = {
   userId: string;
@@ -32,7 +34,6 @@ type SavedSpace = {
 type CapabilityState = {
   camera: boolean;
   secureContext: boolean;
-  webAr: boolean | null;
 };
 
 const ROOM_TYPES = [
@@ -122,6 +123,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const savingRef = useRef(false);
+  const firstArPointRef = useRef<WebXRPoint | null>(null);
+  const wasArActiveRef = useRef(false);
 
   const [title, setTitle] = useState('New room scan');
   const [roomType, setRoomType] = useState('Room');
@@ -138,7 +141,6 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const [capabilities, setCapabilities] = useState<CapabilityState>({
     camera: false,
     secureContext: false,
-    webAr: null,
   });
 
   const [measurementKind, setMeasurementKind] = useState<SpatialMeasurementKind>('length');
@@ -148,6 +150,39 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
 
   const [noteText, setNoteText] = useState('');
   const [noteCategory, setNoteCategory] = useState<SpatialNoteCategory>('work');
+  const [arPointStep, setArPointStep] = useState<0 | 1>(0);
+
+  const addArPoint = useCallback((point: WebXRPoint) => {
+    const firstPoint = firstArPointRef.current;
+    if (!firstPoint) {
+      firstArPointRef.current = point;
+      setArPointStep(1);
+      setStatus('First AR point set. Move to the other end and set the second point.');
+      return;
+    }
+
+    const inches = metersToInches(distanceInMeters(firstPoint, point));
+    if (inches < 0.25) {
+      setStatus('Those AR points are too close. Move to the other end of the dimension.');
+      return;
+    }
+
+    const defaultLabel = MEASUREMENT_TYPES.find((item) => item.value === measurementKind)?.label || 'Measurement';
+    setMeasurements((current) => [
+      ...current,
+      {
+        id: makeId('ar-measurement'),
+        label: measurementLabel.trim() || defaultLabel,
+        kind: measurementKind,
+        totalInches: inches,
+        source: 'webxr-hit-test',
+      },
+    ]);
+    firstArPointRef.current = null;
+    setArPointStep(0);
+    setStatus(`AR estimate: ${formatMeasurement(inches)}. Verify with a tape before quoting or ordering.`);
+  }, [measurementKind, measurementLabel]);
+  const ar = useWebXRAR(addArPoint);
 
   const metrics = useMemo(() => calculateRoomMetrics(measurements), [measurements]);
 
@@ -176,23 +211,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     const detect = async () => {
       const secureContext = typeof window !== 'undefined' ? window.isSecureContext : false;
       const camera = Boolean(navigator.mediaDevices?.getUserMedia);
-      let webAr: boolean | null = null;
-
-      try {
-        const xr = (navigator as Navigator & {
-          xr?: { isSessionSupported?: (mode: string) => Promise<boolean> };
-        }).xr;
-        if (xr?.isSessionSupported) {
-          webAr = await xr.isSessionSupported('immersive-ar');
-        } else {
-          webAr = false;
-        }
-      } catch {
-        webAr = false;
-      }
-
       if (active) {
-        setCapabilities({ camera, secureContext, webAr });
+        setCapabilities({ camera, secureContext });
       }
     };
 
@@ -240,7 +260,50 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     };
   }, [stopCamera]);
 
+  const startAR = async () => {
+    if (!capabilities.secureContext) {
+      setStatus('WebXR AR requires a secure HTTPS connection.');
+      return;
+    }
+    stopCamera();
+    setStatus('Starting WebXR AR…');
+    try {
+      await ar.start();
+      setStatus('AR is live. Center the reticle on a surface, then set two points to measure.');
+    } catch (error) {
+      const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+      setStatus(name === 'NotAllowedError'
+        ? 'AR needs camera and motion permission. Allow access in the browser and try again.'
+        : name === 'NotSupportedError'
+          ? 'This browser or device does not provide the AR hit-testing feature. Continue with the camera or manual dimensions.'
+          : 'Could not start WebXR AR. Use a compatible browser on a supported device, or continue with the camera/photo tools.');
+    }
+  };
+
+  const stopAR = async () => {
+    await ar.stop();
+    firstArPointRef.current = null;
+    setArPointStep(0);
+    setStatus('AR session ended. Saved dimensions and notes are unchanged.');
+  };
+
+  useEffect(() => {
+    const wasActive = wasArActiveRef.current;
+    wasArActiveRef.current = ar.active;
+    if (!ar.active) {
+      firstArPointRef.current = null;
+      setArPointStep(0);
+      if (wasActive) {
+        setStatus((current) => current.startsWith('AR is live') || current.startsWith('First AR point set')
+          ? 'AR session ended.'
+          : current);
+      }
+    }
+    ar.setAnchor(ar.active && arPointStep === 1 ? firstArPointRef.current : null);
+  }, [ar.active, arPointStep, ar.setAnchor]);
+
   const startCamera = async () => {
+    if (ar.active) await stopAR();
     setStatus('Opening rear camera…');
 
     try {
@@ -280,6 +343,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (ar.active) await stopAR();
     stopCamera();
     event.target.value = '';
     setStatus('Preparing room photo…');
@@ -330,6 +394,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         label: measurementLabel.trim() || defaultLabel,
         kind: measurementKind,
         totalInches,
+        source: 'field',
       },
     ]);
     setFeet('');
@@ -394,7 +459,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         reportIntegrationFailure('firebase', 'save');
       }
 
-      setStatus('Workspace saved with its room photo, measurements, and notes.');
+      setStatus(record.imageDataUrl
+        ? 'Workspace saved with its room photo, measurements, and notes.'
+        : 'Workspace saved with its measurements and notes. No room photo was attached.');
       return record;
     } finally {
       savingRef.current = false;
@@ -463,6 +530,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   };
 
   const loadSpace = (space: SavedSpace) => {
+    if (ar.active) void stopAR();
     stopCamera();
     setRecordId(space.id);
     setTitle(space.data.title);
@@ -479,6 +547,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   };
 
   const newSpace = () => {
+    if (ar.active) void stopAR();
     stopCamera();
     setRecordId('');
     setTitle('New room scan');
@@ -502,8 +571,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             <span className="kicker">ARCHITECTURAL AR</span>
             <h1>Spatial Workspace</h1>
             <p>
-              Capture a room, record trusted field dimensions, pin work notes to the view,
-              and hand the result directly into the rest of Life&apos;s Assistant.
+              Measure between tracked real-world points with WebXR on supported devices,
+              verify the result on site, then carry the room plan into Life&apos;s Assistant.
             </p>
           </div>
           <div className="header-actions">
@@ -521,18 +590,28 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           <span className={capabilities.secureContext ? 'cap ok' : 'cap'}>
             <b>HTTPS</b>{capabilities.secureContext ? 'Secure' : 'Required'}
           </span>
-          <span className={capabilities.webAr ? 'cap ok' : 'cap'}>
-            <b>WebAR</b>{capabilities.webAr ? 'Supported' : 'Browser fallback'}
+          <span className={ar.supported ? 'cap ok' : 'cap'}>
+            <b>WebXR AR</b>{ar.supported === null ? 'Checking…' : ar.supported ? 'Available' : 'Browser fallback'}
           </span>
-          <span className="cap">
-            <b>Depth / LiDAR</b>Native bridge planned
+          <span className={ar.surfaceAvailable ? 'cap ok' : 'cap'}>
+            <b>AR hit test</b>{ar.active ? ar.surfaceAvailable ? 'Surface found' : 'Searching' : ar.supported ? 'Checked at start' : ar.supported === null ? 'Checking…' : 'Unavailable'}
           </span>
         </div>
 
         <section className="workspace-grid">
           <div className="viewer-panel">
             <div className="viewer-toolbar">
-              <button type="button" className="tool-button" disabled={isSaving} onClick={() => void startCamera()}>
+              {ar.supported && !ar.active && (
+                <button type="button" className="tool-button ar-launch" title="Choose the measurement type first. AR uses two tracked surface points." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => void startAR()}>
+                  {ar.starting ? 'Starting AR…' : 'Start AR measure'}
+                </button>
+              )}
+              {ar.active && (
+                <button type="button" className="tool-button" onClick={() => void stopAR()}>
+                  End AR
+                </button>
+              )}
+              <button type="button" className="tool-button" disabled={isSaving || ar.active} onClick={() => void startCamera()}>
                 {cameraActive ? 'Restart camera' : 'Open rear camera'}
               </button>
               {cameraActive && (
@@ -543,19 +622,20 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
               {cameraActive && (
                 <button type="button" className="tool-button" disabled={isSaving} onClick={stopCamera}>Stop camera</button>
               )}
-              <label className="tool-button upload">
+              <label className={`tool-button upload ${ar.active ? 'disabled' : ''}`}>
                 Use photo
-                <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} />
+                <input type="file" accept="image/*" capture="environment" disabled={ar.active} onChange={handlePhoto} />
               </label>
             </div>
 
             <div
               className="scan-stage"
-              onClick={pinNote}
+              onClick={ar.active ? undefined : pinNote}
               role="group"
               tabIndex={0}
               aria-label="Room view. Type a spatial note, then tap this view to place it. Press Enter or Space to place it at the center."
               onKeyDown={(event) => {
+                if (ar.active) return;
                 if ((event.key === 'Enter' || event.key === ' ') && noteText.trim()) {
                   event.preventDefault();
                   setNotes((current) => [
@@ -575,12 +655,17 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             >
               <video
                 ref={videoRef}
-                className={cameraActive ? 'camera visible' : 'camera'}
+                className={cameraActive && !ar.active ? 'camera visible' : 'camera'}
                 playsInline
                 muted
               />
-              {photoUrl && <img className="photo" src={photoUrl} alt="Selected room reference" />}
-              {!cameraActive && !photoUrl && (
+              {photoUrl && !ar.active && <img className="photo" src={photoUrl} alt="Selected room reference" />}
+              <canvas
+                ref={ar.canvasRef}
+                className={ar.active ? 'ar-canvas visible' : 'ar-canvas'}
+                aria-hidden="true"
+              />
+              {!ar.active && !cameraActive && !photoUrl && (
                 <div className="empty-stage">
                   <div className="scan-cube" aria-hidden="true">
                     <span />
@@ -592,10 +677,10 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 </div>
               )}
 
-              <div className="scan-grid" aria-hidden="true" />
-              <div className="reticle" aria-hidden="true"><span /></div>
+              {!ar.active && <div className="scan-grid" aria-hidden="true" />}
+              {!ar.active && <div className="reticle" aria-hidden="true"><span /></div>}
 
-              {notes.map((note, index) => (
+              {!ar.active && notes.map((note, index) => (
                 <button
                   type="button"
                   key={note.id}
@@ -614,15 +699,42 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
               ))}
 
               <div className="stage-status">
-                <span className={cameraActive ? 'live-dot active' : 'live-dot'} />
-                {cameraActive ? 'LIVE CAMERA' : photoUrl ? 'REFERENCE PHOTO' : 'SPATIAL PLAN'}
+                <span className={ar.active && ar.surfaceAvailable || cameraActive ? 'live-dot active' : 'live-dot'} />
+                {ar.active
+                  ? ar.surfaceAvailable ? 'AR SURFACE LOCK' : 'AR SEARCHING'
+                  : cameraActive ? 'LIVE CAMERA' : photoUrl ? 'REFERENCE PHOTO' : 'SPATIAL PLAN'}
+              </div>
+
+              <div
+                ref={ar.overlayRootRef}
+                className={ar.active ? 'xr-dom-overlay active' : 'xr-dom-overlay'}
+                aria-label="AR measuring controls"
+              >
+                {ar.active && (
+                  <div className="ar-controls">
+                    <p>{arPointStep === 1
+                      ? 'First point set. Move to the other end.'
+                      : ar.surfaceAvailable ? 'Surface detected' : 'Move slowly to find a surface'}</p>
+                    <button
+                      type="button"
+                      disabled={!ar.surfaceAvailable}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!ar.placeCurrentPoint()) setStatus('No surface detected at the reticle.');
+                      }}
+                    >
+                      {arPointStep === 0 ? 'Set first point' : 'Set second point'}
+                    </button>
+                    <button type="button" className="end-ar-overlay" onClick={(event) => { event.stopPropagation(); void stopAR(); }}>
+                      End AR
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="accuracy-note">
-              <b>Accuracy rule:</b> camera pixels are not converted into real-world dimensions unless
-              a supported depth provider supplies that data. Enter a verified measurement below so
-              quotes and material estimates never inherit a guessed dimension.
+              <b>Measurement accuracy:</b> WebXR point-to-point measurements are AR estimates from the device&apos;s tracked world coordinates and can drift. Verify dimensions with a tape before quoting or ordering. This web flow does not collect a LiDAR/depth map, and camera pixels are never treated as measurements.
             </div>
           </div>
 
@@ -698,6 +810,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 </label>
                 <button className="add-button" onClick={addMeasurement}>Add</button>
               </div>
+              {ar.supported && (
+                <small className="ar-step-hint">For an AR estimate, choose the type and label above, start AR, then set two surface points.</small>
+              )}
 
               <div className="measurement-list">
                 {measurements.length === 0 ? (
@@ -713,7 +828,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                       )
                     }
                   >
-                    <span>{measurement.label}</span>
+                    <span>{measurement.label}{measurement.source === 'webxr-hit-test' ? ' · AR estimate' : ''}</span>
                     <b>{formatMeasurement(measurement.totalInches)}</b>
                   </button>
                 ))}
@@ -723,6 +838,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 <div><span>Area</span><b>{metrics.area ? `${metrics.area} ft²` : '—'}</b></div>
                 <div><span>Volume</span><b>{metrics.volume ? `${metrics.volume} ft³` : '—'}</b></div>
               </div>
+              {measurements.some((measurement) => measurement.source === 'webxr-hit-test') && (
+                <p className="ar-warning">Area and volume include AR estimates. Verify before using them for materials or pricing.</p>
+              )}
             </div>
 
             <div className="panel">
@@ -917,6 +1035,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           justify-content: center;
         }
         .upload input { display: none; }
+        .upload.disabled { opacity: .5; cursor: not-allowed; }
         .scan-stage {
           position: relative;
           min-height: 560px;
@@ -939,6 +1058,14 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         }
         .camera { display: none; }
         .camera.visible { display: block; }
+        .ar-canvas { visibility: hidden; position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .ar-canvas.visible { visibility: visible; }
+        .xr-dom-overlay { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+        .ar-controls { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 20px); padding: 8px; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; color: #fff; background: rgba(15,15,15,.82); backdrop-filter: blur(12px); pointer-events: auto; }
+        .ar-controls p { margin: 0 4px; font-size: .72rem; }
+        .ar-controls button { min-height: 38px; padding: 0 11px; border: 1px solid #5b6d62; border-radius: 9px; color: #eafff1; background: #254033; font: inherit; font-size: .7rem; font-weight: 750; white-space: nowrap; cursor: pointer; }
+        .ar-controls button:disabled { opacity: .48; cursor: wait; }
+        .ar-controls .end-ar-overlay { border-color: #555; color: #eee; background: #333; }
         .scan-grid {
           pointer-events: none;
           position: absolute;
@@ -1118,6 +1245,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           padding: 0 13px;
           cursor: pointer;
         }
+        .ar-step-hint { display: block; margin-top: 8px; color: #c9b77e; font-size: .61rem; line-height: 1.4; }
         .measurement-list {
           display: flex;
           flex-wrap: wrap;
@@ -1157,6 +1285,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .metrics span, .metrics b { display: block; }
         .metrics span { color: #999; font-size: .58rem; }
         .metrics b { color: #d9d9d9; margin-top: 3px; font-size: .76rem; }
+        .ar-warning { margin: 9px 0 0; color: #e5c681; font-size: .64rem; line-height: 1.45; }
         .note-list {
           display: grid;
           gap: 6px;

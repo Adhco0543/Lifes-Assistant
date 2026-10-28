@@ -1,0 +1,236 @@
+export type WebXRPoint = { x: number; y: number; z: number };
+
+type WebXRHitPose = { transform?: { position?: WebXRPoint } };
+type WebXRHitResult = { getPose: (space: object) => WebXRHitPose | null };
+type WebXRHitSource = object;
+type WebXRView = {
+  projectionMatrix: Float32Array;
+  transform: { inverse: { matrix: Float32Array } };
+};
+type WebXRViewport = { x: number; y: number; width: number; height: number };
+type WebXRFrame = {
+  getHitTestResults: (source: WebXRHitSource) => WebXRHitResult[];
+  getViewerPose: (space: object) => { views: WebXRView[] } | null;
+};
+type WebXRLayer = {
+  framebuffer: WebGLFramebuffer | null;
+  getViewport: (view: WebXRView) => WebXRViewport;
+};
+type WebXRSession = EventTarget & {
+  requestReferenceSpace: (type: string) => Promise<object>;
+  requestHitTestSource: (options: { space: object }) => Promise<WebXRHitSource>;
+  requestAnimationFrame: (callback: (time: number, frame: WebXRFrame) => void) => number;
+  updateRenderState: (state: { baseLayer: WebXRLayer }) => void;
+  end: () => Promise<void>;
+};
+type WebXRSystem = {
+  isSessionSupported: (mode: string) => Promise<boolean>;
+  requestSession: (mode: string, options: Record<string, unknown>) => Promise<WebXRSession>;
+};
+type XRCompatibleContext = WebGLRenderingContext & { makeXRCompatible?: () => Promise<void> };
+type XRLayerConstructor = new (
+  session: WebXRSession,
+  context: XRCompatibleContext,
+  options: { alpha: boolean; antialias: boolean; depth: boolean; stencil: boolean }
+) => WebXRLayer;
+
+export type WebXRARController = {
+  getLatestHit: () => WebXRPoint | null;
+  setAnchor: (point: WebXRPoint | null) => void;
+  end: () => Promise<void>;
+};
+
+export function metersToInches(meters: number): number {
+  if (!Number.isFinite(meters) || meters <= 0) return 0;
+  return Math.round(meters * 39.37007874 * 100) / 100;
+}
+
+export function distanceInMeters(a: WebXRPoint, b: WebXRPoint): number {
+  if (![a.x, a.y, a.z, b.x, b.y, b.z].every(Number.isFinite)) return 0;
+  const x = b.x - a.x;
+  const y = b.y - a.y;
+  const z = b.z - a.z;
+  return Math.sqrt(x * x + y * y + z * z);
+}
+
+function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error('Could not initialize the AR reticle.');
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    gl.deleteShader(shader);
+    throw new Error('Could not initialize the AR reticle.');
+  }
+  return shader;
+}
+
+function createReticleProgram(gl: WebGLRenderingContext) {
+  const vertex = compileShader(gl, gl.VERTEX_SHADER,
+    'attribute vec4 position; void main() { gl_Position = position; }');
+  const fragment = compileShader(gl, gl.FRAGMENT_SHADER,
+    'precision mediump float; uniform vec4 tint; void main() { gl_FragColor = tint; }');
+  const program = gl.createProgram();
+  if (!program) throw new Error('Could not initialize the AR reticle.');
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    gl.deleteProgram(program);
+    throw new Error('Could not initialize the AR reticle.');
+  }
+  const buffer = gl.createBuffer();
+  const lineBuffer = gl.createBuffer();
+  const position = gl.getAttribLocation(program, 'position');
+  const tint = gl.getUniformLocation(program, 'tint');
+  if (!buffer || !lineBuffer || position < 0 || !tint) {
+    gl.deleteBuffer(buffer);
+    gl.deleteBuffer(lineBuffer);
+    gl.deleteProgram(program);
+    throw new Error('Could not initialize the AR reticle.');
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -0.035, 0, 0, 1, 0.035, 0, 0, 1,
+    0, -0.035, 0, 1, 0, 0.035, 0, 1,
+  ]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 4, gl.FLOAT, false, 0, 0);
+  return { program, buffer, lineBuffer, position, tint };
+}
+
+function projectToClip(view: WebXRView, point: WebXRPoint): [number, number, number, number] | null {
+  const viewMatrix = view.transform.inverse.matrix;
+  const projection = view.projectionMatrix;
+  if (viewMatrix.length !== 16 || projection.length !== 16) return null;
+  const x = viewMatrix[0] * point.x + viewMatrix[4] * point.y + viewMatrix[8] * point.z + viewMatrix[12];
+  const y = viewMatrix[1] * point.x + viewMatrix[5] * point.y + viewMatrix[9] * point.z + viewMatrix[13];
+  const z = viewMatrix[2] * point.x + viewMatrix[6] * point.y + viewMatrix[10] * point.z + viewMatrix[14];
+  const w = viewMatrix[3] * point.x + viewMatrix[7] * point.y + viewMatrix[11] * point.z + viewMatrix[15];
+  const clipX = projection[0] * x + projection[4] * y + projection[8] * z + projection[12] * w;
+  const clipY = projection[1] * x + projection[5] * y + projection[9] * z + projection[13] * w;
+  const clipZ = projection[2] * x + projection[6] * y + projection[10] * z + projection[14] * w;
+  const clipW = projection[3] * x + projection[7] * y + projection[11] * z + projection[15] * w;
+  return clipW > 0 ? [clipX / clipW, clipY / clipW, clipZ / clipW, 1] : null;
+}
+
+export async function startWebXRARSession(options: {
+  canvas: HTMLCanvasElement;
+  overlayRoot: HTMLElement;
+  onSurfaceChange: (available: boolean) => void;
+  onSelect: (point: WebXRPoint | null) => void;
+  onEnd: () => void;
+}): Promise<WebXRARController> {
+  const xr = (navigator as Navigator & { xr?: WebXRSystem }).xr;
+  const Layer = (globalThis as typeof globalThis & { XRWebGLLayer?: XRLayerConstructor }).XRWebGLLayer;
+  if (!xr || !Layer) throw new Error('This browser does not provide WebXR AR.');
+  if (!window.isSecureContext) throw new Error('AR requires a secure HTTPS connection.');
+
+  const session = await xr.requestSession('immersive-ar', {
+    requiredFeatures: ['hit-test'],
+    optionalFeatures: ['dom-overlay'],
+    domOverlay: { root: options.overlayRoot },
+  });
+
+  let ended = false;
+  let latestHit: WebXRPoint | null = null;
+  let anchorPoint: WebXRPoint | null = null;
+  let lastSurfaceState = false;
+  const onSelect = () => options.onSelect(latestHit);
+  const onSessionEnd = () => {
+    if (ended) return;
+    ended = true;
+    session.removeEventListener('select', onSelect);
+    session.removeEventListener('end', onSessionEnd);
+    options.onSurfaceChange(false);
+    options.onEnd();
+  };
+
+  try {
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    options.canvas.width = Math.max(1, Math.round(options.canvas.clientWidth * pixelRatio));
+    options.canvas.height = Math.max(1, Math.round(options.canvas.clientHeight * pixelRatio));
+    const gl = options.canvas.getContext('webgl', {
+      alpha: true,
+      antialias: true,
+      depth: true,
+    }) as XRCompatibleContext | null;
+    if (!gl) throw new Error('This browser could not create the AR display.');
+    await gl.makeXRCompatible?.();
+    const reticle = createReticleProgram(gl);
+    const layer = new Layer(session, gl, { alpha: true, antialias: true, depth: true, stencil: false });
+    session.updateRenderState({ baseLayer: layer });
+
+    const viewerSpace = await session.requestReferenceSpace('viewer');
+    const worldSpace = await session.requestReferenceSpace('local');
+    const hitSource = await session.requestHitTestSource({ space: viewerSpace });
+    const frame = (_time: number, xrFrame: WebXRFrame) => {
+      if (ended) return;
+      const pose = xrFrame.getViewerPose(worldSpace);
+      const firstHit = xrFrame.getHitTestResults(hitSource)[0];
+      const hitPose = firstHit?.getPose(worldSpace);
+      const position = hitPose?.transform?.position;
+      latestHit = position && [position.x, position.y, position.z].every(Number.isFinite)
+        ? { x: position.x, y: position.y, z: position.z }
+        : null;
+
+      const hasSurface = Boolean(latestHit);
+      if (hasSurface !== lastSurfaceState) {
+        lastSurfaceState = hasSurface;
+        options.onSurfaceChange(hasSurface);
+      }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      if (pose) {
+        gl.useProgram(reticle.program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, reticle.buffer);
+        gl.enableVertexAttribArray(reticle.position);
+        gl.vertexAttribPointer(reticle.position, 4, gl.FLOAT, false, 0, 0);
+        gl.uniform4f(reticle.tint, hasSurface ? 0.38 : 1, hasSurface ? 1 : 1, hasSurface ? 0.68 : 1, 0.95);
+        for (const view of pose.views) {
+          const viewport = layer.getViewport(view);
+          gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+          gl.drawArrays(gl.LINES, 0, 4);
+          if (anchorPoint && latestHit) {
+            const start = projectToClip(view, anchorPoint);
+            const end = projectToClip(view, latestHit);
+            if (start && end) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, reticle.lineBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([...start, ...end]), gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(reticle.position, 4, gl.FLOAT, false, 0, 0);
+              gl.uniform4f(reticle.tint, 1, 0.83, 0.25, 0.95);
+              gl.drawArrays(gl.LINES, 0, 2);
+              gl.bindBuffer(gl.ARRAY_BUFFER, reticle.buffer);
+              gl.vertexAttribPointer(reticle.position, 4, gl.FLOAT, false, 0, 0);
+              gl.uniform4f(reticle.tint, hasSurface ? 0.38 : 1, 1, hasSurface ? 0.68 : 1, 0.95);
+            }
+          }
+        }
+      }
+      session.requestAnimationFrame(frame);
+    };
+
+    session.addEventListener('select', onSelect);
+    session.addEventListener('end', onSessionEnd);
+    session.requestAnimationFrame(frame);
+
+    return {
+      getLatestHit: () => latestHit,
+      setAnchor: (point) => { anchorPoint = point; },
+      end: async () => {
+        if (ended) return;
+        await session.end().catch(() => undefined);
+        onSessionEnd();
+      },
+    };
+  } catch (error) {
+    await session.end().catch(() => undefined);
+    onSessionEnd();
+    throw error;
+  }
+}

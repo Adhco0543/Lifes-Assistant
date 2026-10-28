@@ -13,6 +13,7 @@ export type SpatialMeasurement = {
   label: string;
   kind: SpatialMeasurementKind;
   totalInches: number;
+  source?: 'field' | 'webxr-hit-test';
 };
 
 export type SpatialNoteCategory = 'work' | 'damage' | 'material' | 'idea';
@@ -46,6 +47,7 @@ export type RoomMetrics = {
 export type SpatialMaterialHandoff = {
   projectName?: string;
   measurements?: Partial<RoomMetrics>;
+  measurementWarning?: string;
 };
 
 const finite = (value: unknown): number => {
@@ -80,7 +82,7 @@ export function clampPin(value: number): number {
 
 export function calculateRoomMetrics(measurements: SpatialMeasurement[]): RoomMetrics {
   const findFeet = (kind: SpatialMeasurementKind) => {
-    const item = measurements.find((measurement) => measurement.kind === kind);
+    const item = [...measurements].reverse().find((measurement) => measurement.kind === kind);
     return item ? item.totalInches / 12 : 0;
   };
 
@@ -102,7 +104,7 @@ export function calculateRoomMetrics(measurements: SpatialMeasurement[]): RoomMe
 export function summarizeSpatialWorkspace(record: SpatialWorkspaceRecord): string {
   const measurements = record.measurements.length
     ? record.measurements
-        .map((item) => `${item.label}: ${formatMeasurement(item.totalInches)}`)
+        .map((item) => `${item.label}: ${formatMeasurement(item.totalInches)}${item.source === 'webxr-hit-test' ? ' (AR estimate; verify on site)' : ''}`)
         .join('; ')
     : 'No measurements saved yet';
 
@@ -120,12 +122,17 @@ export function summarizeSpatialWorkspace(record: SpatialWorkspaceRecord): strin
 
 export function buildMaterialHandoff(record: SpatialWorkspaceRecord) {
   const metrics = calculateRoomMetrics(record.measurements);
+  const hasArEstimate = record.measurements.some((measurement) => measurement.source === 'webxr-hit-test');
 
   return {
     projectName: record.title,
     measurements: metrics,
+    ...(hasArEstimate ? { measurementWarning: 'These dimensions include WebXR AR estimates. Verify them with a tape before pricing or ordering materials.' } : {}),
     source: 'Spatial Workspace',
-    notes: record.notes.map((note) => note.text),
+    notes: [
+      ...record.notes.map((note) => note.text),
+      ...(hasArEstimate ? ['Includes WebXR AR estimates. Verify all dimensions on site before ordering materials.'] : []),
+    ],
   };
 }
 
@@ -156,6 +163,9 @@ export function parseSpatialMaterialHandoff(value: unknown): SpatialMaterialHand
   return {
     ...(projectName ? { projectName } : {}),
     ...(Object.keys(parsedMeasurements).length ? { measurements: parsedMeasurements } : {}),
+    ...(typeof source.measurementWarning === 'string' && source.measurementWarning.length <= 300
+      ? { measurementWarning: source.measurementWarning }
+      : {}),
   };
 }
 
@@ -190,6 +200,7 @@ export function parseSpatialWorkspaceRecord(
         label: String(item.label || 'Measurement').slice(0, 80),
         kind,
         totalInches: Math.min(1_000_000, Math.max(0, finite(item.totalInches))),
+        ...(item.source === 'webxr-hit-test' ? { source: 'webxr-hit-test' as const } : { source: 'field' as const }),
       };
     })
     .filter((item) => item.totalInches > 0);
