@@ -25,7 +25,11 @@ struct RoomScanPayload: Codable {
 
     static func make(from room: CapturedRoom) -> RoomScanPayload? {
         let measuredSurfaces = room.floors + room.walls
-        let roomCorners = measuredSurfaces.flatMap { corners(transform: $0.transform, dimensions: $0.dimensions) }
+        let floor = room.floors.max { area(of: $0.dimensions) < area(of: $1.dimensions) }
+        let worldToRoom = floor.map { simd_inverse($0.transform) } ?? matrix_identity_float4x4
+        let roomCorners = measuredSurfaces
+            .flatMap { corners(transform: $0.transform, dimensions: $0.dimensions) }
+            .map { point($0, transformedBy: worldToRoom) }
         guard let bounds = horizontalBounds(of: roomCorners) else { return nil }
 
         let wallHeights = room.walls.map { Double($0.dimensions.y) }.filter { $0 > 0.5 && $0 < 8 }
@@ -45,7 +49,7 @@ struct RoomScanPayload: Codable {
             room.openings.map { element(from: $0, label: "Opening", category: "opening") })
             .compactMap { element -> RoomScanItem? in
                 guard let element,
-                      let itemBounds = horizontalBounds(of: element.corners) else { return nil }
+                      let itemBounds = horizontalBounds(of: element.corners.map { point($0, transformedBy: worldToRoom) }) else { return nil }
                 let itemWidth = min(lengthInches, max(2, metersToInches(itemBounds.maxX - itemBounds.minX)))
                 let itemDepth = min(widthInches, max(2, metersToInches(itemBounds.maxZ - itemBounds.minZ)))
                 let x = min(lengthInches - itemWidth, max(0, metersToInches((itemBounds.minX + itemBounds.maxX) / 2 - bounds.minX) - itemWidth / 2))
@@ -133,16 +137,28 @@ struct RoomScanPayload: Codable {
 
     private static func corners(transform: simd_float4x4, dimensions: SIMD3<Float>) -> [SIMD3<Float>] {
         guard dimensions.x.isFinite, dimensions.y.isFinite, dimensions.z.isFinite,
-              dimensions.x > 0, dimensions.y >= 0, dimensions.z > 0 else { return [] }
+              dimensions.x > 0, dimensions.y >= 0, dimensions.z >= 0 else { return [] }
+        let width = max(dimensions.x, 0.01)
+        let height = max(dimensions.y, 0.01)
+        let depth = max(dimensions.z, 0.01)
         return [-1.0, 1.0].flatMap { x in
             [-1.0, 1.0].flatMap { y in
                 [-1.0, 1.0].map { z in
-                    let local = SIMD4<Float>(x * dimensions.x / 2, y * dimensions.y / 2, z * dimensions.z / 2, 1)
+                    let local = SIMD4<Float>(x * width / 2, y * height / 2, z * depth / 2, 1)
                     let world = transform * local
                     return SIMD3<Float>(world.x, world.y, world.z)
                 }
             }
         }
+    }
+
+    private static func point(_ point: SIMD3<Float>, transformedBy transform: simd_float4x4) -> SIMD3<Float> {
+        let local = transform * SIMD4<Float>(point.x, point.y, point.z, 1)
+        return SIMD3<Float>(local.x, local.y, local.z)
+    }
+
+    private static func area(of dimensions: SIMD3<Float>) -> Float {
+        dimensions.x * dimensions.z
     }
 
     private static func horizontalBounds(of points: [SIMD3<Float>]) -> Bounds? {
