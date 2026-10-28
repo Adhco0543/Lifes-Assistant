@@ -9,6 +9,7 @@ import { currentChatContext, recallKeywords, compactConversationMessages } from 
 import { parseChatApiResponse } from '../lib/chatApiContracts';
 import type { ChatApiResponse } from '../lib/chatApiContracts';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
+import { parseRadarApiResponse } from '../lib/radarApiContracts';
 
 interface AdvancedChatProps {
   userId?: string;
@@ -21,22 +22,6 @@ const MAX_VISIBLE_CHAT_MESSAGES = 2000;
 const MAX_PRIOR_CONTEXT_CHARS = 7000;
 const MAX_RECALL_CONVERSATIONS = 10;
 const MAX_RECALL_MESSAGES_PER_CONVERSATION = 400;
-
-type RadarApiLoop = {
-  title: string;
-  summary?: string;
-  status: 'open' | 'waiting';
-  priority: 'low' | 'medium' | 'high';
-  waitingOn?: string;
-  nextAction?: string;
-  linkedView?: string;
-  dueDate?: string;
-};
-
-type RadarApiResponse = {
-  openLoops?: RadarApiLoop[];
-  resolveLoopIds?: string[];
-};
 
 function normalizeLoopKey(title: string, waitingOn?: string): string {
   return (title + '|' + (waitingOn || ''))
@@ -471,7 +456,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       if (!response.ok) return;
 
-      const data = (await response.json()) as RadarApiResponse;
+      const data = parseRadarApiResponse(await response.json().catch(() => null));
       const detected = Array.isArray(data.openLoops) ? data.openLoops : [];
       const resolvedIds = new Set(
         Array.isArray(data.resolveLoopIds) ? data.resolveLoopIds : []

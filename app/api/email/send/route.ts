@@ -1,37 +1,25 @@
 import { NextResponse } from 'next/server';
+import { validateEmailSendRequest, parseEmailProviderId } from '../../../../lib/emailApiContracts';
+import { reportIntegrationFailure } from '../../../../lib/integrationDiagnostics';
 import { verifyFirebaseRequest } from '../../../../lib/serverAuth';
-
-type EmailRequest = {
-  to?: string;
-  subject?: string;
-  text?: string;
-};
 
 export async function POST(request: Request) {
   if (!(await verifyFirebaseRequest(request))) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   }
 
-  const { to, subject, text } = (await request.json()) as EmailRequest;
-  const recipient = String(to || '').trim();
-  const emailSubject = String(subject || '').trim();
-  const emailText = String(text || '').trim();
-
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailPattern.test(recipient)) {
-    return NextResponse.json({ error: 'Enter a valid recipient email.' }, { status: 400 });
+  const contentLength = Number(request.headers.get('content-length') || 0);
+  if (contentLength > 64_000) {
+    return NextResponse.json({ error: 'Email is too large to send.' }, { status: 413 });
   }
 
-  if (!emailSubject || !emailText) {
-    return NextResponse.json({ error: 'Subject and email body are required.' }, { status: 400 });
+  const validation = validateEmailSendRequest(await request.json().catch(() => null));
+  if (!validation.valid) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
   }
 
-  if (emailSubject.length > 200 || emailText.length > 20000) {
-    return NextResponse.json({ error: 'Email is too large to send.' }, { status: 400 });
-  }
-
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.EMAIL_FROM?.trim();
   const domainVerified = process.env.EMAIL_DOMAIN_VERIFIED === 'true';
 
   if (!apiKey || !from || !domainVerified) {
@@ -41,28 +29,43 @@ export async function POST(request: Request) {
     );
   }
 
-  const providerResponse = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [recipient],
-      subject: emailSubject,
-      text: emailText,
-    }),
-  });
+  try {
+    const providerResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [validation.body.to],
+        subject: validation.body.subject,
+        text: validation.body.text,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
 
-  const result = await providerResponse.json().catch(() => ({}));
+    if (!providerResponse.ok) {
+      reportIntegrationFailure('resend', 'request', providerResponse.status);
+      return NextResponse.json(
+        { error: 'Email provider could not send the message. Check the address and try again.' },
+        { status: 502 }
+      );
+    }
 
-  if (!providerResponse.ok) {
+    const result = await providerResponse.json().catch(() => null);
+    const id = parseEmailProviderId(result);
+    if (!id) {
+      reportIntegrationFailure('resend', 'parse-response', providerResponse.status);
+      return NextResponse.json({ error: 'Email provider returned an invalid response.' }, { status: 502 });
+    }
+
+    return NextResponse.json({ ok: true, id, provider: 'resend' });
+  } catch {
+    reportIntegrationFailure('resend', 'request');
     return NextResponse.json(
-      { error: result?.message || 'Email provider rejected the message.' },
-      { status: providerResponse.status }
+      { error: 'Email could not be sent right now. Try again in a moment.' },
+      { status: 502 }
     );
   }
-
-  return NextResponse.json({ ok: true, id: result?.id || null, provider: 'resend' });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import { parseTranscriptionResult } from "../lib/transcriptionContracts";
 
 export interface VoiceRecording {
   id: string;
@@ -124,9 +125,7 @@ export function VoiceRecorder({
 
       // Create FormData for Whisper API
       const formData = new FormData();
-      formData.append("file", recording.audioBlob, "audio.webm");
-      formData.append("model", "whisper-1");
-      formData.append("language", "en");
+      formData.append("audio", recording.audioBlob, "audio.webm");
 
       // Call OpenAI Whisper API
       const response = await fetch("/api/transcribe", {
@@ -136,8 +135,9 @@ export function VoiceRecorder({
 
       if (!response.ok) throw new Error("Transcription failed");
 
-      const data = (await response.json()) as { text?: string; confidence?: number };
-      const transcribedText = data.text || "";
+      const data = parseTranscriptionResult(await response.json().catch(() => null));
+      if (!data) throw new Error("Transcription service returned an invalid response.");
+      const transcribedText = data.text;
 
       setTranscript(transcribedText);
 
@@ -146,7 +146,7 @@ export function VoiceRecorder({
         ...recording,
         transcript: transcribedText,
         isTranscribing: false,
-        confidence: data.confidence,
+        confidence: undefined,
       };
 
       setRecordings((prev) =>

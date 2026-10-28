@@ -2,7 +2,7 @@
  * Structured diagnostics intentionally omit Error objects, URLs, request bodies,
  * tokens, response bodies, user IDs, email addresses and provider messages.
  */
-export type IntegrationProvider = 'google' | 'github' | 'openai' | 'gateway' | 'chat' | 'firebase' | 'radar';
+export type IntegrationProvider = 'google' | 'github' | 'openai' | 'gateway' | 'chat' | 'firebase' | 'radar' | 'resend';
 export type IntegrationOperation = 'revoke' | 'verify' | 'refresh' | 'connect' | 'request' | 'parse-response' | 'save' | 'load';
 
 export function reportIntegrationFailure(
