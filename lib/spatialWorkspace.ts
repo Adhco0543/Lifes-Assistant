@@ -45,6 +45,8 @@ export type SpatialItem = {
   widthInches: number;
   depthInches: number;
   heightInches?: number;
+  /** WebXR local-space transform, valid only while the current AR session remains active. */
+  arTransform?: number[];
 };
 
 export type SpatialWorkspaceRecord = {
@@ -133,6 +135,12 @@ export function spatialItemsOverlap(a: SpatialItem, b: SpatialItem): boolean {
     a.xInches + a.widthInches > b.xInches &&
     a.yInches < b.yInches + b.depthInches &&
     a.yInches + a.depthInches > b.yInches;
+}
+
+export function persistSpatialItem(item: SpatialItem): Omit<SpatialItem, 'arTransform'> {
+  const persisted = { ...item };
+  delete persisted.arTransform;
+  return persisted;
 }
 
 export function calculateRoomMetrics(measurements: SpatialMeasurement[]): RoomMetrics {

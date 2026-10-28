@@ -1,6 +1,6 @@
 export type WebXRPoint = { x: number; y: number; z: number };
 
-type WebXRHitPose = { transform?: { position?: WebXRPoint } };
+type WebXRHitPose = { transform?: { position?: WebXRPoint; matrix?: Float32Array } };
 type WebXRHitResult = { getPose: (space: object) => WebXRHitPose | null };
 type WebXRHitSource = object;
 type WebXRView = {
@@ -36,8 +36,18 @@ type XRLayerConstructor = new (
 
 export type WebXRARController = {
   getLatestHit: () => WebXRPoint | null;
+  getLatestHitTransform: () => number[] | null;
   setAnchor: (point: WebXRPoint | null) => void;
+  setObjects: (objects: WebXRPlacedBox[]) => void;
   end: () => Promise<void>;
+};
+
+export type WebXRPlacedBox = {
+  transform: number[];
+  widthMeters: number;
+  heightMeters: number;
+  depthMeters: number;
+  category: 'cabinet' | 'appliance' | 'fixture' | 'furniture' | 'opening' | 'custom';
 };
 
 export function metersToInches(meters: number): number {
@@ -51,6 +61,26 @@ export function distanceInMeters(a: WebXRPoint, b: WebXRPoint): number {
   const y = b.y - a.y;
   const z = b.z - a.z;
   return Math.sqrt(x * x + y * y + z * z);
+}
+
+export function boxCornersInWorld(box: WebXRPlacedBox): WebXRPoint[] {
+  if (box.transform.length !== 16 || !box.transform.every(Number.isFinite)) return [];
+  const halfWidth = box.widthMeters / 2;
+  const halfDepth = box.depthMeters / 2;
+  const height = box.heightMeters;
+  if (![halfWidth, halfDepth, height].every(Number.isFinite) || halfWidth <= 0 || halfDepth <= 0 || height <= 0) return [];
+  const localCorners: Array<[number, number, number]> = [
+    [-halfWidth, 0, -halfDepth], [halfWidth, 0, -halfDepth],
+    [halfWidth, 0, halfDepth], [-halfWidth, 0, halfDepth],
+    [-halfWidth, height, -halfDepth], [halfWidth, height, -halfDepth],
+    [halfWidth, height, halfDepth], [-halfWidth, height, halfDepth],
+  ];
+  const matrix = box.transform;
+  return localCorners.map(([x, y, z]) => ({
+    x: matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
+    y: matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
+    z: matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14],
+  }));
 }
 
 function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader {
@@ -121,7 +151,7 @@ export async function startWebXRARSession(options: {
   canvas: HTMLCanvasElement;
   overlayRoot: HTMLElement;
   onSurfaceChange: (available: boolean) => void;
-  onSelect: (point: WebXRPoint | null) => void;
+  onSelect: (point: WebXRPoint | null, transform: number[] | null) => void;
   onEnd: () => void;
 }): Promise<WebXRARController> {
   const xr = (navigator as Navigator & { xr?: WebXRSystem }).xr;
@@ -137,9 +167,11 @@ export async function startWebXRARSession(options: {
 
   let ended = false;
   let latestHit: WebXRPoint | null = null;
+  let latestHitTransform: number[] | null = null;
+  let placedObjects: WebXRPlacedBox[] = [];
   let anchorPoint: WebXRPoint | null = null;
   let lastSurfaceState = false;
-  const onSelect = () => options.onSelect(latestHit);
+  const onSelect = () => options.onSelect(latestHit, latestHitTransform);
   const onSessionEnd = () => {
     if (ended) return;
     ended = true;
@@ -173,8 +205,12 @@ export async function startWebXRARSession(options: {
       const firstHit = xrFrame.getHitTestResults(hitSource)[0];
       const hitPose = firstHit?.getPose(worldSpace);
       const position = hitPose?.transform?.position;
+      const matrix = hitPose?.transform?.matrix;
       latestHit = position && [position.x, position.y, position.z].every(Number.isFinite)
         ? { x: position.x, y: position.y, z: position.z }
+        : null;
+      latestHitTransform = latestHit && matrix?.length === 16 && Array.from(matrix).every(Number.isFinite)
+        ? Array.from(matrix)
         : null;
 
       const hasSurface = Boolean(latestHit);
@@ -210,6 +246,37 @@ export async function startWebXRARSession(options: {
               gl.uniform4f(reticle.tint, hasSurface ? 0.38 : 1, 1, hasSurface ? 0.68 : 1, 0.95);
             }
           }
+          for (const object of placedObjects) {
+            const corners = boxCornersInWorld(object);
+            if (corners.length !== 8) continue;
+            const edges = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
+            const clipVertices: number[] = [];
+            for (const index of edges) {
+              const clip = projectToClip(view, corners[index]);
+              if (clip) clipVertices.push(...clip);
+            }
+            if (clipVertices.length === edges.length * 4) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, reticle.lineBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(clipVertices), gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(reticle.position, 4, gl.FLOAT, false, 0, 0);
+              const color = object.category === 'cabinet'
+                ? [0.56, 0.72, 1]
+                : object.category === 'appliance'
+                  ? [0.72, 0.84, 0.92]
+                  : object.category === 'furniture'
+                    ? [1, 0.72, 0.42]
+                    : object.category === 'opening'
+                      ? [1, 0.57, 0.68]
+                      : object.category === 'custom'
+                        ? [0.78, 0.67, 1]
+                        : [0.38, 0.95, 0.72];
+              gl.uniform4f(reticle.tint, color[0], color[1], color[2], 0.95);
+              gl.drawArrays(gl.LINES, 0, edges.length);
+              gl.bindBuffer(gl.ARRAY_BUFFER, reticle.buffer);
+              gl.vertexAttribPointer(reticle.position, 4, gl.FLOAT, false, 0, 0);
+              gl.uniform4f(reticle.tint, hasSurface ? 0.38 : 1, 1, hasSurface ? 0.68 : 1, 0.95);
+            }
+          }
         }
       }
       session.requestAnimationFrame(frame);
@@ -221,7 +288,9 @@ export async function startWebXRARSession(options: {
 
     return {
       getLatestHit: () => latestHit,
+      getLatestHitTransform: () => latestHitTransform,
       setAnchor: (point) => { anchorPoint = point; },
+      setObjects: (objects) => { placedObjects = objects; },
       end: async () => {
         if (ended) return;
         await session.end().catch(() => undefined);

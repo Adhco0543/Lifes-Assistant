@@ -7,13 +7,14 @@ import {
   formatMeasurement,
   isSafeSpatialImageDataUrl,
   measurementToInches,
+  persistSpatialItem,
   placeSpatialItem,
   spatialItemsOverlap,
   parseSpatialMaterialHandoff,
   parseSpatialWorkspaceRecord,
   summarizeSpatialWorkspace,
 } from '../lib/spatialWorkspace.ts';
-import { distanceInMeters, metersToInches } from '../lib/webxrSpatial.ts';
+import { boxCornersInWorld, distanceInMeters, metersToInches } from '../lib/webxrSpatial.ts';
 import nextConfig from '../next.config.ts';
 
 const room = {
@@ -95,6 +96,25 @@ test('room items are placed inside measured bounds and carried into workspace ha
   assert.match(summarizeSpatialWorkspace(plan), /Vanity \(fixture, 2' 6" × 1' 9" footprint at/);
   assert.ok(buildMaterialHandoff(plan).notes.some((note) => /Planned fixture: Vanity/.test(note)));
   assert.equal(parseSpatialMaterialHandoff(buildMaterialHandoff(plan)).layoutItems[0].label, 'Vanity');
+});
+
+test('AR item boxes use hit-pose transforms and do not persist session-only positions', () => {
+  const box = {
+    transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 20, 30, 1],
+    widthMeters: 2,
+    heightMeters: 3,
+    depthMeters: 4,
+    category: 'cabinet',
+  };
+  assert.deepEqual(boxCornersInWorld(box)[0], { x: 9, y: 20, z: 28 });
+  assert.equal(boxCornersInWorld({ ...box, transform: [1, 2] }).length, 0);
+
+  const item = {
+    id: 'cabinet', label: 'Cabinet', category: 'cabinet',
+    xInches: 12, yInches: 24, widthInches: 24, depthInches: 24,
+    arTransform: box.transform,
+  };
+  assert.equal('arTransform' in persistSpatialItem(item), false);
 });
 
 test('WebXR point distances convert meters to inches and mark estimates in handoffs', () => {

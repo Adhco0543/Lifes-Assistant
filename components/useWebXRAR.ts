@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   startWebXRARSession,
   type WebXRARController,
+  type WebXRPlacedBox,
   type WebXRPoint,
 } from '../lib/webxrSpatial';
 
@@ -11,7 +12,7 @@ type XRCapabilityNavigator = Navigator & {
   xr?: { isSessionSupported: (mode: string) => Promise<boolean> };
 };
 
-export function useWebXRAR(onPoint: (point: WebXRPoint) => void) {
+export function useWebXRAR(onPoint: (point: WebXRPoint, transform: number[] | null) => void) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRootRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<WebXRARController | null>(null);
@@ -50,7 +51,7 @@ export function useWebXRAR(onPoint: (point: WebXRPoint) => void) {
         canvas,
         overlayRoot,
         onSurfaceChange: setSurfaceAvailable,
-        onSelect: (point) => { if (point) onPointRef.current(point); },
+        onSelect: (point, transform) => { if (point) onPointRef.current(point, transform); },
         onEnd: () => {
           controllerRef.current = null;
           setActive(false);
@@ -77,8 +78,14 @@ export function useWebXRAR(onPoint: (point: WebXRPoint) => void) {
   const placeCurrentPoint = useCallback((): boolean => {
     const point = controllerRef.current?.getLatestHit();
     if (!point) return false;
-    onPointRef.current(point);
+    onPointRef.current(point, controllerRef.current?.getLatestHitTransform() || null);
     return true;
+  }, []);
+
+  const getLatestHitTransform = useCallback(() => controllerRef.current?.getLatestHitTransform() || null, []);
+
+  const setObjects = useCallback((objects: WebXRPlacedBox[]) => {
+    controllerRef.current?.setObjects(objects);
   }, []);
 
   const setAnchor = useCallback((point: WebXRPoint | null) => {
@@ -101,6 +108,8 @@ export function useWebXRAR(onPoint: (point: WebXRPoint) => void) {
     start,
     stop,
     placeCurrentPoint,
+    getLatestHitTransform,
+    setObjects,
     setAnchor,
   };
 }

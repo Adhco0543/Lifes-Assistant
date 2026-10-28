@@ -10,6 +10,7 @@ import {
   clampPin,
   formatMeasurement,
   measurementToInches,
+  persistSpatialItem,
   placeSpatialItem,
   spatialItemsOverlap,
   MAX_SPATIAL_IMAGE_DATA_URL_LENGTH,
@@ -138,6 +139,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const savingRef = useRef(false);
   const firstArPointRef = useRef<WebXRPoint | null>(null);
   const wasArActiveRef = useRef(false);
+  const arActionRef = useRef<'measure' | 'place-item'>('measure');
+  const placeSelectedARItemRef = useRef<(transform: number[]) => void>(() => undefined);
 
   const [title, setTitle] = useState('New room scan');
   const [roomType, setRoomType] = useState('Room');
@@ -171,8 +174,18 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const [itemDepthInches, setItemDepthInches] = useState('21');
   const [itemHeightInches, setItemHeightInches] = useState('34');
   const [isPlacingItem, setIsPlacingItem] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState('');
+  const [arAction, setArAction] = useState<'measure' | 'place-item'>('measure');
 
-  const addArPoint = useCallback((point: WebXRPoint) => {
+  const addArPoint = useCallback((point: WebXRPoint, transform: number[] | null) => {
+    if (arActionRef.current === 'place-item') {
+      if (!transform) {
+        setStatus('The AR surface did not return a stable placement pose. Move the reticle and try again.');
+        return;
+      }
+      placeSelectedARItemRef.current(transform);
+      return;
+    }
     const firstPoint = firstArPointRef.current;
     if (!firstPoint) {
       firstArPointRef.current = point;
@@ -204,6 +217,19 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   }, [measurementKind, measurementLabel]);
   const ar = useWebXRAR(addArPoint);
 
+  const placeSelectedARItem = useCallback((transform: number[]) => {
+    const selected = items.find((item) => item.id === selectedItemId) || items[0];
+    if (!selected) {
+      setStatus('Choose an item from the room list before placing it in AR.');
+      return;
+    }
+    setItems((current) => current.map((item) => item.id === selected.id
+      ? { ...item, arTransform: transform }
+      : item));
+    setStatus(`${selected.label} placed in the live AR view. Its dimensions are saved; its AR location lasts for this session.`);
+  }, [items, selectedItemId]);
+  placeSelectedARItemRef.current = placeSelectedARItem;
+
   const metrics = useMemo(() => calculateRoomMetrics(measurements), [measurements]);
   const roomLengthInches = [...measurements].reverse().find((measurement) => measurement.kind === 'length')?.totalInches || 0;
   const roomWidthInches = [...measurements].reverse().find((measurement) => measurement.kind === 'width')?.totalInches || 0;
@@ -214,13 +240,26 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     ? planLengthInches / planWidthInches
     : 1;
 
+  useEffect(() => {
+    if (!ar.active) return;
+    ar.setObjects(items.flatMap((item) => item.arTransform
+      ? [{
+          transform: item.arTransform,
+          widthMeters: item.widthInches / 39.37007874,
+          heightMeters: (item.heightInches || 36) / 39.37007874,
+          depthMeters: item.depthInches / 39.37007874,
+          category: item.category,
+        }]
+      : []));
+  }, [ar.active, ar.setObjects, items]);
+
   const currentRecord = useCallback((): SpatialWorkspaceRecord => ({
     title: title.trim() || 'Untitled space',
     roomType,
     ...(imageDataUrl ? { imageDataUrl } : {}),
     measurements,
     notes,
-    items,
+    items: items.map(persistSpatialItem),
     createdAt,
     updatedAt: Date.now(),
   }), [createdAt, imageDataUrl, items, measurements, notes, roomType, title]);
@@ -294,11 +333,19 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
       setStatus('WebXR AR requires a secure HTTPS connection.');
       return;
     }
+    setItems((current) => current.map((item) => {
+      if (!item.arTransform) return item;
+      const next = { ...item };
+      delete next.arTransform;
+      return next;
+    }));
     stopCamera();
     setStatus('Starting WebXR AR…');
     try {
       await ar.start();
-      setStatus('AR is live. Center the reticle on a surface, then set two points to measure.');
+      setStatus(arActionRef.current === 'place-item'
+        ? 'AR is live. Select an item, aim at a surface, and place its 3D box preview.'
+        : 'AR is live. Center the reticle on a surface, then set two points to measure.');
     } catch (error) {
       const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
       setStatus(name === 'NotAllowedError'
@@ -313,7 +360,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     await ar.stop();
     firstArPointRef.current = null;
     setArPointStep(0);
-    setStatus('AR session ended. Saved dimensions and notes are unchanged.');
+    setStatus('AR session ended. Saved item footprints remain; place their AR previews again in a new session.');
   };
 
   useEffect(() => {
@@ -322,6 +369,14 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     if (!ar.active) {
       firstArPointRef.current = null;
       setArPointStep(0);
+      if (wasActive) {
+        setItems((current) => current.map((item) => {
+          if (!item.arTransform) return item;
+          const next = { ...item };
+          delete next.arTransform;
+          return next;
+        }));
+      }
       if (wasActive) {
         setStatus((current) => current.startsWith('AR is live') || current.startsWith('First AR point set')
           ? 'AR session ended.'
@@ -481,6 +536,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
       return;
     }
     setItems((current) => [...current, item]);
+    setSelectedItemId(item.id);
     setIsPlacingItem(false);
     setStatus(`${item.label} added to the room plan. Click it on the plan or its list entry to remove it.`);
   };
@@ -496,6 +552,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const removeSpatialItem = (id: string) => {
     const removed = items.find((item) => item.id === id);
     setItems((current) => current.filter((item) => item.id !== id));
+    if (selectedItemId === id) setSelectedItemId('');
     setStatus(removed ? `${removed.label} removed from the room plan.` : 'Room item removed.');
   };
 
@@ -637,6 +694,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setMeasurements(space.data.measurements);
     setNotes(space.data.notes);
     setItems(space.data.items);
+    setSelectedItemId(space.data.items[0]?.id || '');
+    setArAction('measure');
+    arActionRef.current = 'measure';
     setImageDataUrl(space.data.imageDataUrl || '');
     setPhotoUrl(space.data.imageDataUrl || '');
     setCreatedAt(space.data.createdAt);
@@ -656,6 +716,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setMeasurements([]);
     setNotes([]);
     setItems([]);
+    setSelectedItemId('');
+    setArAction('measure');
+    arActionRef.current = 'measure';
     setImageDataUrl('');
     setPhotoUrl('');
     setCreatedAt(Date.now());
@@ -674,8 +737,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             <span className="kicker">ARCHITECTURAL AR</span>
             <h1>Spatial Workspace</h1>
             <p>
-              Measure between tracked real-world points with WebXR on supported devices,
-              verify the result on site, then carry the room plan into Life&apos;s Assistant.
+              Measure a room with WebXR, preview dimensioned items in the live AR view,
+              then carry the saved room plan into Life&apos;s Assistant.
             </p>
           </div>
           <div className="header-actions">
@@ -705,7 +768,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           <div className="viewer-panel">
             <div className="viewer-toolbar">
               {ar.supported && !ar.active && (
-                <button type="button" className="tool-button ar-launch" title="Choose the measurement type first. AR uses two tracked surface points." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => void startAR()}>
+                <button type="button" className="tool-button ar-launch" title="Measure with two tracked surface points or place a room item in AR." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => { setArAction('measure'); arActionRef.current = 'measure'; void startAR(); }}>
                   {ar.starting ? 'Starting AR…' : 'Start AR measure'}
                 </button>
               )}
@@ -815,19 +878,47 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
               >
                 {ar.active && (
                   <div className="ar-controls">
-                    <p>{arPointStep === 1
-                      ? 'First point set. Move to the other end.'
-                      : ar.surfaceAvailable ? 'Surface detected' : 'Move slowly to find a surface'}</p>
+                    <p>{arAction === 'place-item'
+                      ? `Place ${items.find((item) => item.id === selectedItemId)?.label || items[0]?.label || 'an item'} at the reticle. AR placements are temporary to this session.`
+                      : arPointStep === 1
+                        ? 'First point set. Move to the other end.'
+                        : ar.surfaceAvailable ? 'Surface detected' : 'Move slowly to find a surface'}</p>
+                    {items.length > 0 && (
+                      <select
+                        aria-label="AR item to place"
+                        value={selectedItemId || items[0].id}
+                        onChange={(event) => setSelectedItemId(event.target.value)}
+                      >
+                        {items.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.widthInches} × {item.depthInches} in</option>)}
+                      </select>
+                    )}
                     <button
                       type="button"
-                      disabled={!ar.surfaceAvailable}
+                      disabled={!ar.surfaceAvailable || (arAction === 'place-item' && items.length === 0)}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (!ar.placeCurrentPoint()) setStatus('No surface detected at the reticle.');
                       }}
                     >
-                      {arPointStep === 0 ? 'Set first point' : 'Set second point'}
+                      {arAction === 'place-item'
+                        ? (items.find((item) => item.id === selectedItemId) || items[0])?.arTransform ? 'Move item to reticle' : 'Place item at reticle'
+                        : arPointStep === 0 ? 'Set first point' : 'Set second point'}
                     </button>
+                    {arAction === 'place-item' && (selectedItemId || items[0]?.id) && (
+                      <button type="button" className="end-ar-overlay" onClick={(event) => { event.stopPropagation(); removeSpatialItem(selectedItemId || items[0].id); }}>
+                        Remove selected item
+                      </button>
+                    )}
+                    {items.length > 0 && <button type="button" className="end-ar-overlay" onClick={(event) => {
+                      event.stopPropagation();
+                      const nextAction = arAction === 'measure' ? 'place-item' : 'measure';
+                      setArAction(nextAction);
+                      arActionRef.current = nextAction;
+                      firstArPointRef.current = null;
+                      setArPointStep(0);
+                    }}>
+                      {arAction === 'measure' ? 'Place room item' : 'Measure distance'}
+                    </button>}
                     <button type="button" className="end-ar-overlay" onClick={(event) => { event.stopPropagation(); void stopAR(); }}>
                       End AR
                     </button>
@@ -837,7 +928,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             </div>
 
             <div className="accuracy-note">
-              <b>Measurement accuracy:</b> WebXR point-to-point measurements are AR estimates from the device&apos;s tracked world coordinates and can drift. Verify dimensions with a tape before quoting or ordering. This web flow does not collect a LiDAR/depth map, and camera pixels are never treated as measurements.
+              <b>AR preview:</b> WebXR measurements are estimates and can drift; verify with a tape before quoting or ordering. Room items appear as dimensioned 3D box previews. Their live AR positions last for the current session; saved workspaces keep their measured 2D footprints and dimensions. This web flow does not collect a LiDAR/depth map.
             </div>
           </div>
 
@@ -1042,7 +1133,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                       </label>
                       <label>
                         Height (in)
-                        <input type="number" inputMode="decimal" min="0.1" step="0.1" value={itemHeightInches} onChange={(event) => setItemHeightInches(event.target.value)} placeholder="Optional" />
+                        <input type="number" inputMode="decimal" min="0.1" step="0.1" value={itemHeightInches} onChange={(event) => setItemHeightInches(event.target.value)} placeholder="36 if blank" />
                       </label>
                     </div>
                     <div className="placement-actions">
@@ -1059,10 +1150,18 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
               )}
               {items.length > 0 && (
                 <ul className="room-item-list" aria-label="Items in this room">
-                  {items.map((item) => (
+                      {items.map((item) => (
                     <li key={item.id}>
-                      <span><b>{item.label}</b><small>{item.category} · {formatMeasurement(item.widthInches)} × {formatMeasurement(item.depthInches)}</small></span>
-                      <button type="button" aria-label={`Remove ${item.label}`} onClick={() => removeSpatialItem(item.id)}>Remove</button>
+                          <span><b>{item.label}</b><small>{item.category} · {formatMeasurement(item.widthInches)} × {formatMeasurement(item.depthInches)}{item.arTransform ? ' · visible in AR' : ''}</small></span>
+                          <div className="room-item-actions">
+                            {ar.supported && <button type="button" aria-label={`${item.arTransform ? 'Move' : 'Place'} ${item.label} in AR`} disabled={ar.starting || !capabilities.secureContext} onClick={() => {
+                              setSelectedItemId(item.id);
+                              setArAction('place-item');
+                              arActionRef.current = 'place-item';
+                              if (!ar.active) void startAR();
+                            }}>{item.arTransform ? 'AR' : 'Place in AR'}</button>}
+                            <button type="button" aria-label={`Remove ${item.label}`} onClick={() => removeSpatialItem(item.id)}>Remove</button>
+                          </div>
                     </li>
                   ))}
                 </ul>
@@ -1289,6 +1388,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .xr-dom-overlay { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
         .ar-controls { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: max-content; max-width: calc(100% - 20px); padding: 8px; border: 1px solid rgba(255,255,255,.22); border-radius: 14px; color: #fff; background: rgba(15,15,15,.82); backdrop-filter: blur(12px); pointer-events: auto; }
         .ar-controls p { flex-basis: 100%; margin: 0 4px; text-align: center; font-size: .72rem; }
+        .ar-controls select { flex-basis: 100%; width: 100%; min-height: 38px; border: 1px solid #505b57; border-radius: 9px; padding: 0 10px; color: #fff; background: #252a28; font: inherit; font-size: .7rem; }
         .ar-controls button { min-height: 38px; padding: 0 11px; border: 1px solid #5b6d62; border-radius: 9px; color: #eafff1; background: #254033; font: inherit; font-size: .7rem; font-weight: 750; white-space: nowrap; cursor: pointer; }
         .ar-controls button:disabled { opacity: .48; cursor: wait; }
         .ar-controls .end-ar-overlay { border-color: #555; color: #eee; background: #333; }
@@ -1570,7 +1670,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .room-item-list li > span { min-width: 0; display: grid; gap: 2px; }
         .room-item-list b { overflow: hidden; color: #d7d7d7; font-size: .65rem; text-overflow: ellipsis; white-space: nowrap; }
         .room-item-list small { color: #8f8f8f; font-size: .58rem; }
-        .room-item-list button { flex: 0 0 auto; border: 0; color: #f0a9a9; background: transparent; font-size: .61rem; cursor: pointer; }
+        .room-item-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+        .room-item-list button { border: 0; color: #f0a9a9; background: transparent; font-size: .61rem; cursor: pointer; }
+        .room-item-list .room-item-actions button:first-child { color: #9cc8ff; }
         .note-list {
           display: grid;
           gap: 6px;
