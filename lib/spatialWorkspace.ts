@@ -126,36 +126,44 @@ export function parseSpatialWorkspaceRecord(
 
   const measurements: SpatialMeasurement[] = rawMeasurements
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
-    .map((item, index) => ({
-      id: String(item.id || `measurement-${index}`),
-      label: String(item.label || 'Measurement').slice(0, 80),
-      kind:
+    .map((item, index): SpatialMeasurement => {
+      const kind: SpatialMeasurementKind =
         item.kind === 'length' ||
         item.kind === 'width' ||
         item.kind === 'height' ||
         item.kind === 'opening' ||
         item.kind === 'object'
           ? item.kind
-          : 'other',
-      totalInches: Math.max(0, finite(item.totalInches)),
-    }))
+          : 'other';
+
+      return {
+        id: String(item.id || `measurement-${index}`),
+        label: String(item.label || 'Measurement').slice(0, 80),
+        kind,
+        totalInches: Math.max(0, finite(item.totalInches)),
+      };
+    })
     .filter((item) => item.totalInches > 0);
 
   const notes: SpatialNote[] = rawNotes
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
-    .map((item, index) => ({
-      id: String(item.id || `note-${index}`),
-      text: String(item.text || '').slice(0, 500),
-      category:
+    .map((item, index): SpatialNote => {
+      const category: SpatialNoteCategory =
         item.category === 'damage' ||
         item.category === 'material' ||
         item.category === 'idea'
           ? item.category
-          : 'work',
-      x: clampPin(finite(item.x)),
-      y: clampPin(finite(item.y)),
-    }))
-    .filter((item) => item.text.trim());
+          : 'work';
+
+      return {
+        id: String(item.id || `note-${index}`),
+        text: String(item.text || '').slice(0, 500),
+        category,
+        x: clampPin(finite(item.x)),
+        y: clampPin(finite(item.y)),
+      };
+    })
+    .filter((item) => Boolean(item.text.trim()));
 
   const now = Date.now();
 
