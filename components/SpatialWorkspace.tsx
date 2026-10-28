@@ -2,12 +2,14 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 import {
   buildMaterialHandoff,
   calculateRoomMetrics,
   clampPin,
   formatMeasurement,
   measurementToInches,
+  MAX_SPATIAL_IMAGE_DATA_URL_LENGTH,
   parseSpatialWorkspaceRecord,
   summarizeSpatialWorkspace,
   type SpatialMeasurement,
@@ -63,6 +65,52 @@ const NOTE_TYPES: Array<{ value: SpatialNoteCategory; label: string }> = [
   { value: 'idea', label: 'Idea' },
 ];
 
+const MAX_IMAGE_FILE_BYTES = 20 * 1024 * 1024;
+
+function encodeSpatialImage(source: CanvasImageSource, sourceWidth: number, sourceHeight: number): string {
+  const scale = Math.min(1, 1440 / Math.max(sourceWidth, sourceHeight));
+  let width = Math.max(1, Math.round(sourceWidth * scale));
+  let height = Math.max(1, Math.round(sourceHeight * scale));
+
+  for (let attempt = 0; attempt < 12 && width > 0 && height > 0; attempt += 1) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('This browser could not prepare the room image.');
+    context.drawImage(source, 0, 0, width, height);
+
+    for (const quality of [0.72, 0.58, 0.45]) {
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      if (dataUrl.length <= MAX_SPATIAL_IMAGE_DATA_URL_LENGTH) return dataUrl;
+    }
+
+    width = Math.round(width * 0.78);
+    height = Math.round(height * 0.78);
+  }
+
+  throw new Error('This room image is too detailed to save. Try a smaller photo.');
+}
+
+async function prepareSpatialImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Choose an image file for the room view.');
+  }
+  if (file.size > MAX_IMAGE_FILE_BYTES) {
+    throw new Error('Room photos must be 20 MB or smaller.');
+  }
+  if (typeof createImageBitmap !== 'function') {
+    throw new Error('This browser cannot prepare photos for saved workspaces.');
+  }
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    return encodeSpatialImage(bitmap, bitmap.width, bitmap.height);
+  } finally {
+    bitmap.close();
+  }
+}
+
 function makeId(prefix: string) {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `${prefix}-${crypto.randomUUID()}`;
@@ -73,7 +121,7 @@ function makeId(prefix: string) {
 export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspaceProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const photoUrlRef = useRef<string>('');
+  const savingRef = useRef(false);
 
   const [title, setTitle] = useState('New room scan');
   const [roomType, setRoomType] = useState('Room');
@@ -85,6 +133,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const [status, setStatus] = useState('Ready to map a space.');
   const [cameraActive, setCameraActive] = useState(false);
   const [photoUrl, setPhotoUrl] = useState('');
+  const [imageDataUrl, setImageDataUrl] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [capabilities, setCapabilities] = useState<CapabilityState>({
     camera: false,
     secureContext: false,
@@ -104,11 +154,12 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const currentRecord = useCallback((): SpatialWorkspaceRecord => ({
     title: title.trim() || 'Untitled space',
     roomType,
+    ...(imageDataUrl ? { imageDataUrl } : {}),
     measurements,
     notes,
     createdAt,
     updatedAt: Date.now(),
-  }), [createdAt, measurements, notes, roomType, title]);
+  }), [createdAt, imageDataUrl, measurements, notes, roomType, title]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -171,7 +222,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
 
         setSavedSpaces(next);
       } catch (error) {
-        console.warn('Spatial workspace history unavailable:', error);
+        reportIntegrationFailure('firebase', 'load');
+        setStatus('Saved spaces could not be loaded. Your current workspace is still available.');
       }
     };
 
@@ -185,7 +237,6 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   useEffect(() => {
     return () => {
       stopCamera();
-      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
     };
   }, [stopCamera]);
 
@@ -218,27 +269,47 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
 
       setCameraActive(true);
       setPhotoUrl('');
+      setImageDataUrl('');
       setStatus('Camera live. Add verified dimensions and tap the view to pin notes.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not open the camera.');
     }
   };
 
-  const handlePhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     stopCamera();
+    event.target.value = '';
+    setStatus('Preparing room photo…');
 
-    if (photoUrlRef.current) {
-      URL.revokeObjectURL(photoUrlRef.current);
+    try {
+      const dataUrl = await prepareSpatialImage(file);
+      setImageDataUrl(dataUrl);
+      setPhotoUrl(dataUrl);
+      setStatus('Room photo ready. It will be saved with this workspace.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not load this room photo.');
+    }
+  };
+
+  const captureCameraFrame = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setStatus('Wait for the camera view to become ready, then capture again.');
+      return;
     }
 
-    const url = URL.createObjectURL(file);
-    photoUrlRef.current = url;
-    setPhotoUrl(url);
-    setStatus('Photo loaded. Tap the image to pin a note.');
-    event.target.value = '';
+    try {
+      const dataUrl = encodeSpatialImage(video, video.videoWidth, video.videoHeight);
+      setImageDataUrl(dataUrl);
+      setPhotoUrl(dataUrl);
+      stopCamera();
+      setStatus('Room view captured. Notes and the photo will be saved together.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not capture this room view.');
+    }
   };
 
   const addMeasurement = () => {
@@ -292,49 +363,51 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   };
 
   const persist = async () => {
+    if (savingRef.current) return null;
+    savingRef.current = true;
+    setIsSaving(true);
     const record = currentRecord();
     setStatus('Saving spatial workspace…');
+    try {
+      const savedId = recordId || await firebaseBackend.saveBusinessRecord('spatial-workspace', record);
+      if (recordId) await firebaseBackend.updateBusinessRecord(recordId, record);
+      setRecordId(savedId);
+      setSavedSpaces((current) => [
+        { id: savedId, data: record },
+        ...current.filter((space) => space.id !== savedId),
+      ].slice(0, 100));
 
-    if (recordId) {
-      await firebaseBackend.updateBusinessRecord(recordId, record);
-    } else {
-      const id = await firebaseBackend.saveBusinessRecord('spatial-workspace', record);
-      setRecordId(id);
+      try {
+        await firebaseBackend.saveContinuityState({
+          view: 'spatial',
+          label: 'Spatial workspace',
+          context: record.title,
+          contextId: savedId,
+          device:
+            window.innerWidth <= 640
+              ? 'phone'
+              : window.innerWidth <= 1024
+                ? 'tablet'
+                : 'desktop',
+        });
+      } catch {
+        reportIntegrationFailure('firebase', 'save');
+      }
+
+      setStatus('Workspace saved with its room photo, measurements, and notes.');
+      return record;
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
     }
-
-    await firebaseBackend.saveContinuityState({
-      view: 'spatial',
-      label: 'Spatial workspace',
-      context: record.title,
-      contextId: recordId || undefined,
-      device:
-        window.innerWidth <= 640
-          ? 'phone'
-          : window.innerWidth <= 1024
-            ? 'tablet'
-            : 'desktop',
-    });
-
-    const records = await firebaseBackend.getRecentBusinessRecords(100);
-    const next = records
-      .filter((item) => item.kind === 'spatial-workspace')
-      .map((item) => {
-        const parsed = parseSpatialWorkspaceRecord(item.data);
-        if (!parsed) return null;
-        return { id: String(item.id || ''), data: parsed };
-      })
-      .filter((item): item is SavedSpace => Boolean(item?.id));
-
-    setSavedSpaces(next);
-    setStatus('Saved to your cloud workspace.');
-    return record;
   };
 
   const safePersist = async () => {
     try {
       return await persist();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Could not save this space.');
+    } catch {
+      reportIntegrationFailure('firebase', 'save');
+      setStatus('Could not save this workspace. Check your connection and sign-in, then try again.');
       return null;
     }
   };
@@ -344,34 +417,49 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     if (!record) return;
 
     const firstNote = record.notes[0]?.text;
-    await firebaseBackend.saveDraft('handoff-task', {
-      title: firstNote
-        ? `${record.title}: ${firstNote}`
-        : `Review spatial plan for ${record.title}`,
-      source: 'Spatial Workspace',
-    });
-    onNavigate('tasks');
+    try {
+      await firebaseBackend.saveDraft('handoff-task', {
+        title: firstNote
+          ? `${record.title}: ${firstNote}`
+          : `Review spatial plan for ${record.title}`,
+        source: 'Spatial Workspace',
+      });
+      onNavigate('tasks');
+    } catch {
+      reportIntegrationFailure('firebase', 'save');
+      setStatus('Workspace saved, but the task draft could not be opened. Try again.');
+    }
   };
 
   const handoffQuote = async () => {
     const record = await safePersist();
     if (!record) return;
 
-    await firebaseBackend.saveDraft('handoff-quote', {
-      projectDescription: summarizeSpatialWorkspace(record),
-      notes: 'Measurements were entered as verified field dimensions in Spatial Workspace.',
-      items: [],
-      source: 'Spatial Workspace',
-    });
-    onNavigate('quotes');
+    try {
+      await firebaseBackend.saveDraft('handoff-quote', {
+        projectDescription: summarizeSpatialWorkspace(record),
+        notes: 'Measurements were entered as verified field dimensions in Spatial Workspace.',
+        items: [],
+        source: 'Spatial Workspace',
+      });
+      onNavigate('quotes');
+    } catch {
+      reportIntegrationFailure('firebase', 'save');
+      setStatus('Workspace saved, but the quote draft could not be opened. Try again.');
+    }
   };
 
   const handoffMaterials = async () => {
     const record = await safePersist();
     if (!record) return;
 
-    await firebaseBackend.saveDraft('handoff-materials', buildMaterialHandoff(record));
-    onNavigate('materials');
+    try {
+      await firebaseBackend.saveDraft('handoff-materials', buildMaterialHandoff(record));
+      onNavigate('materials');
+    } catch {
+      reportIntegrationFailure('firebase', 'save');
+      setStatus('Workspace saved, but the material estimate could not be opened. Try again.');
+    }
   };
 
   const loadSpace = (space: SavedSpace) => {
@@ -381,7 +469,12 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setRoomType(space.data.roomType);
     setMeasurements(space.data.measurements);
     setNotes(space.data.notes);
+    setImageDataUrl(space.data.imageDataUrl || '');
+    setPhotoUrl(space.data.imageDataUrl || '');
     setCreatedAt(space.data.createdAt);
+    setFeet('');
+    setInches('');
+    setNoteText('');
     setStatus('Saved space loaded.');
   };
 
@@ -392,7 +485,12 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     setRoomType('Room');
     setMeasurements([]);
     setNotes([]);
+    setImageDataUrl('');
+    setPhotoUrl('');
     setCreatedAt(Date.now());
+    setFeet('');
+    setInches('');
+    setNoteText('');
     setStatus('New spatial workspace ready.');
   };
 
@@ -409,8 +507,10 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             </p>
           </div>
           <div className="header-actions">
-            <button className="ghost" onClick={newSpace}>New space</button>
-            <button className="primary" onClick={() => void safePersist()}>Save workspace</button>
+            <button type="button" className="ghost" disabled={isSaving} onClick={newSpace}>New space</button>
+            <button type="button" className="primary" disabled={isSaving} onClick={() => void safePersist()}>
+              {isSaving ? 'Saving…' : 'Save workspace'}
+            </button>
           </div>
         </header>
 
@@ -432,11 +532,16 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         <section className="workspace-grid">
           <div className="viewer-panel">
             <div className="viewer-toolbar">
-              <button className="tool-button" onClick={() => void startCamera()}>
+              <button type="button" className="tool-button" disabled={isSaving} onClick={() => void startCamera()}>
                 {cameraActive ? 'Restart camera' : 'Open rear camera'}
               </button>
               {cameraActive && (
-                <button className="tool-button" onClick={stopCamera}>Stop camera</button>
+                <button type="button" className="tool-button" disabled={isSaving} onClick={captureCameraFrame}>
+                  Capture room view
+                </button>
+              )}
+              {cameraActive && (
+                <button type="button" className="tool-button" disabled={isSaving} onClick={stopCamera}>Stop camera</button>
               )}
               <label className="tool-button upload">
                 Use photo
@@ -447,11 +552,12 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             <div
               className="scan-stage"
               onClick={pinNote}
-              role="button"
+              role="group"
               tabIndex={0}
-              aria-label="Room view. Type a spatial note, then tap this view to place it."
+              aria-label="Room view. Type a spatial note, then tap this view to place it. Press Enter or Space to place it at the center."
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && noteText.trim()) {
+                if ((event.key === 'Enter' || event.key === ' ') && noteText.trim()) {
+                  event.preventDefault();
                   setNotes((current) => [
                     ...current,
                     {
@@ -491,6 +597,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
 
               {notes.map((note, index) => (
                 <button
+                  type="button"
                   key={note.id}
                   className={`pin pin-${note.category}`}
                   style={{ left: `${note.x}%`, top: `${note.y}%` }}
@@ -665,9 +772,9 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             <p>Save once, then carry the same room context into the next tool.</p>
           </div>
           <div className="handoff-actions">
-            <button onClick={() => void handoffTask()}><span>✓</span> Create task</button>
-            <button onClick={() => void handoffQuote()}><span>▤</span> Start quote</button>
-            <button onClick={() => void handoffMaterials()}><span>◇</span> Estimate materials</button>
+            <button type="button" disabled={isSaving} onClick={() => void handoffTask()}><span>✓</span> Create task</button>
+            <button type="button" disabled={isSaving} onClick={() => void handoffQuote()}><span>▤</span> Start quote</button>
+            <button type="button" disabled={isSaving} onClick={() => void handoffMaterials()}><span>◇</span> Estimate materials</button>
           </div>
         </section>
 
@@ -677,7 +784,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
               <span className="kicker">SAVED SPACES</span>
               <h2>Resume a room without starting over.</h2>
             </div>
-            <span className="status-text">{status}</span>
+            <span className="status-text" role="status" aria-live="polite">{status}</span>
           </div>
           <div className="history-grid">
             {savedSpaces.length === 0 ? (
@@ -719,7 +826,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           margin-bottom: 18px;
         }
         .kicker {
-          color: #7d94ad;
+          color: #9bb4d0;
           font-size: .68rem;
           font-weight: 800;
           letter-spacing: .16em;
@@ -734,7 +841,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .spatial-header p, .handoff-panel p {
           max-width: 720px;
           margin: 0;
-          color: #969696;
+          color: #aaa;
           line-height: 1.6;
           font-size: .9rem;
         }
@@ -744,6 +851,11 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           gap: 8px;
         }
         button, .upload { font: inherit; }
+        button:focus-visible, .upload:focus-within, .scan-stage:focus-visible {
+          outline: 2px solid #9cc8ff;
+          outline-offset: 3px;
+        }
+        button:disabled { opacity: .55; cursor: wait; }
         .primary, .ghost, .tool-button, .handoff-actions button {
           min-height: 42px;
           border-radius: 11px;
@@ -773,7 +885,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           background: #252525;
           border-radius: 13px;
           padding: 10px 12px;
-          color: #7e7e7e;
+          color: #aaa;
           font-size: .68rem;
           display: flex;
           flex-direction: column;
@@ -939,7 +1051,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         }
         .accuracy-note {
           padding: 11px 5px 2px;
-          color: #777;
+          color: #999;
           font-size: .68rem;
           line-height: 1.55;
         }
@@ -966,7 +1078,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         label {
           display: grid;
           gap: 5px;
-          color: #818181;
+          color: #aaa;
           font-size: .66rem;
           margin-top: 9px;
         }
@@ -1026,7 +1138,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .measurement-chip b { margin-top: 2px; color: #e6e6e6; font-size: .69rem; }
         .empty-copy, .tap-hint {
           display: block;
-          color: #686868;
+          color: #999;
           font-size: .62rem;
           margin-top: 9px;
         }
@@ -1043,7 +1155,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           padding: 9px;
         }
         .metrics span, .metrics b { display: block; }
-        .metrics span { color: #6e6e6e; font-size: .58rem; }
+        .metrics span { color: #999; font-size: .58rem; }
         .metrics b { color: #d9d9d9; margin-top: 3px; font-size: .76rem; }
         .note-list {
           display: grid;
@@ -1069,7 +1181,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         }
         .note-row b {
           text-transform: uppercase;
-          color: #777;
+          color: #999;
           font-size: .54rem;
           letter-spacing: .08em;
         }
@@ -1108,7 +1220,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           gap: 20px;
           margin-bottom: 12px;
         }
-        .status-text { color: #777; font-size: .68rem; }
+        .status-text { color: #aaa; font-size: .68rem; }
         .history-grid {
           display: grid;
           grid-template-columns: repeat(4, minmax(0,1fr));
@@ -1128,7 +1240,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .history-card span, .history-card strong, .history-card small { display: block; }
         .history-card span { color: #687b8f; font-size: .54rem; letter-spacing: .12em; }
         .history-card strong { margin-top: 8px; font-size: .78rem; }
-        .history-card small { margin-top: 8px; color: #707070; font-size: .6rem; }
+        .history-card small { margin-top: 8px; color: #999; font-size: .6rem; }
         .history-empty {
           grid-column: 1 / -1;
           color: #686868;

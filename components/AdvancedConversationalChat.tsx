@@ -238,11 +238,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         : 'This conversation has no saved messages yet.');
       setPendingAction(null);
       setHistoryOpen(false);
-    } catch (error) {
+    } catch {
       if (requestNumber !== conversationLoadSequence.current) return;
       reportIntegrationFailure('firebase', 'load');
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setConversationLoadError('Could not open that conversation: ' + message);
+      setConversationLoadError('Could not open that conversation. Check your connection and try again.');
       setHistoryStatus('Could not open saved messages. Your current chat was not changed.');
       setHistoryOpen(true);
     } finally {
@@ -258,7 +257,6 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
     const initializeChat = async () => {
       try {
-        console.log('[Chat] Initializing chat for userId:', userId);
         await firebaseBackend.initialize();
 
         const currentUser = firebaseBackend.getCurrentUser();
@@ -377,7 +375,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     };
 
     recognitionRef.current.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
+      reportIntegrationFailure('chat', 'request');
+      setHistoryStatus('Voice input stopped. Check microphone permission and try again.');
       setIsListening(false);
     };
   }, []);
@@ -420,8 +419,9 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       setAttachments([]);
       setAttachmentError('');
       setPendingAction(null);
-    } catch (error) {
+    } catch {
       reportIntegrationFailure('firebase', 'save');
+      setHistoryStatus('Could not create a conversation. Check your connection and try again.');
     }
   }, [businessContext, userId]);
 

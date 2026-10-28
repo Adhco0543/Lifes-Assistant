@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAppIntegration, useResponsive } from '../lib/hooks';
 import { businessProfileManager, BusinessProfile } from '../lib/businessProfile';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
+import { parseSpatialMaterialHandoff } from '../lib/spatialWorkspace';
 import { RichMedia } from './Richmedia';
 
 interface MaterialEstimatorProps {
@@ -223,38 +225,23 @@ export const MaterialEstimator: React.FC<MaterialEstimatorProps> = ({ userId }) 
     const hydrateSpatialHandoff = async () => {
       try {
         const handoff = await firebaseBackend.getLatestDraft('handoff-materials');
-        if (
-          !active ||
-          !handoff ||
-          !Object.keys(handoff).some((key) => key !== 'consumedAt')
-        ) {
+        if (!active || !handoff || !Object.keys(handoff).some((key) => key !== 'consumedAt')) {
           return;
         }
 
-        if (typeof handoff.projectName === 'string' && handoff.projectName.trim()) {
-          setProjectName(handoff.projectName.trim());
-        }
+        const parsed = parseSpatialMaterialHandoff(handoff);
+        if (!parsed) return;
 
-        const raw =
-          handoff.measurements && typeof handoff.measurements === 'object'
-            ? (handoff.measurements as Record<string, unknown>)
-            : null;
-
-        if (raw) {
-          const length = Math.max(0, Number(raw.length || 0));
-          const width = Math.max(0, Number(raw.width || 0));
-          const height = Math.max(0, Number(raw.height || 0));
-          const area = Math.max(0, Number(raw.area || (length > 0 && width > 0 ? length * width : 0)));
-          const volume = Math.max(0, Number(raw.volume || (area > 0 && height > 0 ? area * height : 0)));
-
-          setMeasurements({ length, width, height, area, volume });
+        if (parsed.projectName) setProjectName(parsed.projectName);
+        if (parsed.measurements) {
+          setMeasurements((current) => ({ ...current, ...parsed.measurements }));
         }
 
         await firebaseBackend.saveDraft('handoff-materials', {
           consumedAt: Date.now(),
         });
-      } catch (error) {
-        console.warn('Could not load Spatial Workspace measurements:', error);
+      } catch {
+        reportIntegrationFailure('firebase', 'load');
       }
     };
 

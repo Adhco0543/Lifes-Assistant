@@ -28,6 +28,7 @@ export type SpatialNote = {
 export type SpatialWorkspaceRecord = {
   title: string;
   roomType: string;
+  imageDataUrl?: string;
   measurements: SpatialMeasurement[];
   notes: SpatialNote[];
   createdAt: number;
@@ -42,10 +43,25 @@ export type RoomMetrics = {
   volume: number;
 };
 
+export type SpatialMaterialHandoff = {
+  projectName?: string;
+  measurements?: Partial<RoomMetrics>;
+};
+
 const finite = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const MAX_MEASUREMENTS = 200;
+const MAX_NOTES = 200;
+export const MAX_SPATIAL_IMAGE_DATA_URL_LENGTH = 450_000;
+
+export function isSafeSpatialImageDataUrl(value: unknown): value is string {
+  return typeof value === 'string' &&
+    value.length <= MAX_SPATIAL_IMAGE_DATA_URL_LENGTH &&
+    /^data:image\/(?:jpeg|png|webp);base64,[a-z\d+/]+=*$/i.test(value);
+}
 
 export function measurementToInches(feet: number, inches: number): number {
   return Math.max(0, Math.round((finite(feet) * 12 + finite(inches)) * 100) / 100);
@@ -113,10 +129,40 @@ export function buildMaterialHandoff(record: SpatialWorkspaceRecord) {
   };
 }
 
+export function parseSpatialMaterialHandoff(value: unknown): SpatialMaterialHandoff | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const source = value as Record<string, unknown>;
+  const projectName = typeof source.projectName === 'string'
+    ? source.projectName.trim().slice(0, 120)
+    : '';
+  const raw = source.measurements;
+  const measurements = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+  const parsedMeasurements: Partial<RoomMetrics> = {};
+
+  if (measurements) {
+    for (const key of ['length', 'width', 'height', 'area', 'volume'] as const) {
+      const rawValue = measurements[key];
+      if (typeof rawValue === 'number' && Number.isFinite(rawValue) && rawValue >= 0) {
+        parsedMeasurements[key] = Math.min(rawValue, 1_000_000_000);
+      }
+    }
+  }
+
+  if (!projectName && !Object.keys(parsedMeasurements).length) return null;
+
+  return {
+    ...(projectName ? { projectName } : {}),
+    ...(Object.keys(parsedMeasurements).length ? { measurements: parsedMeasurements } : {}),
+  };
+}
+
 export function parseSpatialWorkspaceRecord(
   value: unknown
 ): SpatialWorkspaceRecord | null {
-  if (!value || typeof value !== 'object') return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const source = value as Record<string, unknown>;
   const rawMeasurements = Array.isArray(source.measurements)
@@ -125,7 +171,10 @@ export function parseSpatialWorkspaceRecord(
   const rawNotes = Array.isArray(source.notes) ? source.notes : [];
 
   const measurements: SpatialMeasurement[] = rawMeasurements
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .slice(0, MAX_MEASUREMENTS)
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === 'object' && !Array.isArray(item))
+    )
     .map((item, index): SpatialMeasurement => {
       const kind: SpatialMeasurementKind =
         item.kind === 'length' ||
@@ -140,13 +189,16 @@ export function parseSpatialWorkspaceRecord(
         id: String(item.id || `measurement-${index}`),
         label: String(item.label || 'Measurement').slice(0, 80),
         kind,
-        totalInches: Math.max(0, finite(item.totalInches)),
+        totalInches: Math.min(1_000_000, Math.max(0, finite(item.totalInches))),
       };
     })
     .filter((item) => item.totalInches > 0);
 
   const notes: SpatialNote[] = rawNotes
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .slice(0, MAX_NOTES)
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === 'object' && !Array.isArray(item))
+    )
     .map((item, index): SpatialNote => {
       const category: SpatialNoteCategory =
         item.category === 'damage' ||
@@ -170,6 +222,9 @@ export function parseSpatialWorkspaceRecord(
   return {
     title: String(source.title || 'Untitled space').slice(0, 120),
     roomType: String(source.roomType || 'Room').slice(0, 80),
+    ...(isSafeSpatialImageDataUrl(source.imageDataUrl)
+      ? { imageDataUrl: source.imageDataUrl }
+      : {}),
     measurements,
     notes,
     createdAt: finite(source.createdAt) || now,

@@ -5,7 +5,9 @@ import {
   calculateRoomMetrics,
   clampPin,
   formatMeasurement,
+  isSafeSpatialImageDataUrl,
   measurementToInches,
+  parseSpatialMaterialHandoff,
   parseSpatialWorkspaceRecord,
   summarizeSpatialWorkspace,
 } from '../lib/spatialWorkspace.ts';
@@ -68,4 +70,48 @@ test('saved spatial data is normalized before reuse', () => {
   assert.equal(parsed.measurements.length, 1);
   assert.equal(parsed.notes[0].x, 100);
   assert.equal(parsed.notes[0].y, 0);
+});
+
+test('saved records reject invalid roots and only retain bounded image data', () => {
+  assert.equal(parseSpatialWorkspaceRecord([]), null);
+  assert.equal(isSafeSpatialImageDataUrl('data:image/jpeg;base64,aGVsbG8='), true);
+  assert.equal(isSafeSpatialImageDataUrl('data:image/svg+xml;base64,PHN2Zz4='), false);
+  assert.equal(isSafeSpatialImageDataUrl('data:image/jpeg;base64,' + 'a'.repeat(450_001)), false);
+
+  const withPhoto = parseSpatialWorkspaceRecord({
+    title: 'Bathroom',
+    imageDataUrl: 'data:image/jpeg;base64,aGVsbG8=',
+    measurements: [{ id: 'long', label: 'Long wall', kind: 'length', totalInches: 1e100 }],
+  });
+  assert.equal(withPhoto?.imageDataUrl, 'data:image/jpeg;base64,aGVsbG8=');
+  assert.equal(withPhoto?.measurements[0].totalInches, 1_000_000);
+
+  const withInvalidPhoto = parseSpatialWorkspaceRecord({
+    title: 'Kitchen',
+    imageDataUrl: 'data:text/html;base64,PHNjcmlwdD4=',
+    measurements: [["not", "a", "record"]],
+    notes: [["not", "a", "record"]],
+  });
+  assert.equal(withInvalidPhoto?.imageDataUrl, undefined);
+  assert.deepEqual(withInvalidPhoto?.measurements, []);
+  assert.deepEqual(withInvalidPhoto?.notes, []);
+});
+
+test('material handoff validates imported numbers before applying dimensions', () => {
+  assert.equal(parseSpatialMaterialHandoff([]), null);
+  assert.equal(parseSpatialMaterialHandoff({ measurements: { length: '12' } }), null);
+
+  assert.deepEqual(parseSpatialMaterialHandoff({
+    projectName: '  Hallway  ',
+    measurements: {
+      length: 8,
+      width: Number.NaN,
+      height: Number.POSITIVE_INFINITY,
+      area: -1,
+      volume: 64,
+    },
+  }), {
+    projectName: 'Hallway',
+    measurements: { length: 8, volume: 64 },
+  });
 });
