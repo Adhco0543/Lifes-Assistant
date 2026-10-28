@@ -24,8 +24,12 @@ struct RoomScanPayload: Codable {
     }
 
     static func make(from room: CapturedRoom) -> RoomScanPayload? {
-        let measuredSurfaces = room.floors + room.walls
-        let floor = room.floors.max { area(of: $0.dimensions) < area(of: $1.dimensions) }
+        var floor: CapturedRoom.Surface?
+        if #available(iOS 17.0, *) {
+            floor = room.floors.max { area(of: $0.dimensions) < area(of: $1.dimensions) }
+        }
+        var measuredSurfaces = room.walls
+        if let floor { measuredSurfaces.append(floor) }
         let worldToRoom = floor.map { simd_inverse($0.transform) } ?? matrix_identity_float4x4
         let roomCorners = measuredSurfaces
             .flatMap { corners(transform: $0.transform, dimensions: $0.dimensions) }
@@ -141,15 +145,19 @@ struct RoomScanPayload: Codable {
         let width = max(dimensions.x, 0.01)
         let height = max(dimensions.y, 0.01)
         let depth = max(dimensions.z, 0.01)
-        return [-1.0, 1.0].flatMap { x in
-            [-1.0, 1.0].flatMap { y in
-                [-1.0, 1.0].map { z in
+        let signs: [Float] = [-1, 1]
+        var result: [SIMD3<Float>] = []
+        result.reserveCapacity(8)
+        for x in signs {
+            for y in signs {
+                for z in signs {
                     let local = SIMD4<Float>(x * width / 2, y * height / 2, z * depth / 2, 1)
                     let world = transform * local
-                    return SIMD3<Float>(world.x, world.y, world.z)
+                    result.append(SIMD3<Float>(world.x, world.y, world.z))
                 }
             }
         }
+        return result
     }
 
     private static func point(_ point: SIMD3<Float>, transformedBy transform: simd_float4x4) -> SIMD3<Float> {
