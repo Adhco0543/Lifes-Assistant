@@ -1344,6 +1344,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           gap: 12px;
           align-items: start;
         }
+        .viewer-panel, .inspector { min-width: 0; }
         .viewer-panel, .panel, .handoff-panel, .history-panel {
           border: 1px solid #343434;
           background: #242424;
@@ -1363,8 +1364,11 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         .upload.disabled { opacity: .5; cursor: not-allowed; }
         .scan-stage {
           position: relative;
-          min-height: 560px;
-          aspect-ratio: 16 / 10;
+          width: 100%;
+          min-width: 0;
+          height: clamp(360px, 42vw, 560px);
+          min-height: 0;
+          aspect-ratio: auto;
           overflow: hidden;
           border-radius: 14px;
           border: 1px solid #3a3a3a;
@@ -1765,7 +1769,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         }
         @media (max-width: 1050px) {
           .workspace-grid { grid-template-columns: 1fr; }
-          .scan-stage { min-height: 440px; }
+          .scan-stage { height: clamp(440px, 58vw, 720px); }
           .capability-row { grid-template-columns: repeat(2, 1fr); }
           .history-grid { grid-template-columns: repeat(2, 1fr); }
         }
@@ -1782,7 +1786,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           .header-actions, .handoff-actions { width: 100%; }
           .header-actions > *, .handoff-actions > * { flex: 1; }
           .capability-row, .history-grid, .field-grid { grid-template-columns: 1fr; }
-          .scan-stage { min-height: 360px; aspect-ratio: 3 / 4; }
+          .scan-stage { height: clamp(360px, 58vh, 620px); }
           .dimension-row { grid-template-columns: 1fr 1fr; }
           .add-button { grid-column: 1 / -1; }
           h1 { font-size: 2.5rem; }
