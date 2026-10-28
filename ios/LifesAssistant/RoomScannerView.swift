@@ -5,7 +5,7 @@ import SwiftUI
 final class RoomCaptureController: NSObject, ObservableObject, @preconcurrency RoomCaptureViewDelegate {
     @Published private(set) var isCapturing = false
     @Published private(set) var isProcessing = false
-    @Published private(set) var result: RoomScanPayload?
+    var onResult: ((RoomScanPayload) -> Void)?
     @Published var errorMessage: String?
 
     private weak var captureView: RoomCaptureView?
@@ -30,7 +30,6 @@ final class RoomCaptureController: NSObject, ObservableObject, @preconcurrency R
             errorMessage = "Room scanning requires an iPhone or iPad with LiDAR. You can still enter dimensions manually in Spatial Workspace."
             return
         }
-        result = nil
         errorMessage = nil
         isProcessing = false
         captureView?.captureSession.run(configuration: RoomCaptureSession.Configuration())
@@ -65,7 +64,7 @@ final class RoomCaptureController: NSObject, ObservableObject, @preconcurrency R
             errorMessage = "The scan did not capture enough wall and floor detail to calculate room dimensions. Scan again slowly and include each corner."
             return
         }
-        result = payload
+        onResult?(payload)
     }
 }
 
@@ -112,7 +111,7 @@ struct RoomScannerView: View {
 
                 VStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(controller.result == nil ? "Scan the whole room" : "Review your scan")
+                        Text("Scan the whole room")
                             .font(.headline)
                         Text(instructions)
                             .font(.subheadline)
@@ -125,10 +124,6 @@ struct RoomScannerView: View {
                     .padding(.top, 12)
 
                     Spacer()
-
-                    if let result = controller.result {
-                        scanSummary(result)
-                    }
 
                     if let errorMessage = controller.errorMessage {
                         Text(errorMessage)
@@ -146,32 +141,26 @@ struct RoomScannerView: View {
                             .buttonStyle(.bordered)
                             .tint(.white)
 
-                        if controller.result != nil {
-                            Button("Scan again") { controller.start() }
-                                .buttonStyle(.bordered)
-                                .tint(.white)
-                            Button("Use this scan") {
-                                if let result = controller.result { onImport(result) }
-                                dismiss()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color(red: 0.24, green: 0.78, blue: 0.56))
-                        } else {
-                            Button(controller.isProcessing ? "Preparing scan…" : controller.isCapturing ? "Finish scan" : "Start scan") {
-                                if controller.isCapturing { controller.finish() }
-                                else if !controller.isProcessing { controller.start() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color(red: 0.24, green: 0.78, blue: 0.56))
-                            .disabled(controller.isProcessing)
+                        Button(controller.isProcessing ? "Preparing scan…" : controller.isCapturing ? "Finish scan" : "Start scan") {
+                            if controller.isCapturing { controller.finish() }
+                            else if !controller.isProcessing { controller.start() }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color(red: 0.24, green: 0.78, blue: 0.56))
+                        .disabled(controller.isProcessing)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(16)
                     .background(.black.opacity(0.78))
                 }
             }
-            .onAppear { controller.start() }
+            .onAppear {
+                controller.onResult = { result in
+                    onImport(result)
+                    dismiss()
+                }
+                controller.start()
+            }
             .onDisappear { controller.finish() }
     }
 
@@ -196,44 +185,7 @@ struct RoomScannerView: View {
     }
 
     private var instructions: String {
-        if controller.result != nil {
-            return "Check the room outline and detected items. RoomPlan measurements are estimates; verify critical dimensions before ordering materials."
-        }
-        return "Move slowly around the room. Keep the walls, corners, doors, and windows in view, then tap Finish scan."
+        "Move slowly so the camera sees each wall and corner. Tap Finish scan when the room is outlined. Dimensions and detected items will be added automatically."
     }
 
-    private func scanSummary(_ result: RoomScanPayload) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                summaryValue("Length", inches: result.roomLengthInches)
-                summaryValue("Width", inches: result.roomWidthInches)
-                summaryValue("Ceiling", inches: result.ceilingHeightInches)
-            }
-            Text("\(result.items.count) detected item\(result.items.count == 1 ? "" : "s") · estimates can vary by room conditions")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.75))
-        }
-        .padding(14)
-        .background(.black.opacity(0.76), in: RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-    }
-
-    private func summaryValue(_ label: String, inches: Double) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label.uppercased())
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.65))
-            Text(formatInches(inches))
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func formatInches(_ value: Double) -> String {
-        let feet = Int(value / 12)
-        let inches = Int((value - Double(feet * 12)).rounded())
-        return "\(feet)' \(inches)\""
-    }
 }
