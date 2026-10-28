@@ -141,7 +141,7 @@ test('WebXR point distances convert meters to inches and mark estimates in hando
   const arHandoff = buildMaterialHandoff(arRoom);
   assert.match(arHandoff.measurementWarning, /verify them with a tape/i);
   assert.ok(arHandoff.notes.some((note) => /verify all dimensions on site/i.test(note)));
-  assert.match(parseSpatialMaterialHandoff(arHandoff).measurementWarning, /AR estimates/);
+  assert.match(parseSpatialMaterialHandoff(arHandoff).measurementWarning, /AR scan estimates/);
 });
 
 test('the app permits same-origin WebXR spatial tracking sessions', async () => {
@@ -149,6 +149,27 @@ test('the app permits same-origin WebXR spatial tracking sessions', async () => 
   const policy = rules.flatMap((rule) => rule.headers)
     .find((header) => header.key.toLowerCase() === 'permissions-policy');
   assert.equal(policy?.value, 'xr-spatial-tracking=(self)');
+});
+
+test('RoomPlan scan estimates and detected-item attribution survive saved-workspace parsing', () => {
+  const parsed = parseSpatialWorkspaceRecord({
+    title: 'Scanned bedroom',
+    roomType: 'Bedroom',
+    measurements: [
+      { id: 'roomplan-length', label: 'Scanned room length', kind: 'length', totalInches: 180, source: 'roomplan' },
+      { id: 'roomplan-width', label: 'Scanned room width', kind: 'width', totalInches: 144, source: 'roomplan' },
+    ],
+    notes: [],
+    items: [{ id: 'bed-1', label: 'Bed', category: 'furniture', xInches: 20, yInches: 18, widthInches: 60, depthInches: 80, heightInches: 28, source: 'roomplan' }],
+    createdAt: 10,
+    updatedAt: 20,
+  });
+
+  assert.ok(parsed);
+  assert.equal(parsed.measurements[0].source, 'roomplan');
+  assert.equal(parsed.items[0].source, 'roomplan');
+  assert.match(summarizeSpatialWorkspace(parsed), /RoomPlan scan estimate/);
+  assert.match(buildMaterialHandoff(parsed).measurementWarning, /AR scan estimates/);
 });
 
 test('saved spatial data is normalized before reuse', () => {

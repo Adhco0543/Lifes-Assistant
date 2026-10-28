@@ -1,0 +1,36 @@
+name: iOS RoomPlan build
+
+on:
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'lib/nativeRoomScan.ts'
+      - 'components/SpatialWorkspace.tsx'
+      - '.github/workflows/ios-roomplan.yml'
+  push:
+    branches:
+      - feature/ar-spatial-workspace-20261028
+    paths:
+      - 'ios/**'
+      - 'lib/nativeRoomScan.ts'
+      - 'components/SpatialWorkspace.tsx'
+      - '.github/workflows/ios-roomplan.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build iOS app for Simulator
+        run: >-
+          xcodebuild
+          -project ios/LifesAssistant.xcodeproj
+          -scheme LifesAssistant
+          -destination 'generic/platform=iOS Simulator'
+          -configuration Debug
+          CODE_SIGNING_ALLOWED=NO
+          -quiet
+          build

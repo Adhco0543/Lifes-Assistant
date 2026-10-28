@@ -13,7 +13,7 @@ export type SpatialMeasurement = {
   label: string;
   kind: SpatialMeasurementKind;
   totalInches: number;
-  source?: 'field' | 'webxr-hit-test';
+  source?: 'field' | 'webxr-hit-test' | 'roomplan';
 };
 
 export type SpatialNoteCategory = 'work' | 'damage' | 'material' | 'idea';
@@ -47,6 +47,8 @@ export type SpatialItem = {
   heightInches?: number;
   /** WebXR local-space transform, valid only while the current AR session remains active. */
   arTransform?: number[];
+  /** Object was detected by a native Apple RoomPlan scan. */
+  source?: 'roomplan';
 };
 
 export type SpatialWorkspaceRecord = {
@@ -167,7 +169,7 @@ export function calculateRoomMetrics(measurements: SpatialMeasurement[]): RoomMe
 export function summarizeSpatialWorkspace(record: SpatialWorkspaceRecord): string {
   const measurements = record.measurements.length
     ? record.measurements
-        .map((item) => `${item.label}: ${formatMeasurement(item.totalInches)}${item.source === 'webxr-hit-test' ? ' (AR estimate; verify on site)' : ''}`)
+        .map((item) => `${item.label}: ${formatMeasurement(item.totalInches)}${item.source === 'webxr-hit-test' ? ' (AR estimate; verify on site)' : item.source === 'roomplan' ? ' (RoomPlan scan estimate; verify on site)' : ''}`)
         .join('; ')
     : 'No measurements saved yet';
 
@@ -192,7 +194,7 @@ export function summarizeSpatialWorkspace(record: SpatialWorkspaceRecord): strin
 
 export function buildMaterialHandoff(record: SpatialWorkspaceRecord) {
   const metrics = calculateRoomMetrics(record.measurements);
-  const hasArEstimate = record.measurements.some((measurement) => measurement.source === 'webxr-hit-test');
+  const hasArEstimate = record.measurements.some((measurement) => measurement.source === 'webxr-hit-test' || measurement.source === 'roomplan');
   const itemNotes = (record.items || []).map((item) =>
     `Planned ${item.category}: ${item.label}, ${formatMeasurement(item.widthInches)} × ${formatMeasurement(item.depthInches)} footprint, positioned ${formatMeasurement(item.xInches)} from the plan origin.`
   );
@@ -201,12 +203,12 @@ export function buildMaterialHandoff(record: SpatialWorkspaceRecord) {
     projectName: record.title,
     measurements: metrics,
     layoutItems: record.items || [],
-    ...(hasArEstimate ? { measurementWarning: 'These dimensions include WebXR AR estimates. Verify them with a tape before pricing or ordering materials.' } : {}),
+      ...(hasArEstimate ? { measurementWarning: 'These dimensions include AR scan estimates. Verify them with a tape before pricing or ordering materials.' } : {}),
     source: 'Spatial Workspace',
     notes: [
       ...record.notes.map((note) => note.text),
       ...itemNotes,
-      ...(hasArEstimate ? ['Includes WebXR AR estimates. Verify all dimensions on site before ordering materials.'] : []),
+      ...(hasArEstimate ? ['Includes AR scan estimates. Verify all dimensions on site before ordering materials.'] : []),
     ],
   };
 }
@@ -281,7 +283,9 @@ export function parseSpatialWorkspaceRecord(
         label: String(item.label || 'Measurement').slice(0, 80),
         kind,
         totalInches: Math.min(1_000_000, Math.max(0, finite(item.totalInches))),
-        ...(item.source === 'webxr-hit-test' ? { source: 'webxr-hit-test' as const } : { source: 'field' as const }),
+        ...(item.source === 'webxr-hit-test' || item.source === 'roomplan'
+          ? { source: item.source }
+          : { source: 'field' as const }),
       };
     })
     .filter((item) => item.totalInches > 0);
@@ -333,6 +337,7 @@ export function parseSpatialWorkspaceRecord(
         widthInches: Math.min(1_000_000, Math.max(0, finite(item.widthInches))),
         depthInches: Math.min(1_000_000, Math.max(0, finite(item.depthInches))),
         ...(heightInches > 0 ? { heightInches: Math.min(1_000_000, heightInches) } : {}),
+        ...(item.source === 'roomplan' ? { source: 'roomplan' as const } : {}),
       };
     })
     .filter((item) => item.widthInches > 0 && item.depthInches > 0);

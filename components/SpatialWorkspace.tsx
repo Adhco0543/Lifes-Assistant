@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { firebaseBackend } from '../lib/firebaseBackend';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 import { useWebXRAR } from './useWebXRAR';
+import { parseNativeRoomScan, roomScanToMeasurements } from '../lib/nativeRoomScan';
 import {
   buildMaterialHandoff,
   calculateRoomMetrics,
@@ -39,6 +40,14 @@ type SavedSpace = {
 type CapabilityState = {
   camera: boolean;
   secureContext: boolean;
+};
+
+type NativeRoomScannerBridge = {
+  postMessage: (message: string) => void;
+};
+
+type NativeRoomScannerWindow = Window & {
+  webkit?: { messageHandlers?: { roomScanner?: NativeRoomScannerBridge } };
 };
 
 const ROOM_TYPES = [
@@ -155,6 +164,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
   const [photoUrl, setPhotoUrl] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [nativeRoomScannerAvailable, setNativeRoomScannerAvailable] = useState(false);
   const [capabilities, setCapabilities] = useState<CapabilityState>({
     camera: false,
     secureContext: false,
@@ -289,6 +299,34 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const bridge = (window as NativeRoomScannerWindow).webkit?.messageHandlers?.roomScanner;
+    setNativeRoomScannerAvailable(Boolean(bridge));
+
+    const importNativeScan = (event: Event) => {
+      const scan = parseNativeRoomScan((event as CustomEvent<unknown>).detail);
+      if (!scan) {
+        setStatus('The native room scan could not be read. Scan the room again and try importing it.');
+        return;
+      }
+
+      const scannedAt = Date.now();
+      setMeasurements((current) => [
+        ...current.filter((measurement) => measurement.source !== 'roomplan').slice(0, 197),
+        ...roomScanToMeasurements(scan, scannedAt),
+      ]);
+      setItems((current) => {
+        const existing = current.filter((item) => item.source !== 'roomplan');
+        return [...existing.slice(0, Math.max(0, 100 - scan.items.length)), ...scan.items];
+      });
+      setTitle((current) => current === 'New room scan' ? 'Scanned room' : current);
+      setStatus(`Room scan added: ${scan.items.length} detected item${scan.items.length === 1 ? '' : 's'} and room dimensions. Review the plan and remove anything that was misidentified.`);
+    };
+
+    window.addEventListener('lifeassistant:room-scan', importNativeScan);
+    return () => window.removeEventListener('lifeassistant:room-scan', importNativeScan);
   }, []);
 
   useEffect(() => {
@@ -659,8 +697,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
     try {
       await firebaseBackend.saveDraft('handoff-quote', {
         projectDescription: summarizeSpatialWorkspace(record),
-        notes: record.measurements.some((measurement) => measurement.source === 'webxr-hit-test')
-          ? 'Room dimensions include WebXR AR estimates. Verify them on site before pricing or ordering.'
+        notes: record.measurements.some((measurement) => measurement.source === 'webxr-hit-test' || measurement.source === 'roomplan')
+          ? 'Room dimensions include AR scan estimates. Verify them on site before pricing or ordering.'
           : 'Room dimensions were entered as verified field dimensions in Spatial Workspace.',
         items: [],
         source: 'Spatial Workspace',
@@ -748,14 +786,20 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
           </div>
         </header>
 
-        <div className={`scan-guidance ${ar.supported ? 'scan-guidance-xr' : ''}`} role="status">
+        <div className={`scan-guidance ${ar.supported || nativeRoomScannerAvailable ? 'scan-guidance-xr' : ''}`} role="status">
           <strong>{ar.supported === null
-            ? 'Checking AR support for this browser'
-            : ar.supported
+            ? nativeRoomScannerAvailable
+              ? 'Full-room scanning is available'
+              : 'Checking AR support for this browser'
+            : nativeRoomScannerAvailable
+              ? 'Full-room scanning is available'
+              : ar.supported
               ? 'AR point measuring is available'
               : 'Automatic room scanning is unavailable here'}</strong>
           <span>
-            {ar.supported === null
+            {nativeRoomScannerAvailable
+              ? 'Scan the whole room with Apple RoomPlan, then import its dimensions and detected items into this measured-space plan. You can remove detected items or add your own.'
+              : ar.supported === null
               ? 'Camera and photo tools save reference images only; they do not calculate dimensions. You can enter tape measurements below to build a scaled plan.'
               : ar.supported
                 ? 'This web workspace does not detect the whole room automatically. Start AR and set two endpoints for each dimension, or enter tape measurements below. Camera and photo tools save reference images only.'
@@ -764,6 +808,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         </div>
 
         <div className="capability-row" aria-label="Device capability status">
+          {nativeRoomScannerAvailable && <span className="cap ok"><b>RoomPlan</b>Native scanner ready</span>}
           <span className={capabilities.camera ? 'cap ok' : 'cap'}>
             <b>Camera</b>{capabilities.camera ? 'Ready' : 'Unavailable'}
           </span>
@@ -781,6 +826,19 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         <section className="workspace-grid">
           <div className="viewer-panel">
             <div className="viewer-toolbar">
+              {nativeRoomScannerAvailable && (
+                <button type="button" className="tool-button ar-launch" disabled={isSaving} title="Scan this room with Apple RoomPlan on a LiDAR-equipped iPhone or iPad." onClick={() => {
+                  const roomScanner = (window as NativeRoomScannerWindow).webkit?.messageHandlers?.roomScanner;
+                  if (!roomScanner) {
+                    setStatus('The native room scanner is not connected. Close and reopen this screen in Life’s Assistant.');
+                    return;
+                  }
+                  roomScanner.postMessage('start');
+                  setStatus('Opening the native room scanner…');
+                }}>
+                  Scan whole room
+                </button>
+              )}
               {ar.supported && !ar.active && (
                 <button type="button" className="tool-button ar-launch" title="Measure one distance by selecting its two endpoints, or place a room item in AR." disabled={isSaving || ar.starting || !capabilities.secureContext} onClick={() => { setArAction('measure'); arActionRef.current = 'measure'; void startAR(); }}>
                   {ar.starting ? 'Starting AR…' : 'Measure two points in AR'}
@@ -852,8 +910,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                     <span />
                     <span />
                   </div>
-                  <strong>Camera and photos are visual references</strong>
-                  <small>Enter tape measurements to create the scaled room plan and dimensions.</small>
+                  <strong>{nativeRoomScannerAvailable ? 'Ready to scan the whole room' : 'Camera and photos are visual references'}</strong>
+                  <small>{nativeRoomScannerAvailable ? 'Tap Scan whole room, then move slowly to capture the walls and fixtures.' : 'Enter tape measurements to create the scaled room plan and dimensions.'}</small>
                 </div>
               )}
 
@@ -942,7 +1000,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
             </div>
 
             <div className="accuracy-note">
-              <b>AR preview:</b> WebXR measurements are estimates and can drift; verify with a tape before quoting or ordering. Room items appear as dimensioned 3D box previews. Their live AR positions last for the current session; saved workspaces keep their measured 2D footprints and dimensions. This web flow does not collect a LiDAR/depth map.
+              <b>AR preview:</b> WebXR and RoomPlan measurements are estimates; verify with a tape before quoting or ordering. Room items appear as dimensioned 3D box previews. Their live AR positions last for the current session; saved workspaces keep their measured 2D footprints and dimensions. {nativeRoomScannerAvailable ? 'The native iOS scanner uses RoomPlan on supported LiDAR devices.' : 'This browser workspace does not collect a LiDAR/depth map.'}
             </div>
           </div>
 
@@ -1036,7 +1094,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                       )
                     }
                   >
-                    <span>{measurement.label}{measurement.source === 'webxr-hit-test' ? ' · AR estimate' : ''}</span>
+                    <span>{measurement.label}{measurement.source === 'webxr-hit-test' ? ' · AR estimate' : measurement.source === 'roomplan' ? ' · RoomPlan estimate' : ''}</span>
                     <b>{formatMeasurement(measurement.totalInches)}</b>
                   </button>
                 ))}
@@ -1046,8 +1104,8 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 <div><span>Area</span><b>{metrics.area ? `${metrics.area} ft²` : '—'}</b></div>
                 <div><span>Volume</span><b>{metrics.volume ? `${metrics.volume} ft³` : '—'}</b></div>
               </div>
-              {measurements.some((measurement) => measurement.source === 'webxr-hit-test') && (
-                <p className="ar-warning">Area and volume include AR estimates. Verify before using them for materials or pricing.</p>
+              {measurements.some((measurement) => measurement.source === 'webxr-hit-test' || measurement.source === 'roomplan') && (
+                <p className="ar-warning">Area and volume include AR scan estimates. Verify before using them for materials or pricing.</p>
               )}
             </div>
 
@@ -1166,7 +1224,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
                 <ul className="room-item-list" aria-label="Items in this room">
                       {items.map((item) => (
                     <li key={item.id}>
-                          <span><b>{item.label}</b><small>{item.category} · {formatMeasurement(item.widthInches)} × {formatMeasurement(item.depthInches)}{item.arTransform ? ' · visible in AR' : ''}</small></span>
+                          <span><b>{item.label}</b><small>{item.category}{item.source === 'roomplan' ? ' · detected in scan' : ''} · {formatMeasurement(item.widthInches)} × {formatMeasurement(item.depthInches)}{item.arTransform ? ' · visible in AR' : ''}</small></span>
                           <div className="room-item-actions">
                             {ar.supported && <button type="button" aria-label={`${item.arTransform ? 'Move' : 'Place'} ${item.label} in AR`} disabled={ar.starting || !capabilities.secureContext} onClick={() => {
                               setSelectedItemId(item.id);
@@ -1332,7 +1390,7 @@ export default function SpatialWorkspace({ userId, onNavigate }: SpatialWorkspac
         }
         .capability-row {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
           gap: 8px;
           margin-bottom: 12px;
         }
