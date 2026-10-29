@@ -293,19 +293,19 @@ export const App: React.FC = () => {
         console.error('Error saving local profile:', error);
       }
 
-      try {
-        await firebaseBackend.saveDraft('workspace-profile', {
-          businessName: nextBusinessName,
-          businessType: nextBusinessType,
-          updatedAt: Date.now(),
-        });
-      } catch (error) {
-        console.warn('Could not sync workspace profile to cloud:', error);
-      }
-
+      // Leave onboarding as soon as the required preferences are saved.
+      // The workspace draft is a compatibility copy and must not block the transition.
       setBusinessType(nextBusinessType);
       setBusinessName(nextBusinessName);
       setCurrentView('home');
+
+      void firebaseBackend.saveDraft('workspace-profile', {
+        businessName: nextBusinessName,
+        businessType: nextBusinessType,
+        updatedAt: Date.now(),
+      }).catch((error) => {
+        console.warn('Could not sync workspace profile to cloud:', error);
+      });
     },
     []
   );
