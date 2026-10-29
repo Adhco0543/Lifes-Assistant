@@ -28,7 +28,6 @@ const QUICK_ACTIONS = [
   { id: 'brief', icon: '◈', title: 'Focus Brief', detail: 'Turn saved work into the next three moves.' },
   { id: 'search', icon: '⌕', title: 'Search', detail: 'Find saved tasks, notes, people, and conversations.' },
   { id: 'quotes', icon: '▤', title: 'Build a quote', detail: 'Turn scope, labor, and materials into a draft.' },
-  { id: 'materials', icon: '◇', title: 'Materials', detail: 'Estimate materials from a project.' },
   { id: 'email', icon: '↗', title: 'Email drafts', detail: 'Write a message for your approval.' },
   { id: 'projects', icon: '▦', title: 'Projects', detail: 'Keep goals, context, and status together.' },
 ];
@@ -64,7 +63,8 @@ export default function LifeAssistantHome({
         const local = stored ? JSON.parse(stored) as unknown : null;
         const source = lifeProfile || (cloud && ('mode' in cloud || 'primary_slips' in cloud) ? cloud : local);
         if (active) setPreferences(normalizeLifePreferences(source));
-      } catch {
+      } catch (error) {
+        console.warn('Could not load Life profile preferences:', error);
         if (active) setPreferences(DEFAULT_LIFE_PREFERENCES);
       }
     };
@@ -75,7 +75,7 @@ export default function LifeAssistantHome({
   const orderedActions = useMemo(() => {
     return getVisibleTools(preferences, QUICK_ACTIONS);
   }, [preferences.mode, preferences.tool_overrides]);
-  const coreLimit = preferences.mode === 'everyday' ? 7 : 10;
+  const coreLimit = MODE_TOOL_ORDER[preferences.mode].length;
   const coreActions = orderedActions.filter((action) => MODE_TOOL_ORDER[preferences.mode].indexOf(action.id) < coreLimit || preferences.tool_overrides.pinned.includes(action.id));
   const moreActions = orderedActions.filter((action) => !coreActions.some((core) => core.id === action.id));
 
