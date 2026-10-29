@@ -19,11 +19,11 @@ const steps: Array<{ id: StepId; title: string; kicker: string; description: str
   },
   {
     id: 'slips', title: 'What do you most often forget or let sit too long?', kicker: 'YOUR PRIORITIES',
-    description: 'We’ll prioritize these in Life Radar. Choose 1–3.',
+    description: 'We’ll prioritize this in Life Radar. Choose the one you most want to stay on top of.',
   },
   {
     id: 'capture', title: 'How do you usually capture things?', kicker: 'CAPTURE',
-    description: 'Optional. We’ll lean into this later.',
+    description: 'Optional. Choose a preference or skip to finish setup.',
   },
   {
     id: 'confirm', title: 'You’re set.', kicker: 'READY',
@@ -169,7 +169,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           {step.id === 'slips' && (
             <>
             <p className="slip-selection-count" aria-live="polite">
-              {primarySlips.length === 0 ? 'Choose at least one. You can select up to three.' : `${primarySlips.length} selected · Choose up to ${3 - primarySlips.length} more or continue.`}
+              {primarySlips.length === 0 ? 'Choose one priority to continue.' : `Priority selected.`}
             </p>
             <div className="option-grid">
               {PRIMARY_SLIPS.map((item) => (
@@ -177,7 +177,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
                   type="button"
                   key={item.id}
                   className={primarySlips.includes(item.id) ? 'option selected' : 'option'}
-                  onClick={() => toggleSlip(item.id)}
+                  onClick={() => { setPrimarySlips([item.id]); setStepIndex(2); onStepChange?.(3); }}
                   aria-pressed={primarySlips.includes(item.id)}
                 >
                   <span className="option-mark">{primarySlips.includes(item.id) ? '✓' : '+'}</span>
@@ -193,11 +193,11 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
               {([
                 ['chat', 'Chat / type'], ['voice', 'Voice'], ['forward', 'Forward emails or notes later'],
               ] as Array<[Exclude<CapturePreference, ''>, string]>).map(([value, label]) => (
-                <button type="button" key={value} className={capturePref === value ? 'option selected' : 'option'} onClick={() => setCapturePref(value)} aria-pressed={capturePref === value}>
+                <button type="button" key={value} className={capturePref === value ? 'option selected' : 'option'} onClick={() => { setCapturePref(value); setStepIndex(3); onStepChange?.(4); }} aria-pressed={capturePref === value}>
                   <span className="option-mark">{capturePref === value ? '✓' : '+'}</span><span>{label}</span>
                 </button>
               ))}
-              <button type="button" className={!capturePref ? 'skip-option selected' : 'skip-option'} onClick={() => setCapturePref('')}>No preference</button>
+              <button type="button" className={!capturePref ? 'skip-option selected' : 'skip-option'} onClick={() => { setCapturePref(''); setStepIndex(3); onStepChange?.(4); }}>No preference</button>
             </div>
           )}
 
