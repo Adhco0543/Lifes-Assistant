@@ -65,9 +65,9 @@ export default function ConnectionsHub({ userId }: { userId: string }) {
   const [github, setGitHub] = useState<GitHubConnection>({});
   const [githubRepositoryAccess, setGitHubRepositoryAccess] = useState(false);
   const [selected, setSelected] = useState<Record<GoogleService, boolean>>({
-    drive: true,
+    drive: false,
     gmail: false,
-    calendar: true,
+    calendar: false,
     photos: false,
   });
   const [busy, setBusy] = useState('');

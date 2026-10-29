@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { normalizeLifePreferences, PRIMARY_SLIPS, type CapturePreference, type LifeMode } from '../lib/lifePreferences';
 
 interface ProgressiveOnboardingProps {
   userId?: string;
@@ -9,49 +10,24 @@ interface ProgressiveOnboardingProps {
   onStepChange?: (step: number) => void;
 }
 
-type StepId = 'workspace' | 'help' | 'style' | 'memory' | 'approval';
-
-const HELP_OPTIONS = [
-  'Everyday planning',
-  'Work & business',
-  'Writing & email',
-  'Tasks & reminders',
-  'Money & estimates',
-  'Learning & research',
-  'Relationships & communication',
-  'Projects & ideas',
-];
+type StepId = 'mode' | 'slips' | 'capture' | 'confirm';
 
 const steps: Array<{ id: StepId; title: string; kicker: string; description: string }> = [
   {
-    id: 'workspace',
-    title: 'Make it yours.',
-    kicker: 'WELCOME',
-    description: 'Give this workspace a name. It can represent your whole life, your work, or both.',
+    id: 'mode', title: 'How do you mostly want to use Life’s Assistant?', kicker: 'YOUR MODE',
+    description: 'You can change this later.',
   },
   {
-    id: 'help',
-    title: 'What should it help carry?',
-    kicker: 'YOUR WORLD',
-    description: 'Choose the areas where you want Life’s Assistant to be useful most often.',
+    id: 'slips', title: 'What do you most often forget or let sit too long?', kicker: 'YOUR PRIORITIES',
+    description: 'We’ll prioritize these in Life Radar. Choose 1–3.',
   },
   {
-    id: 'style',
-    title: 'How should it talk to you?',
-    kicker: 'COMMUNICATION',
-    description: 'You can change this later, but the first conversation should already feel right.',
+    id: 'capture', title: 'How do you usually capture things?', kicker: 'CAPTURE',
+    description: 'Optional. We’ll lean into this later.',
   },
   {
-    id: 'memory',
-    title: 'Give it one thing worth remembering.',
-    kicker: 'MEMORY',
-    description: 'Optional. Save a person, preference, rule, routine, or fact that should survive future chats.',
-  },
-  {
-    id: 'approval',
-    title: 'You stay in control.',
-    kicker: 'ACTIONS',
-    description: 'External actions should be clear, intentional, and verifiable.',
+    id: 'confirm', title: 'You’re set.', kicker: 'READY',
+    description: 'Here’s what Life’s Assistant will prioritize for you.',
   },
 ];
 
@@ -61,29 +37,21 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   onStepChange,
 }) => {
   const [stepIndex, setStepIndex] = useState(0);
-  const [workspaceName, setWorkspaceName] = useState('My Life');
-  const [helpAreas, setHelpAreas] = useState<string[]>([]);
-  const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed'>('balanced');
-  const [memory, setMemory] = useState('');
-  const [approvalFirst, setApprovalFirst] = useState(true);
+  const [mode, setMode] = useState<LifeMode | null>(null);
+  const [primarySlips, setPrimarySlips] = useState<string[]>([]);
+  const [capturePref, setCapturePref] = useState<CapturePreference>('');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
 
   const step = steps[stepIndex];
   const progress = ((stepIndex + 1) / steps.length) * 100;
 
-  const canContinue = useMemo(() => {
-    if (step.id === 'workspace') return Boolean(workspaceName.trim());
-    if (step.id === 'help') return helpAreas.length > 0;
-    return true;
-  }, [helpAreas.length, step.id, workspaceName]);
+  const canContinue = step.id === 'mode' ? mode !== null : step.id !== 'slips' || (primarySlips.length > 0 && primarySlips.length <= 3);
 
-  const toggleHelpArea = (item: string) => {
-    setHelpAreas((current) =>
-      current.includes(item)
-        ? current.filter((value) => value !== item)
-        : current.concat(item)
-    );
+  const toggleSlip = (item: string) => {
+    setPrimarySlips((current) => item === 'unsure'
+      ? current.includes(item) ? [] : ['unsure']
+      : current.includes(item) ? current.filter((value) => value !== item && value !== 'unsure') : current.includes('unsure') ? [item] : current.length >= 3 ? current : [...current, item]);
   };
 
   const next = async () => {
@@ -100,54 +68,37 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
     setStatus('Saving your workspace…');
 
     try {
-      const preferences = {
-        assistantName: "Life's Assistant",
-        tone: responseStyle,
-        memoryEnabled: true,
-        approvalFirst,
-        helpAreas,
-        updatedAt: Date.now(),
+      if (!mode) throw new Error('Choose a mode to continue.');
+      const completedAt = new Date().toISOString();
+      const choices = normalizeLifePreferences({ mode, primary_slips: primarySlips, capture_pref: capturePref });
+      const profile = {
+        mode: choices.mode,
+        primary_slips: choices.primary_slips,
+        capture_pref: capturePref || null,
+        onboarding_completed_at: completedAt,
+        tool_overrides: { pinned: [], hidden: [] },
       };
 
+      await firebaseBackend.updateUserProfile(userId, profile);
       try {
-        await firebaseBackend.saveDraft('assistant-preferences', preferences);
-      } catch {
-        localStorage.setItem(
-          'lifes-assistant-preferences:' + userId,
-          JSON.stringify({
-            assistantName: "Life's Assistant",
-            tone: responseStyle,
-            memoryEnabled: true,
-            compactMode: false,
-            timezone: 'America/New_York',
-          })
-        );
+        await firebaseBackend.saveDraft('assistant-preferences', profile);
+      } catch (error) {
+        console.warn('Life preferences were saved, but the compatibility copy could not be updated:', error);
       }
-
-      if (memory.trim()) {
-        try {
-          const id = await firebaseBackend.saveBusinessRecord('memory', {
-            text: memory.trim(),
-            category: 'General',
-          });
-          await firebaseBackend.trackEvent('memory.saved', {
-            recordId: id,
-            category: 'General',
-            preview: memory.trim().slice(0, 120),
-          });
-        } catch {
-          // Onboarding still completes if optional cloud memory is unavailable.
-        }
+      try {
+        localStorage.setItem(`lifes-assistant-preferences:${userId}`, JSON.stringify(profile));
+      } catch (error) {
+        console.warn('Life preferences were saved to the account, but not to local storage:', error);
       }
 
       onComplete?.({
         timestamp: Date.now(),
-        workspaceName: workspaceName.trim(),
-        businessName: workspaceName.trim(),
-        businessType: helpAreas.includes('Work & business') ? 'life-and-work' : 'personal',
-        helpAreas,
-        responseStyle,
-        approvalFirst,
+        workspaceName: 'My Life',
+        businessName: 'My Life',
+        businessType: mode === 'business' ? 'business' : mode === 'everyday' ? 'personal' : 'mix',
+        mode,
+        primary_slips: choices.primary_slips,
+        capture_pref: capturePref || null,
       });
     } catch {
       setStatus('I could not save the setup. Try again.');
@@ -192,88 +143,53 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
             <p>{step.description}</p>
           </div>
 
-          {step.id === 'workspace' && (
-            <div className="field-block">
-              <label htmlFor="workspace-name">Workspace name</label>
-              <input
-                id="workspace-name"
-                value={workspaceName}
-                onChange={(event) => setWorkspaceName(event.target.value)}
-                placeholder="My Life"
-                autoFocus
-                maxLength={60}
-              />
-              <small>Examples: My Life, TJ&apos;s Workspace, Work + Home.</small>
-            </div>
-          )}
-
-          {step.id === 'help' && (
+          {step.id === 'mode' && (
             <div className="option-grid">
-              {HELP_OPTIONS.map((item) => (
-                <button
-                  type="button"
-                  key={item}
-                  className={helpAreas.includes(item) ? 'option selected' : 'option'}
-                  onClick={() => toggleHelpArea(item)}
-                >
-                  <span className="option-mark">{helpAreas.includes(item) ? '✓' : '+'}</span>
-                  <span>{item}</span>
+              {([
+                ['everyday', 'Everyday / Personal', 'Follow-ups, appointments, home & admin'], ['business', 'Business / Freelance / Contractor', 'Quotes, clients, projects, materials'], ['mix', 'Mix of both', 'A bit of personal and business work'],
+              ] as Array<[LifeMode, string, string]>).map(([value, label, description]) => (
+                <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => setMode(value)} aria-pressed={mode === value}>
+                  <span className="option-mark">{mode === value ? '✓' : '+'}</span><span><b>{label}</b><small className="option-description">{description}</small></span>
                 </button>
               ))}
             </div>
           )}
 
-          {step.id === 'style' && (
-            <div className="style-grid">
-              {[
-                ['concise', 'Concise', 'Short, direct, action-focused.'],
-                ['balanced', 'Balanced', 'Enough detail without burying the answer.'],
-                ['detailed', 'Detailed', 'More explanation, structure, and context.'],
-              ].map(([value, title, detail]) => (
+          {step.id === 'slips' && (
+            <div className="option-grid">
+              {PRIMARY_SLIPS.map((item) => (
                 <button
-                  key={value}
                   type="button"
-                  className={responseStyle === value ? 'style-option selected' : 'style-option'}
-                  onClick={() => setResponseStyle(value as typeof responseStyle)}
+                  key={item.id}
+                  className={primarySlips.includes(item.id) ? 'option selected' : 'option'}
+                  onClick={() => toggleSlip(item.id)}
+                  aria-pressed={primarySlips.includes(item.id)}
                 >
-                  <strong>{title}</strong>
-                  <small>{detail}</small>
+                  <span className="option-mark">{primarySlips.includes(item.id) ? '✓' : '+'}</span>
+                  <span>{item.label}</span>
                 </button>
               ))}
             </div>
           )}
 
-          {step.id === 'memory' && (
-            <div className="field-block">
-              <label htmlFor="memory">Always remember…</label>
-              <textarea
-                id="memory"
-                value={memory}
-                onChange={(event) => setMemory(event.target.value)}
-                placeholder="Example: Allen likes short estimates with labor and materials broken out separately."
-                maxLength={700}
-              />
-              <small>This is optional and can be edited later in Memory.</small>
+          {step.id === 'capture' && (
+            <div className="option-grid">
+              {([
+                ['chat', 'Chat / type'], ['voice', 'Voice'], ['forward', 'Forward emails or notes later'],
+              ] as Array<[Exclude<CapturePreference, ''>, string]>).map(([value, label]) => (
+                <button type="button" key={value} className={capturePref === value ? 'option selected' : 'option'} onClick={() => setCapturePref(value)} aria-pressed={capturePref === value}>
+                  <span className="option-mark">{capturePref === value ? '✓' : '+'}</span><span>{label}</span>
+                </button>
+              ))}
+              <button type="button" className={!capturePref ? 'skip-option selected' : 'skip-option'} onClick={() => setCapturePref('')}>No preference</button>
             </div>
           )}
 
-          {step.id === 'approval' && (
-            <div className="approval-card">
-              <div className="shield">◇</div>
-              <div>
-                <strong>Approval-first external actions</strong>
-                <p>
-                  Email, purchases, scheduling, account changes, and other external actions should require a clear confirmation before execution.
-                </p>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={approvalFirst}
-                  onChange={(event) => setApprovalFirst(event.target.checked)}
-                />
-                <span />
-              </label>
+          {step.id === 'confirm' && (
+            <div className="confirmation-card">
+              <span className="confirm-check">✓</span>
+              <p>Got it. I’ll prioritize <strong>{mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'}</strong> and surface things related to <strong>{primarySlips.includes('unsure') ? 'a bit of everything' : primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ')}</strong>.</p>
+              <small>{capturePref ? `Capture preference: ${capturePref === 'forward' ? 'forward emails or notes later' : capturePref}.` : 'Capture preference skipped.'} You can change this anytime in Settings.</small>
             </div>
           )}
 
@@ -281,8 +197,9 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
 
           <footer>
             <button className="back" type="button" onClick={back} disabled={stepIndex === 0 || saving}>Back</button>
+            {step.id === 'capture' && <button className="back" type="button" onClick={() => { setCapturePref(''); void next(); }} disabled={saving}>Skip</button>}
             <button className="next" type="button" onClick={next} disabled={!canContinue || saving}>
-              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Enter Life’s Assistant' : 'Continue'}
+              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Go to Life’s Assistant' : 'Continue'}
             </button>
           </footer>
         </main>
@@ -438,6 +355,13 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           text-align: left;
         }
         .option.selected { border-color: #666; background: #303030; color: #f0f0f0; }
+        .option-description { display: block; margin-top: 3px; color: #828282; font-size: .62rem; }
+        .skip-option { min-height: 42px; border: 1px solid #343434; border-radius: 11px; padding: 0 13px; background: transparent; color: #999; cursor: pointer; }
+        .skip-option.selected { border-color: #6d8276; color: #dce9df; }
+        .confirmation-card { margin-top: 28px; border: 1px solid #34443a; border-radius: 16px; padding: 20px; background: #202a24; }
+        .confirm-check { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #314b3b; color: #a7e1b8; font-weight: 800; }
+        .confirmation-card p { color: #d1d8d2; font-size: .9rem; line-height: 1.6; }
+        .confirmation-card small { color: #8e9b91; font-size: .68rem; line-height: 1.5; }
         .option-mark {
           width: 25px;
           height: 25px;

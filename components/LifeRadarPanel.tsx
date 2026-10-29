@@ -7,6 +7,7 @@ import {
   type OpenLoop,
 } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
+import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
 
 interface LifeRadarPanelProps {
   userId: string;
@@ -40,12 +41,6 @@ function timeAgo(timestamp: number): string {
   return value + (value === 1 ? ' day ago' : ' days ago');
 }
 
-function priorityWeight(priority: OpenLoop['priority']): number {
-  if (priority === 'high') return 3;
-  if (priority === 'medium') return 2;
-  return 1;
-}
-
 export default function LifeRadarPanel({
   userId,
   onNavigate,
@@ -54,6 +49,7 @@ export default function LifeRadarPanel({
   const [loops, setLoops] = useState<OpenLoop[]>([]);
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
   const [status, setStatus] = useState('Connecting Life Radar…');
+  const [preferences, setPreferences] = useState<LifePreferences>(DEFAULT_LIFE_PREFERENCES);
 
   useEffect(() => {
     let mounted = true;
@@ -64,16 +60,18 @@ export default function LifeRadarPanel({
       try {
         await firebaseBackend.initialize();
 
-        const [initialContinuity, initialLoops] = await Promise.all([
+        const [initialContinuity, initialLoops, initialProfile] = await Promise.all([
           firebaseBackend.getContinuityState(),
           firebaseBackend.getOpenLoops(50),
+          firebaseBackend.getUserProfile(userId),
         ]);
 
         if (!mounted) return;
 
         setContinuity(initialContinuity);
         setLoops(initialLoops);
-        setStatus('Live across devices. Workspace Radar scans in the background.');
+        setPreferences(normalizeLifePreferences(initialProfile));
+        setStatus('Based on saved tasks, projects, quotes, drafts, and chat follow-ups. Email, calendar, and bank feeds are not scanned yet.');
 
         unsubscribeLoops = firebaseBackend.onOpenLoopsChange((next) => {
           if (mounted) setLoops(next);
@@ -113,28 +111,16 @@ export default function LifeRadarPanel({
         return true;
       })
       .sort((a, b) => {
-        const attentionWeight = (loop: OpenLoop) => {
-          let weight = priorityWeight(loop.priority);
-
-          if (loop.status === 'waiting') {
-            const waitingAge = now - loop.createdAt;
-            if (waitingAge >= 14 * DAY_MS) weight += 2;
-            else if (waitingAge >= 7 * DAY_MS) weight += 1;
-          }
-
-          if (loop.dueAt && loop.dueAt < now) weight += 1;
-          return weight;
-        };
-
-        const attentionDiff = attentionWeight(b) - attentionWeight(a);
+        const attentionDiff = scoreRadarItem(b, preferences, now) - scoreRadarItem(a, preferences, now);
         if (attentionDiff) return attentionDiff;
         return b.updatedAt - a.updatedAt;
       })
-      .slice(0, 5);
-  }, [loops]);
+  }, [loops, preferences]);
+  const visibleLoops = activeLoops.slice(0, 5);
+  const moreLoops = activeLoops.slice(5);
 
   const riskyCount = activeLoops.filter((loop) => {
-    if (loop.priority === 'high') return true;
+    if (loop.priority === 'high' || loop.userMarkedImportant) return true;
     if (loop.dueAt && loop.dueAt < Date.now()) return true;
     return loop.status === 'waiting' && Date.now() - loop.createdAt >= 7 * DAY_MS;
   }).length;
@@ -143,8 +129,10 @@ export default function LifeRadarPanel({
   const resolve = async (id: string) => {
     try {
       await firebaseBackend.resolveOpenLoop(id);
+      setStatus('Marked resolved.');
     } catch (error) {
       console.warn('Could not resolve Life Radar item:', error);
+      setStatus('Could not resolve that item. It is still open.');
     }
   };
 
@@ -154,8 +142,10 @@ export default function LifeRadarPanel({
         id,
         Date.now() + 24 * 60 * 60 * 1000
       );
+      setStatus('Snoozed until tomorrow.');
     } catch (error) {
       console.warn('Could not snooze Life Radar item:', error);
+      setStatus('Could not snooze that item. It is still in your list.');
     }
   };
 
@@ -191,9 +181,36 @@ export default function LifeRadarPanel({
       });
 
       await firebaseBackend.resolveOpenLoop(loop.id);
+      setStatus('Task saved. The Radar item was resolved.');
     } catch (error) {
       console.warn('Could not turn Life Radar item into a task:', error);
+      setStatus('Could not complete the action. Check Tasks before trying again.');
     }
+  };
+
+  const markImportant = async (loop: OpenLoop) => {
+    const signal = loop.linkedView ? `view:${loop.linkedView}` : '';
+    const next = {
+      ...preferences,
+      important_signals: signal
+        ? [...new Set([...(preferences.important_signals || []), signal])]
+        : preferences.important_signals || [],
+    };
+    try {
+      await firebaseBackend.updateOpenLoop(loop.id, { userMarkedImportant: !loop.userMarkedImportant });
+      setPreferences(next);
+      await firebaseBackend.updateUserProfile(userId, next);
+      await firebaseBackend.saveDraft('assistant-preferences', next);
+      setStatus('Saved. Similar items will rank higher.');
+    } catch {
+      setStatus('Could not save that importance preference.');
+    }
+  };
+
+  const handleLoop = (loop: OpenLoop) => {
+    const view = suggestedRadarView(loop);
+    if (view === 'chat') localStorage.setItem('assistant_launch_prompt:' + userId, loop.nextAction || loop.title);
+    onNavigate(view);
   };
 
   const resume = () => {
@@ -224,7 +241,7 @@ export default function LifeRadarPanel({
       {topPriority && (
         <button
           className="top-priority-card"
-          onClick={() => onNavigate(topPriority.linkedView || 'tasks')}
+          onClick={() => handleLoop(topPriority)}
         >
           <div>
             <span>TOP PRIORITY</span>
@@ -262,8 +279,11 @@ export default function LifeRadarPanel({
             <div>
               <strong>Radar is clear.</strong>
               <p>
-                Radar scans Chat plus your workspace for unfinished commitments,
-                due-soon tasks, stale quotes, stalled projects, and abandoned drafts.
+                {preferences.mode === 'business'
+                  ? 'No client follow-ups, quotes, or project next steps need attention right now.'
+                  : preferences.mode === 'everyday'
+                    ? 'No appointments, personal follow-ups, or everyday tasks need attention right now.'
+                    : 'No personal or business follow-ups need attention right now.'}
               </p>
             </div>
             <button onClick={() => onNavigate('chat')}>
@@ -271,7 +291,7 @@ export default function LifeRadarPanel({
             </button>
           </div>
         ) : (
-          activeLoops.map((loop) => {
+          visibleLoops.map((loop) => {
             const sourceOpen = expandedSourceId === loop.id;
             const waitingDays =
               loop.status === 'waiting'
@@ -301,6 +321,7 @@ export default function LifeRadarPanel({
                       <span>Next:</span> {loop.nextAction}
                     </p>
                   )}
+                  {!loop.nextAction && <p className="next-action"><span>Next:</span> Choose a next step.</p>}
 
                   {sourceOpen && loop.sourceExcerpt && (
                     <div className="source-box">
@@ -313,7 +334,7 @@ export default function LifeRadarPanel({
                 <div className="loop-actions">
                   <button
                     className="handle"
-                    onClick={() => onNavigate(loop.linkedView || 'tasks')}
+                    onClick={() => handleLoop(loop)}
                   >
                     Handle it
                   </button>
@@ -322,6 +343,7 @@ export default function LifeRadarPanel({
                   )}
                   <button onClick={() => snooze(loop.id)}>Tomorrow</button>
                   <button onClick={() => resolve(loop.id)}>Resolve</button>
+                  <button aria-pressed={Boolean(loop.userMarkedImportant)} onClick={() => void markImportant(loop)}>{loop.userMarkedImportant ? 'Important ✓' : 'Mark important'}</button>
                   {loop.sourceExcerpt && (
                     <button
                       className="why"
@@ -338,6 +360,19 @@ export default function LifeRadarPanel({
               </article>
             );
           })
+        )}
+        {moreLoops.length > 0 && (
+          <details className="more-loops">
+            <summary>More ({moreLoops.length})</summary>
+            <div className="loop-list">
+              {moreLoops.map((loop) => (
+                <article key={loop.id} className={'loop-card ' + loop.priority}>
+                  <div className="loop-main"><div className="loop-state"><span className={'priority-dot ' + loop.priority} />{loop.status === 'waiting' ? 'WAITING · ' + Math.max(0, Math.floor((Date.now() - loop.createdAt) / DAY_MS)) + 'D' : 'OPEN'}</div><h3>{loop.title}</h3><p className="next-action"><span>Next:</span> {loop.nextAction || 'Choose a next step.'}</p></div>
+                  <div className="loop-actions"><button className="handle" onClick={() => handleLoop(loop)}>Handle it</button><button onClick={() => void snooze(loop.id)}>Tomorrow</button><button onClick={() => void resolve(loop.id)}>Resolve</button></div>
+                </article>
+              ))}
+            </div>
+          </details>
         )}
       </div>
 

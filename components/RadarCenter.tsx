@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
+import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
 
 interface RadarCenterProps {
   userId: string;
@@ -10,26 +11,6 @@ interface RadarCenterProps {
 }
 
 type Filter = 'active' | 'waiting' | 'snoozed' | 'resolved' | 'all';
-
-function priorityWeight(priority: OpenLoop['priority']): number {
-  if (priority === 'high') return 3;
-  if (priority === 'medium') return 2;
-  return 1;
-}
-
-function attentionWeight(loop: OpenLoop): number {
-  const now = Date.now();
-  let weight = priorityWeight(loop.priority);
-
-  if (loop.status === 'waiting') {
-    const age = now - loop.createdAt;
-    if (age >= 14 * DAY_MS) weight += 2;
-    else if (age >= 7 * DAY_MS) weight += 1;
-  }
-
-  if (loop.dueAt && loop.dueAt < now) weight += 1;
-  return weight;
-}
 
 function formatAge(timestamp: number): string {
   const days = Math.floor(Math.max(0, Date.now() - timestamp) / DAY_MS);
@@ -59,6 +40,7 @@ export default function RadarCenter({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [status, setStatus] = useState('Loading Radar…');
   const [scanning, setScanning] = useState(false);
+  const [preferences, setPreferences] = useState<LifePreferences>(DEFAULT_LIFE_PREFERENCES);
 
   useEffect(() => {
     let mounted = true;
@@ -67,10 +49,11 @@ export default function RadarCenter({
     const connect = async () => {
       try {
         await firebaseBackend.initialize();
-        const initial = await firebaseBackend.getOpenLoops(100);
+        const [initial, profile] = await Promise.all([firebaseBackend.getOpenLoops(100), firebaseBackend.getUserProfile(userId)]);
         if (!mounted) return;
 
         setLoops(initial);
+        setPreferences(normalizeLifePreferences(profile));
         setStatus('Radar is live across your signed-in devices.');
         unsubscribe = firebaseBackend.onOpenLoopsChange((next) => {
           if (mounted) setLoops(next);
@@ -132,11 +115,11 @@ export default function RadarCenter({
       })
       .sort((a, b) => {
         if (filter === 'resolved') return b.updatedAt - a.updatedAt;
-        const attention = attentionWeight(b) - attentionWeight(a);
+        const attention = scoreRadarItem(b, preferences) - scoreRadarItem(a, preferences);
         if (attention) return attention;
         return b.updatedAt - a.updatedAt;
       });
-  }, [filter, loops]);
+  }, [filter, loops, preferences]);
 
   const scanNow = () => {
     setScanning(true);
@@ -191,7 +174,7 @@ export default function RadarCenter({
   };
 
   const top = loops.filter(isVisibleActive).sort((a, b) => {
-    const attention = attentionWeight(b) - attentionWeight(a);
+    const attention = scoreRadarItem(b, preferences) - scoreRadarItem(a, preferences);
     if (attention) return attention;
     return b.updatedAt - a.updatedAt;
   })[0];
@@ -243,7 +226,7 @@ export default function RadarCenter({
             <strong>{top.title}</strong>
             <small>{top.nextAction || top.summary || 'This is Radar’s top current signal.'}</small>
           </div>
-          <button onClick={() => onNavigate(top.linkedView || 'tasks')}>
+          <button onClick={() => onNavigate(suggestedRadarView(top))}>
             Open →
           </button>
         </section>
@@ -314,7 +297,7 @@ export default function RadarCenter({
                     <>
                       <button
                         className="primary"
-                        onClick={() => onNavigate(loop.linkedView || 'tasks')}
+                        onClick={() => onNavigate(suggestedRadarView(loop))}
                       >
                         Handle it
                       </button>

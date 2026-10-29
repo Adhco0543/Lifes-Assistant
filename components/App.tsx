@@ -107,6 +107,12 @@ export const App: React.FC = () => {
 
   const loadProfile = useCallback(async (targetUserId: string) => {
     try {
+      const userPreferences = await firebaseBackend.getUserProfile(targetUserId);
+      if (!userPreferences || (userPreferences.mode !== 'everyday' && userPreferences.mode !== 'business' && userPreferences.mode !== 'mix')) {
+        setCurrentView('onboarding');
+        return;
+      }
+
       const cloudProfile = await firebaseBackend.getLatestDraft('workspace-profile');
       if (cloudProfile?.businessName) {
         const nextBusinessName = String(cloudProfile.businessName);

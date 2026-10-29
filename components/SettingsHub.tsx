@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { normalizeLifePreferences, PRIMARY_SLIPS, MODE_TOOL_ORDER, type LifeMode, type CapturePreference } from '../lib/lifePreferences';
 
 type SettingCategory = 'general' | 'assistant' | 'appearance' | 'privacy' | 'integrations';
 
@@ -15,6 +16,10 @@ type Preferences = {
   memoryEnabled: boolean;
   compactMode: boolean;
   timezone: string;
+  mode: LifeMode;
+  primary_slips: string[];
+  capture_pref: CapturePreference;
+  tool_overrides: { pinned: string[]; hidden: string[] };
 };
 
 const CATEGORIES: Array<{ id: SettingCategory; label: string; icon: string; note: string }> = [
@@ -36,6 +41,10 @@ const DEFAULTS: Preferences = {
   memoryEnabled: true,
   compactMode: false,
   timezone: 'America/New_York',
+  mode: 'mix',
+  primary_slips: [],
+  capture_pref: '',
+  tool_overrides: { pinned: [], hidden: [] },
 };
 
 export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
@@ -78,9 +87,16 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
       }
 
       try {
-        const cloudPrefs = await firebaseBackend.getLatestDraft('assistant-preferences');
+        const [cloudPrefs, lifeProfile] = await Promise.all([
+          firebaseBackend.getLatestDraft('assistant-preferences'),
+          firebaseBackend.getUserProfile(userId),
+        ]);
         if (!active) return;
 
+        const lifeSource = lifeProfile || cloudPrefs;
+        const life = lifeSource && ('mode' in lifeSource || 'primary_slips' in lifeSource || 'capture_pref' in lifeSource)
+          ? normalizeLifePreferences(lifeSource)
+          : normalizeLifePreferences(localPrefs);
         setPrefs({
           ...localPrefs,
           assistantName: normalizeAssistantName(cloudPrefs?.assistantName || localPrefs.assistantName),
@@ -102,6 +118,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
             typeof cloudPrefs?.timezone === 'string' && cloudPrefs.timezone.trim()
               ? cloudPrefs.timezone
               : localPrefs.timezone,
+          ...life,
         });
       } catch {
         if (active) setPrefs(localPrefs);
@@ -130,7 +147,17 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
         memoryEnabled: prefs.memoryEnabled,
         compactMode: prefs.compactMode,
         timezone: prefs.timezone,
+        mode: prefs.mode,
+        primary_slips: prefs.primary_slips,
+        capture_pref: prefs.capture_pref,
+        tool_overrides: prefs.tool_overrides,
         updatedAt: Date.now(),
+      });
+      await firebaseBackend.updateUserProfile(userId, {
+        mode: prefs.mode,
+        primary_slips: prefs.primary_slips,
+        capture_pref: prefs.capture_pref || null,
+        tool_overrides: prefs.tool_overrides,
       });
 
       setSaved(true);
@@ -153,7 +180,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
         <header>
           <span className="eyebrow">SETTINGS</span>
           <h1>Make the assistant yours.</h1>
-          <p>Only settings that actually do something are shown here. Placeholder security badges and fake connected apps have been removed.</p>
+          <p>Change your mode, priorities, tool pins, and privacy choices here.</p>
         </header>
 
         <div className="settings-grid">
@@ -205,6 +232,19 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
             {active === 'assistant' && (
               <div className="section-content">
                 <div className="section-title"><span className="eyebrow">ASSISTANT</span><h2>How it should work with you</h2></div>
+                <label className="field"><span>Mostly use it for</span><select value={prefs.mode} onChange={(event) => update('mode', event.target.value as LifeMode)}><option value="everyday">Everyday / Personal</option><option value="business">Business / Freelance / Contractor</option><option value="mix">Mix of both</option></select></label>
+                <div className="field"><span>What tends to slip?</span><div className="preference-list">{PRIMARY_SLIPS.map((slip) => {
+                  const selected = prefs.primary_slips.includes(slip.id);
+                  const toggle = () => update('primary_slips', slip.id === 'unsure' ? selected ? [] : ['unsure'] : selected ? prefs.primary_slips.filter((item) => item !== slip.id && item !== 'unsure') : prefs.primary_slips.includes('unsure') ? [slip.id] : prefs.primary_slips.length >= 3 ? prefs.primary_slips : [...prefs.primary_slips, slip.id]);
+                  return <button key={slip.id} type="button" className={selected ? 'preference-chip selected' : 'preference-chip'} aria-pressed={selected} onClick={toggle}>{slip.label}</button>;
+                })}</div></div>
+                <label className="field"><span>Capture preference</span><select value={prefs.capture_pref} onChange={(event) => update('capture_pref', event.target.value as CapturePreference)}><option value="">Not set</option><option value="chat">Chat / type</option><option value="voice">Voice</option><option value="forward">Forward emails or notes later</option></select></label>
+                <div className="field"><span>Pin or hide tools</span><small>Pinned tools move to the top. Hidden tools leave the home grid.</small><div className="tool-overrides">{MODE_TOOL_ORDER.mix.map((tool) => {
+                  const pinned = prefs.tool_overrides.pinned.includes(tool);
+                  const hidden = prefs.tool_overrides.hidden.includes(tool);
+                  const updateOverrides = (next: { pinned: string[]; hidden: string[] }) => update('tool_overrides', next);
+                  return <div className="tool-override" key={tool}><strong>{tool === 'brief' ? 'Focus Brief' : tool === 'radar' ? 'Life Radar' : tool === 'email' ? 'Email drafts' : tool[0].toUpperCase() + tool.slice(1)}</strong><button type="button" aria-pressed={pinned} onClick={() => updateOverrides({ ...prefs.tool_overrides, pinned: pinned ? prefs.tool_overrides.pinned.filter((item) => item !== tool) : [...prefs.tool_overrides.pinned, tool] })}>{pinned ? 'Unpin' : 'Pin'}</button><button type="button" aria-pressed={hidden} onClick={() => updateOverrides({ ...prefs.tool_overrides, hidden: hidden ? prefs.tool_overrides.hidden.filter((item) => item !== tool) : [...prefs.tool_overrides.hidden, tool] })}>{hidden ? 'Show' : 'Hide'}</button></div>;
+                })}</div><button type="button" className="danger-button" onClick={() => update('tool_overrides', { pinned: [], hidden: [] })}>Reset to mode defaults</button></div>
                 <label className="field">
                   <span>Assistant name</span>
                   <input value={prefs.assistantName} maxLength={30} onChange={(event) => update('assistantName', event.target.value)} />
@@ -297,6 +337,13 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
         .field > span, .switch-row strong { font-size: .75rem; font-weight: 650; }
         .field input, .field select { min-height: 40px; border: 1px solid #414141; border-radius: 9px; background: #222; color: #e8e8e8; padding: 0 10px; outline: none; }
         .field small, .switch-row small { color: #6f6f6f; font-size: .64rem; line-height: 1.4; }
+        .preference-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+        .preference-chip { min-height: 34px; padding: 0 10px; border: 1px solid #3c3c3c; border-radius: 999px; color: #aaa; background: #242424; font: inherit; font-size: .66rem; cursor: pointer; }
+        .preference-chip.selected { border-color: #5c7564; color: #cbe3d2; background: #253129; }
+        .tool-overrides { display: grid; gap: 6px; margin-top: 4px; }
+        .tool-override { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 6px; border-top: 1px solid #353535; padding-top: 6px; }
+        .tool-override strong { color: #aaa; font-size: .65rem; }
+        .tool-override button { min-height: 30px; padding: 0 9px; border: 1px solid #414141; border-radius: 8px; color: #aaa; background: #252525; font-size: .61rem; cursor: pointer; }
         .switch-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; background: #2b2b2b; border: 1px solid #353535; border-radius: 13px; }
         .switch-row strong, .switch-row small { display: block; }
         .switch-row small { margin-top: 3px; }

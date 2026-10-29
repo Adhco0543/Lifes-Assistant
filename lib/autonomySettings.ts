@@ -83,8 +83,8 @@ export const DEFAULT_AUTONOMY_SETTINGS: AutonomySettings = {
     enabled: false,
   },
 
-  backgroundMode: true,
-  backgroundModeBehavior: "auto_execute",
+  backgroundMode: false,
+  backgroundModeBehavior: "draft_only",
 
   autoTaskTypes: ["job_search", "materials", "customer_lookup"],
   requiresApprovalForTasks: ["email", "quote"],

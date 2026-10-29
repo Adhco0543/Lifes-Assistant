@@ -31,6 +31,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { getFirestore } from "firebase/firestore";
+import { buildLifeProfileDocument } from "./lifePreferences";
 
 export interface ChatAttachmentMeta {
   name: string;
@@ -102,6 +103,7 @@ export interface OpenLoop {
   sourceExcerpt?: string;
   linkedView?: string;
   snoozedUntil?: number | null;
+  userMarkedImportant?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -534,6 +536,36 @@ class FirebaseBackend {
     return (snapshot.data().data as Record<string, unknown>) ?? null;
   }
 
+  async updateUserProfile(userId: string, data: Record<string, unknown>): Promise<void> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+    if (!user) throw new Error("Authentication required to save Life preferences.");
+    if (user.uid !== userId) throw new Error("Cannot update another user's profile.");
+    const profileRef = doc(db, "users", userId, "settings", "lifeProfile");
+    const existing = await getDoc(profileRef);
+    const previous = existing.exists() ? existing.data() : {};
+    await setDoc(profileRef, buildLifeProfileDocument(data, previous));
+  }
+
+  async getUserProfile(userId: string): Promise<Record<string, unknown> | null> {
+    const { db, auth } = await this.getServices();
+    const user = auth.currentUser;
+    if (!user) return null;
+    if (user.uid !== userId) throw new Error("Cannot read another user's profile.");
+    const snapshot = await getDoc(doc(db, "users", userId, "settings", "lifeProfile"));
+    return snapshot.exists() ? snapshot.data() : null;
+  }
+
+  async saveLifeProfile(data: Record<string, unknown>): Promise<void> {
+    const userId = this.getUserId();
+    return this.updateUserProfile(userId, data);
+  }
+
+  async getLifeProfile(): Promise<Record<string, unknown> | null> {
+    const userId = this.getUserId();
+    return this.getUserProfile(userId);
+  }
+
   async testCloudSync(): Promise<{ ok: boolean; checkedAt: number }> {
     const { db, auth } = await this.getServices();
     const user = auth.currentUser;
@@ -776,6 +808,7 @@ class FirebaseBackend {
           : undefined,
         linkedView: data.linkedView ? String(data.linkedView) : undefined,
         snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
+        userMarkedImportant: data.userMarkedImportant === true,
         createdAt: Number(data.createdAt || Date.now()),
         updatedAt: Number(data.updatedAt || Date.now()),
       } as OpenLoop;
@@ -821,6 +854,7 @@ class FirebaseBackend {
             : undefined,
           linkedView: data.linkedView ? String(data.linkedView) : undefined,
           snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
+          userMarkedImportant: data.userMarkedImportant === true,
           createdAt: Number(data.createdAt || Date.now()),
           updatedAt: Number(data.updatedAt || Date.now()),
         } as OpenLoop;

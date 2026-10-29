@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import LifeRadarPanel from './LifeRadarPanel';
+import { DEFAULT_LIFE_PREFERENCES, MODE_TOOL_ORDER, MODE_PLACEHOLDERS, TRY_ASKING_BY_MODE, getVisibleTools, normalizeLifePreferences, type LifePreferences } from '../lib/lifePreferences';
 
 interface LifeAssistantHomeProps {
   displayName?: string;
@@ -19,21 +20,17 @@ type RecentItem = {
 };
 
 const QUICK_ACTIONS = [
-  { id: 'search', icon: '⌕', title: 'Search my workspace', detail: 'Find a task, note, person, memory, quote, receipt, or conversation.' },
-  { id: 'people', icon: '◎', title: 'People I know', detail: 'Save context about family, coworkers, clients, and friends.' },
-  { id: 'projects', icon: '▦', title: 'My projects', detail: 'Keep goals, context, and status together across conversations.' },
-  { id: 'brief', icon: '◈', title: 'Build my focus brief', detail: 'Turn your saved workspace into the next three moves.' },
-  { id: 'chat', icon: '✦', title: "Ask Life's Assistant", detail: 'Plan, research, write, or think something through.' },
-  { id: 'tasks', icon: '✓', title: 'Task center', detail: 'Review work that is queued, waiting, or ready.' },
-  { id: 'quotes', icon: '▤', title: 'Build a quote', detail: 'Turn scope, labor, and materials into a clean draft.' },
-  { id: 'email', icon: '↗', title: 'Draft an email', detail: 'Write a clear message without starting from a blank page.' },
-];
-
-const TRY_ASKING = [
-  'Help me plan everything I need to get done tomorrow.',
-  'Turn these rough notes into a professional quote.',
-  'Draft a follow-up email and let me approve it before anything is sent.',
-  'Break this project into steps and tell me what I should do first.',
+  { id: 'radar', icon: '◌', title: 'Life Radar', detail: 'See the next items that need attention.' },
+  { id: 'chat', icon: '✦', title: 'Tell Life’s Assistant', detail: 'Plan, write, or tell it what happened.' },
+  { id: 'tasks', icon: '✓', title: 'Tasks', detail: 'Keep next steps simple and visible.' },
+  { id: 'memory', icon: '◉', title: 'Memory', detail: 'Keep useful context you chose to save.' },
+  { id: 'people', icon: '◎', title: 'People', detail: 'Save context about family, coworkers, and clients.' },
+  { id: 'brief', icon: '◈', title: 'Focus Brief', detail: 'Turn saved work into the next three moves.' },
+  { id: 'search', icon: '⌕', title: 'Search', detail: 'Find saved tasks, notes, people, and conversations.' },
+  { id: 'quotes', icon: '▤', title: 'Build a quote', detail: 'Turn scope, labor, and materials into a draft.' },
+  { id: 'materials', icon: '◇', title: 'Materials', detail: 'Estimate materials from a project.' },
+  { id: 'email', icon: '↗', title: 'Email drafts', detail: 'Write a message for your approval.' },
+  { id: 'projects', icon: '▦', title: 'Projects', detail: 'Keep goals, context, and status together.' },
 ];
 
 export default function LifeAssistantHome({
@@ -53,6 +50,34 @@ export default function LifeAssistantHome({
   const [command, setCommand] = useState('');
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const [recentStatus, setRecentStatus] = useState('Loading your workspace…');
+  const [preferences, setPreferences] = useState<LifePreferences>(DEFAULT_LIFE_PREFERENCES);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const [stored, cloud, lifeProfile] = await Promise.all([
+          Promise.resolve(localStorage.getItem(`lifes-assistant-preferences:${userId}`)),
+          firebaseBackend.getLatestDraft('assistant-preferences'),
+          firebaseBackend.getUserProfile(userId),
+        ]);
+        const local = stored ? JSON.parse(stored) as unknown : null;
+        const source = lifeProfile || (cloud && ('mode' in cloud || 'primary_slips' in cloud) ? cloud : local);
+        if (active) setPreferences(normalizeLifePreferences(source));
+      } catch {
+        if (active) setPreferences(DEFAULT_LIFE_PREFERENCES);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [userId]);
+
+  const orderedActions = useMemo(() => {
+    return getVisibleTools(preferences, QUICK_ACTIONS);
+  }, [preferences.mode, preferences.tool_overrides]);
+  const coreLimit = preferences.mode === 'everyday' ? 7 : 10;
+  const coreActions = orderedActions.filter((action) => MODE_TOOL_ORDER[preferences.mode].indexOf(action.id) < coreLimit || preferences.tool_overrides.pinned.includes(action.id));
+  const moreActions = orderedActions.filter((action) => !coreActions.some((core) => core.id === action.id));
 
   useEffect(() => {
     let active = true;
@@ -115,8 +140,11 @@ export default function LifeAssistantHome({
             <div className="eyebrow">YOUR PERSONAL AI WORKSPACE</div>
             <h1>{greeting}, {firstName}.</h1>
             <p>
-              Keep your conversations, drafts, tasks, and business tools in one place.
-              Life&apos;s Assistant is built to help you move work forward without making the app feel like work.
+              {preferences.mode === 'everyday'
+                ? 'Keep personal plans, people, and everyday details in one calm place.'
+                : preferences.mode === 'business'
+                  ? 'Keep client work, quotes, follow-ups, and next steps moving.'
+                  : 'Keep everyday life and business moving from one calm workspace.'}
             </p>
             <div className="hero-actions">
               <button className="primary" onClick={() => onNavigate('chat')}>Start a conversation</button>
@@ -154,7 +182,7 @@ export default function LifeAssistantHome({
               onKeyDown={(event) => {
                 if (event.key === 'Enter') launchCommand();
               }}
-              placeholder="Example: Remind me to call Allen tomorrow and draft what I should say."
+              placeholder={MODE_PLACEHOLDERS[preferences.mode]}
               aria-label="Tell Life's Assistant what you want done"
             />
             <button onClick={launchCommand} disabled={!command.trim()}>Go</button>
@@ -202,7 +230,7 @@ export default function LifeAssistantHome({
           </div>
 
           <div className="quick-grid">
-            {QUICK_ACTIONS.map((action) => (
+            {coreActions.map((action) => (
               <button key={action.id} className="quick-card" onClick={() => onNavigate(action.id)}>
                 <span className="quick-icon">{action.icon}</span>
                 <span className="quick-copy">
@@ -213,6 +241,16 @@ export default function LifeAssistantHome({
               </button>
             ))}
           </div>
+          <details className="more-tools">
+            <summary>More tools</summary>
+            <div className="quick-grid">
+              {moreActions.map((action) => (
+                <button key={action.id} className="quick-card" onClick={() => onNavigate(action.id)}>
+                  <span className="quick-icon">{action.icon}</span><span className="quick-copy"><strong>{action.title}</strong><small>{action.detail}</small></span><span className="arrow">↗</span>
+                </button>
+              ))}
+            </div>
+          </details>
         </section>
 
         <section className="lower-grid">
@@ -222,8 +260,8 @@ export default function LifeAssistantHome({
               <h3>Start naturally. No commands required.</h3>
             </div>
             <div className="prompt-list">
-              {TRY_ASKING.map((prompt) => (
-                <button key={prompt} onClick={() => onNavigate('chat')}>
+              {TRY_ASKING_BY_MODE[preferences.mode].map((prompt) => (
+                <button key={prompt} onClick={() => { localStorage.setItem('assistant_launch_prompt:' + userId, prompt); onNavigate('chat'); }}>
                   <span>“{prompt}”</span>
                   <span>→</span>
                 </button>
@@ -514,6 +552,9 @@ export default function LifeAssistantHome({
           grid-template-columns: repeat(8, minmax(0, 1fr));
           gap: 10px;
         }
+        .more-tools { margin-top: 12px; }
+        .more-tools summary { width: fit-content; color: #a6a6a6; font-size: .72rem; cursor: pointer; padding: 8px 0; }
+        .more-tools[open] .quick-grid { margin-top: 8px; }
         .quick-card {
           min-height: 142px;
           padding: 16px;

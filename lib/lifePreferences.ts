@@ -1,0 +1,197 @@
+export type LifeMode = 'everyday' | 'business' | 'mix';
+export type CapturePreference = 'chat' | 'voice' | 'forward' | '';
+
+export const PRIMARY_SLIPS = [
+  { id: 'followups', label: 'Follow-ups and replies', terms: ['follow-up', 'follow up', 'reply', 'email', 'waiting'] },
+  { id: 'quotes', label: 'Quotes, invoices, or client work', terms: ['quote', 'invoice', 'client', 'customer'] },
+  { id: 'appointments', label: 'Appointments and personal admin', terms: ['appointment', 'calendar', 'renewal', 'bill'] },
+  { id: 'projects', label: 'Projects and next steps', terms: ['project', 'next step', 'task', 'deadline'] },
+  { id: 'unsure', label: 'Not sure / a bit of everything', terms: [] },
+] as const;
+
+export type LifePreferences = {
+  mode: LifeMode;
+  primary_slips: string[];
+  capture_pref: CapturePreference;
+  important_signals?: string[];
+  tool_overrides: { pinned: string[]; hidden: string[] };
+};
+
+export type StoredLifeProfile = {
+  mode: LifeMode;
+  primary_slips: string[];
+  capture_pref: Exclude<CapturePreference, ''> | null;
+  onboarding_completed_at: string;
+  tool_overrides: { pinned: string[]; hidden: string[] };
+};
+
+export const DEFAULT_LIFE_PREFERENCES: LifePreferences = {
+  mode: 'mix',
+  primary_slips: [],
+  capture_pref: '',
+  important_signals: [],
+  tool_overrides: { pinned: [], hidden: [] },
+};
+
+export const modeConfig: Record<LifeMode, {
+  toolOrder: string[];
+  examplePrompts: string[];
+  radarWeights: Record<string, number>;
+  placeholderText: string;
+}> = {
+  everyday: {
+    toolOrder: ['radar', 'chat', 'tasks', 'people', 'memory', 'brief', 'search', 'email', 'quotes', 'materials', 'projects'],
+    examplePrompts: [
+    'Help me plan everything I need to get done tomorrow.',
+    'Draft a follow-up and let me approve it before anything is sent.',
+    'What am I forgetting this week?',
+    'Remind me to renew car registration.',
+    ],
+    radarWeights: { personal_followup: 1.5, appointment: 1.4, quote: 0.7, client_followup: 0.8, project: 1, material: 0.6, other: 1 },
+    placeholderText: 'Example: Remind me to renew my registration next week.',
+  },
+  business: {
+    toolOrder: ['radar', 'chat', 'quotes', 'email', 'materials', 'tasks', 'people', 'memory', 'brief', 'search', 'projects'],
+    examplePrompts: [
+    'Turn these rough notes into a professional quote.',
+    'Follow up on the unfinished quote for Allen.',
+    'Break this project into steps and tell me what I should do first.',
+    'Draft a follow-up email and let me approve it.',
+    ],
+    radarWeights: { personal_followup: 0.8, appointment: 0.7, quote: 1.6, client_followup: 1.5, project: 1.3, material: 1.2, other: 1 },
+    placeholderText: 'Example: Turn these notes into a quote for the client.',
+  },
+  mix: {
+    toolOrder: ['radar', 'chat', 'tasks', 'email', 'people', 'memory', 'brief', 'search', 'quotes', 'materials', 'projects'],
+    examplePrompts: [
+    'What am I forgetting this week?',
+    'Help me plan tomorrow and break this project into steps.',
+    'Draft a follow-up and let me approve it before anything is sent.',
+    ],
+    radarWeights: { personal_followup: 1.2, appointment: 1.1, quote: 1.2, client_followup: 1.2, project: 1.1, material: 0.9, other: 1 },
+    placeholderText: 'Example: Remind me to call Allen tomorrow and draft what I should say.',
+  },
+};
+
+export const MODE_TOOL_ORDER: Record<LifeMode, string[]> = {
+  everyday: modeConfig.everyday.toolOrder,
+  business: modeConfig.business.toolOrder,
+  mix: modeConfig.mix.toolOrder,
+};
+export const TRY_ASKING_BY_MODE: Record<LifeMode, string[]> = {
+  everyday: modeConfig.everyday.examplePrompts,
+  business: modeConfig.business.examplePrompts,
+  mix: modeConfig.mix.examplePrompts,
+};
+export const MODE_PLACEHOLDERS: Record<LifeMode, string> = {
+  everyday: modeConfig.everyday.placeholderText,
+  business: modeConfig.business.placeholderText,
+  mix: modeConfig.mix.placeholderText,
+};
+
+export function getVisibleTools<T extends { id: string }>(profile: Pick<LifePreferences, 'mode' | 'tool_overrides'>, tools: T[]): T[] {
+  const hidden = new Set(profile.tool_overrides.hidden);
+  const pinned = profile.tool_overrides.pinned.filter((id) => !hidden.has(id));
+  const order = modeConfig[profile.mode].toolOrder;
+  return tools.filter((tool) => !hidden.has(tool.id)).sort((a, b) => {
+    const aPinned = pinned.indexOf(a.id);
+    const bPinned = pinned.indexOf(b.id);
+    if (aPinned >= 0 || bPinned >= 0) return aPinned < 0 ? 1 : bPinned < 0 ? -1 : aPinned - bPinned;
+    const aOrder = order.indexOf(a.id);
+    const bOrder = order.indexOf(b.id);
+    return (aOrder < 0 ? Number.MAX_SAFE_INTEGER : aOrder) - (bOrder < 0 ? Number.MAX_SAFE_INTEGER : bOrder);
+  });
+}
+
+export function suggestedRadarView(item: { title: string; summary?: string; nextAction?: string; linkedView?: string }): string {
+  if (item.linkedView) return item.linkedView;
+  const text = `${item.title} ${item.summary || ''} ${item.nextAction || ''}`.toLowerCase();
+  if (/quote|invoice|estimate/.test(text)) return 'quotes';
+  if (/email|follow.?up|reply|respond|call back/.test(text)) return 'email';
+  if (/project|milestone/.test(text)) return 'projects';
+  return 'tasks';
+}
+
+export function normalizeLifePreferences(value: unknown): LifePreferences {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_LIFE_PREFERENCES;
+  const record = value as Record<string, unknown>;
+  const mode: LifeMode = record.mode === 'everyday' || record.mode === 'business' || record.mode === 'mix'
+    ? record.mode
+    : 'mix';
+  const allowed = new Set<string>(PRIMARY_SLIPS.map((slip) => slip.id));
+  const selectedSlips = Array.isArray(record.primary_slips)
+    ? [...new Set(record.primary_slips.filter((item): item is string => typeof item === 'string' && allowed.has(item)))]
+    : [];
+  const primary_slips = selectedSlips.includes('unsure') ? ['unsure'] : selectedSlips.slice(0, 3);
+  const capture_pref: CapturePreference = record.capture_pref === 'chat' || record.capture_pref === 'voice' || record.capture_pref === 'forward'
+    ? record.capture_pref
+    : '';
+  const important_signals = Array.isArray(record.important_signals)
+    ? [...new Set(record.important_signals.filter((item): item is string => typeof item === 'string' && item.length <= 80))]
+    : [];
+  const overrides = record.tool_overrides && typeof record.tool_overrides === 'object'
+    ? record.tool_overrides as Record<string, unknown>
+    : {};
+  const normalizeTools = (items: unknown) => Array.isArray(items)
+    ? [...new Set(items.filter((item): item is string => typeof item === 'string' && MODE_TOOL_ORDER.mix.includes(item)))]
+    : [];
+  const tool_overrides = { pinned: normalizeTools(overrides.pinned), hidden: normalizeTools(overrides.hidden) };
+  return { mode, primary_slips, capture_pref, important_signals, tool_overrides };
+}
+
+export function buildLifeProfileDocument(
+  value: Record<string, unknown>,
+  previous: Record<string, unknown> = {},
+  now = new Date().toISOString()
+): StoredLifeProfile {
+  const source = { ...previous, ...value };
+  const normalized = normalizeLifePreferences(source);
+  const rawTime = typeof value.onboarding_completed_at === 'string'
+    ? value.onboarding_completed_at
+    : previous.onboarding_completed_at;
+  const parsedTime = typeof rawTime === 'string' ? Date.parse(rawTime) : Number.NaN;
+  const overrides = source.tool_overrides && typeof source.tool_overrides === 'object'
+    ? source.tool_overrides as Record<string, unknown>
+    : {};
+  const rawCapture = Object.prototype.hasOwnProperty.call(value, 'capture_pref')
+    ? value.capture_pref
+    : previous.capture_pref;
+
+  return {
+    mode: normalized.mode,
+    primary_slips: normalized.primary_slips,
+    capture_pref: rawCapture === 'chat' || rawCapture === 'voice' || rawCapture === 'forward' ? rawCapture : null,
+    onboarding_completed_at: Number.isFinite(parsedTime) ? new Date(parsedTime).toISOString() : now,
+    tool_overrides: normalized.tool_overrides,
+  };
+}
+
+export function scoreRadarItem(
+  item: { title: string; summary?: string; source?: string; linkedView?: string; status?: string; priority?: string; nextAction?: string; createdAt?: number; updatedAt?: number; dueAt?: number | null; userMarkedImportant?: boolean },
+  preferences: LifePreferences,
+  now = Date.now()
+): number {
+  const text = `${item.title} ${item.summary || ''} ${item.source || ''} ${item.linkedView || ''}`.toLowerCase();
+  const ageDays = item.createdAt ? Math.max(0, (now - item.createdAt) / (24 * 60 * 60 * 1000)) : 0;
+  const risk = item.priority === 'high' || Boolean(item.dueAt && item.dueAt <= now) || (item.status === 'waiting' && ageDays >= 7) || Boolean(item.linkedView && preferences.important_signals?.includes(`view:${item.linkedView}`));
+  let score = ageDays * 0.4 + (risk ? 20 : 0) + (item.nextAction?.trim() ? 10 : 0);
+  if (item.updatedAt && now - item.updatedAt <= 48 * 60 * 60 * 1000) score += 3;
+  if (item.userMarkedImportant) score += 20;
+  if (item.linkedView && preferences.important_signals?.includes(`view:${item.linkedView}`)) score += 20;
+  let type: 'personal_followup' | 'appointment' | 'quote' | 'client_followup' | 'project' | 'material' | 'other' = 'other';
+  if (/appointment|bill|renewal|personal|calendar/.test(text)) type = 'appointment';
+  else if (/quote|invoice/.test(text)) type = 'quote';
+  else if (/client|customer/.test(text)) type = 'client_followup';
+  else if (/project|estimate/.test(text)) type = 'project';
+  else if (/material|spatial|room/.test(text)) type = 'material';
+  else if (/follow-up|follow up|reply|email|waiting/.test(text)) type = 'personal_followup';
+  score *= modeConfig[preferences.mode].radarWeights[type];
+
+  if (preferences.primary_slips.includes('unsure')) score += 15;
+  for (const slip of PRIMARY_SLIPS) {
+    if (preferences.primary_slips.includes(slip.id) && slip.terms.some((term) => text.includes(term))) {
+      score += 15;
+    }
+  }
+  return score;
+}
