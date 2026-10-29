@@ -33,45 +33,8 @@ export const DEFAULT_LIFE_PREFERENCES: LifePreferences = {
   tool_overrides: { pinned: [], hidden: [] },
 };
 
-export const modeConfig: Record<LifeMode, {
-  toolOrder: string[];
-  examplePrompts: string[];
-  radarWeights: Record<string, number>;
-  placeholderText: string;
-}> = {
-  everyday: {
-    toolOrder: ['radar', 'chat', 'tasks', 'people', 'memory', 'brief', 'search', 'email', 'quotes', 'materials', 'projects'],
-    examplePrompts: [
-    'Help me plan everything I need to get done tomorrow.',
-    'Draft a follow-up and let me approve it before anything is sent.',
-    'What am I forgetting this week?',
-    'Remind me to renew car registration.',
-    ],
-    radarWeights: { personal_followup: 1.5, appointment: 1.4, quote: 0.7, client_followup: 0.8, project: 1, material: 0.6, other: 1 },
-    placeholderText: 'Example: Remind me to renew my registration next week.',
-  },
-  business: {
-    toolOrder: ['radar', 'chat', 'quotes', 'email', 'materials', 'tasks', 'people', 'memory', 'brief', 'search', 'projects'],
-    examplePrompts: [
-    'Turn these rough notes into a professional quote.',
-    'Follow up on the unfinished quote for Allen.',
-    'Break this project into steps and tell me what I should do first.',
-    'Draft a follow-up email and let me approve it.',
-    ],
-    radarWeights: { personal_followup: 0.8, appointment: 0.7, quote: 1.6, client_followup: 1.5, project: 1.3, material: 1.2, other: 1 },
-    placeholderText: 'Example: Turn these notes into a quote for the client.',
-  },
-  mix: {
-    toolOrder: ['radar', 'chat', 'tasks', 'email', 'people', 'memory', 'brief', 'search', 'quotes', 'materials', 'projects'],
-    examplePrompts: [
-    'What am I forgetting this week?',
-    'Help me plan tomorrow and break this project into steps.',
-    'Draft a follow-up and let me approve it before anything is sent.',
-    ],
-    radarWeights: { personal_followup: 1.2, appointment: 1.1, quote: 1.2, client_followup: 1.2, project: 1.1, material: 0.9, other: 1 },
-    placeholderText: 'Example: Remind me to call Allen tomorrow and draft what I should say.',
-  },
-};
+import { modeConfig } from './modeConfig';
+export { modeConfig, getOrderedTools } from './modeConfig';
 
 export const MODE_TOOL_ORDER: Record<LifeMode, string[]> = {
   everyday: modeConfig.everyday.toolOrder,
