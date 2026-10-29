@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { updateUserProfile } from '../lib/profile';
 import { normalizeLifePreferences, PRIMARY_SLIPS, type CapturePreference, type LifeMode } from '../lib/lifePreferences';
 
 interface ProgressiveOnboardingProps {
@@ -75,7 +76,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
         tool_overrides: { pinned: [], hidden: [] },
       };
 
-      await firebaseBackend.updateUserProfile(userId, profile);
+      await updateUserProfile(userId, profile);
       void firebaseBackend.saveDraft('assistant-preferences', profile).catch(error => console.warn('Optional preferences backup failed:', error));
       try {
         localStorage.setItem(`lifes-assistant-preferences:${userId}`, JSON.stringify(profile));
@@ -144,9 +145,6 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
                   <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => {
                       setMode(value);
                       setStatus('');
-                      const nextIndex = 1;
-                      setStepIndex(nextIndex);
-                      onStepChange?.(nextIndex + 1);
                     }} aria-pressed={mode === value}>
                     <span className="option-mark">{mode === value ? '✓' : '+'}</span><span><b>{label}</b><small className="option-description">{description}</small></span>
                   </button>
