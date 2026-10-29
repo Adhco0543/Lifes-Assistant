@@ -79,17 +79,20 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
         tool_overrides: { pinned: [], hidden: [] },
       };
 
-      await firebaseBackend.updateUserProfile(userId, profile);
-      try {
-        await firebaseBackend.saveDraft('assistant-preferences', profile);
-      } catch (error) {
-        console.warn('Life preferences were saved, but the compatibility copy could not be updated:', error);
-      }
+      // Persist a device copy before leaving onboarding so a slow cloud request
+      // cannot trap the user on the final screen.
       try {
         localStorage.setItem(`lifes-assistant-preferences:${userId}`, JSON.stringify(profile));
       } catch (error) {
-        console.warn('Life preferences were saved to the account, but not to local storage:', error);
+        console.warn('Could not cache Life preferences locally:', error);
       }
+
+      // Start cloud sync, but never block the dashboard transition on it.
+      void firebaseBackend.updateUserProfile(userId, profile)
+        .then(() => firebaseBackend.saveDraft('assistant-preferences', profile))
+        .catch((error) => {
+          console.warn('Life preferences could not be synced to cloud:', error);
+        });
 
       onComplete?.({
         timestamp: Date.now(),
