@@ -541,10 +541,13 @@ class FirebaseBackend {
     const user = auth.currentUser;
     if (!user) throw new Error("Authentication required to save Life preferences.");
     if (user.uid !== userId) throw new Error("Cannot update another user's profile.");
-    const profileRef = doc(db, "users", userId, "settings", "lifeProfile");
+    // The authenticated user's root document is the canonical profile location.
+    // Merge only the profile field to preserve account metadata and other data.
+    const profileRef = doc(db, "users", userId);
     const existing = await getDoc(profileRef);
-    const previous = existing.exists() ? existing.data() : {};
-    await setDoc(profileRef, buildLifeProfileDocument(data, previous));
+    const previous = existing.exists() ? (existing.data().profile as Record<string, unknown> | undefined) : undefined;
+    const profile = buildLifeProfileDocument(data, previous || {});
+    await setDoc(profileRef, { profile }, { merge: true });
   }
 
   async getUserProfile(userId: string): Promise<Record<string, unknown> | null> {
@@ -552,8 +555,18 @@ class FirebaseBackend {
     const user = auth.currentUser;
     if (!user) return null;
     if (user.uid !== userId) throw new Error("Cannot read another user's profile.");
-    const snapshot = await getDoc(doc(db, "users", userId, "settings", "lifeProfile"));
-    return snapshot.exists() ? snapshot.data() : null;
+    const snapshot = await getDoc(doc(db, "users", userId));
+    if (snapshot.exists() && snapshot.data().profile) {
+      return snapshot.data().profile as Record<string, unknown>;
+    }
+    // Existing users may have completed onboarding under the previous path.
+    const legacy = await getDoc(doc(db, "users", userId, "settings", "lifeProfile"));
+    if (!legacy.exists()) return null;
+    const profile = legacy.data();
+    if (profile.mode) {
+      await setDoc(doc(db, "users", userId), { profile }, { merge: true });
+    }
+    return profile;
   }
 
   async saveLifeProfile(data: Record<string, unknown>): Promise<void> {
