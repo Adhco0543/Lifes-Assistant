@@ -33,7 +33,7 @@ export const DEFAULT_LIFE_PREFERENCES: LifePreferences = {
   tool_overrides: { pinned: [], hidden: [] },
 };
 
-import { modeConfig } from './modeConfig.ts';
+import { modeConfig } from './modeConfig';
 export { modeConfig, getOrderedTools } from './modeConfig';
 
 export const MODE_TOOL_ORDER: Record<LifeMode, string[]> = {
