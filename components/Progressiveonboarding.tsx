@@ -167,6 +167,10 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           )}
 
           {step.id === 'slips' && (
+            <>
+            <p className="slip-selection-count" aria-live="polite">
+              {primarySlips.length === 0 ? 'Choose at least one. You can select up to three.' : `${primarySlips.length} selected · Choose up to ${3 - primarySlips.length} more or continue.`}
+            </p>
             <div className="option-grid">
               {PRIMARY_SLIPS.map((item) => (
                 <button
@@ -181,6 +185,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
                 </button>
               ))}
             </div>
+            </>
           )}
 
           {step.id === 'capture' && (
@@ -435,12 +440,22 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           color: #888;
           font-size: .68rem;
         }
+        .slip-selection-count {
+          margin: 20px 0 -12px;
+          color: #a9c8b0;
+          font-size: .72rem;
+          line-height: 1.45;
+        }
         footer {
+          position: sticky;
+          bottom: 0;
+          z-index: 2;
           margin-top: auto;
-          padding-top: 36px;
+          padding: 18px 0 max(12px, env(safe-area-inset-bottom));
           display: flex;
           justify-content: space-between;
           gap: 10px;
+          background: linear-gradient(180deg, rgba(29,29,29,0), #1d1d1d 22%);
         }
         footer button {
           min-height: 42px;
