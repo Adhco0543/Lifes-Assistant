@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { firebaseBackend } from '@/lib/firebaseBackend';
+import { getUserProfile } from '@/lib/profile';
 import ProgressiveOnboarding from '@/components/Progressiveonboarding';
 
 export default function OnboardingPage() {
@@ -18,7 +19,7 @@ export default function OnboardingPage() {
         const user = firebaseBackend.getCurrentUser();
         if (!active) return;
         if (!user) { router.replace('/'); return; }
-        const profile = await firebaseBackend.getUserProfile(user.uid);
+        const profile = await getUserProfile(user.uid);
         if (!active) return;
         if (profile?.mode === 'everyday' || profile?.mode === 'business' || profile?.mode === 'mix') {
           router.replace('/');
