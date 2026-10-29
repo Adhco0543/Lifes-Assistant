@@ -149,13 +149,19 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
                 {([
                   ['everyday', 'Everyday / Personal', 'Follow-ups, appointments, home & admin'], ['business', 'Business / Freelance / Contractor', 'Quotes, clients, projects, materials'], ['mix', 'Mix of both', 'A bit of personal and business work'],
                 ] as Array<[LifeMode, string, string]>).map(([value, label, description]) => (
-                  <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => { setMode(value); setStatus(''); }} aria-pressed={mode === value}>
+                  <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => {
+                      setMode(value);
+                      setStatus('');
+                      const nextIndex = 1;
+                      setStepIndex(nextIndex);
+                      onStepChange?.(nextIndex + 1);
+                    }} aria-pressed={mode === value}>
                     <span className="option-mark">{mode === value ? '✓' : '+'}</span><span><b>{label}</b><small className="option-description">{description}</small></span>
                   </button>
                 ))}
               </div>
               <p className="selection-feedback" aria-live="polite">
-                {mode ? `${mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'} selected. Tap Continue to move on.` : 'Choose one option, then tap Continue.'}
+                {mode ? `${mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'} selected.` : 'Choose one option to continue.'}
               </p>
             </>
           )}
