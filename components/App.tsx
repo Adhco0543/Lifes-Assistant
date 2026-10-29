@@ -7,6 +7,7 @@ import Progressiveonboarding from './Progressiveonboarding';
 import AuthForm from './AuthForm';
 import { businessProfileManager } from '../lib/businessProfile';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { getUserProfile } from '../lib/profile';
 import { AIQuoteBuilder } from './AIQuoteBuilder';
 import { AINoteEditor } from './AINoteEditor';
 import { AIEmailComposer } from './AIEmailComposer';
@@ -107,14 +108,16 @@ export const App: React.FC = () => {
 
   const loadProfile = useCallback(async (targetUserId: string) => {
     try {
-      const userPreferences = await firebaseBackend.getUserProfile(targetUserId);
+      const userPreferences = await getUserProfile(targetUserId);
       if (!userPreferences || (userPreferences.mode !== 'everyday' && userPreferences.mode !== 'business' && userPreferences.mode !== 'mix')) {
+        window.history.replaceState(null, '', '/onboarding');
         setCurrentView('onboarding');
         return;
       }
 
       // A valid Firebase user profile completes onboarding even when the
       // optional workspace draft has never been created.
+      if (window.location.pathname === '/onboarding') window.history.replaceState(null, '', '/');
       setBusinessType(userPreferences.mode === 'everyday' ? 'personal' : userPreferences.mode);
       setBusinessName('My Life');
       setCurrentView('home');
