@@ -113,6 +113,12 @@ export const App: React.FC = () => {
         return;
       }
 
+      // A valid Firebase user profile completes onboarding even when the
+      // optional workspace draft has never been created.
+      setBusinessType(userPreferences.mode === 'everyday' ? 'personal' : userPreferences.mode);
+      setBusinessName('My Life');
+      setCurrentView('home');
+
       const cloudProfile = await firebaseBackend.getLatestDraft('workspace-profile');
       if (cloudProfile?.businessName) {
         const nextBusinessName = String(cloudProfile.businessName);
@@ -145,7 +151,9 @@ export const App: React.FC = () => {
 
     const profile = businessProfileManager.loadProfile(targetUserId);
     if (!profile) {
-      setCurrentView('onboarding');
+      // A read error is not evidence that onboarding is incomplete.
+      // Stay on the signed-in home screen instead of trapping users in setup.
+      setCurrentView('home');
       return;
     }
 
