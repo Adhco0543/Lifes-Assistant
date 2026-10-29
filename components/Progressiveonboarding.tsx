@@ -144,15 +144,20 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           </div>
 
           {step.id === 'mode' && (
-            <div className="option-grid">
-              {([
-                ['everyday', 'Everyday / Personal', 'Follow-ups, appointments, home & admin'], ['business', 'Business / Freelance / Contractor', 'Quotes, clients, projects, materials'], ['mix', 'Mix of both', 'A bit of personal and business work'],
-              ] as Array<[LifeMode, string, string]>).map(([value, label, description]) => (
-                <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => setMode(value)} aria-pressed={mode === value}>
-                  <span className="option-mark">{mode === value ? '✓' : '+'}</span><span><b>{label}</b><small className="option-description">{description}</small></span>
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="option-grid">
+                {([
+                  ['everyday', 'Everyday / Personal', 'Follow-ups, appointments, home & admin'], ['business', 'Business / Freelance / Contractor', 'Quotes, clients, projects, materials'], ['mix', 'Mix of both', 'A bit of personal and business work'],
+                ] as Array<[LifeMode, string, string]>).map(([value, label, description]) => (
+                  <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => { setMode(value); setStatus(''); }} aria-pressed={mode === value}>
+                    <span className="option-mark">{mode === value ? '✓' : '+'}</span><span><b>{label}</b><small className="option-description">{description}</small></span>
+                  </button>
+                ))}
+              </div>
+              <p className="selection-feedback" aria-live="polite">
+                {mode ? `${mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'} selected. Tap Continue to move on.` : 'Choose one option, then tap Continue.'}
+              </p>
+            </>
           )}
 
           {step.id === 'slips' && (
@@ -354,7 +359,9 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           cursor: pointer;
           text-align: left;
         }
-        .option.selected { border-color: #666; background: #303030; color: #f0f0f0; }
+        .option.selected { border-color: #7dc994; background: #27342b; color: #f7fff8; box-shadow: inset 0 0 0 1px rgba(125,201,148,.24); }
+        .option.selected .option-mark { background: #35513e; color: #a9e4b9; }
+        .selection-feedback { margin: 12px 0 0; color: #8eae97; font-size: .7rem; line-height: 1.4; }
         .option-description { display: block; margin-top: 3px; color: #828282; font-size: .62rem; }
         .skip-option { min-height: 42px; border: 1px solid #343434; border-radius: 11px; padding: 0 13px; background: transparent; color: #999; cursor: pointer; }
         .skip-option.selected { border-color: #6d8276; color: #dce9df; }
