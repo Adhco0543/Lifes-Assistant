@@ -16,7 +16,7 @@ export default function OnboardingPage() {
     async function checkProfile() {
       try {
         await firebaseBackend.initialize();
-        const user = firebaseBackend.getCurrentUser();
+        const user = await firebaseBackend.waitForCurrentUser();
         if (!active) return;
         if (!user) { router.replace('/'); return; }
         const profile = await getUserProfile(user.uid);
