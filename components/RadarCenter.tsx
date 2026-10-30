@@ -95,7 +95,7 @@ export default function RadarCenter({
       waiting: loops.filter((loop) => !loop.archived && loop.status === 'waiting').length,
       snoozed: loops.filter(
         (loop) =>
-          loop.status === 'snoozed' &&
+          !loop.archived && loop.status === 'snoozed' &&
           Boolean(loop.snoozedUntil && loop.snoozedUntil > Date.now())
       ).length,
       resolved: loops.filter((loop) => loop.status === 'resolved' && !loop.archived).length,
@@ -366,14 +366,12 @@ export default function RadarCenter({
                       <button onClick={() => void bulkArchive([loop.id])}>Archive</button>
                     </>
                   )}
-                  {true && (
-                    <button
+                  <button
                       className="why"
                       onClick={() => setExpandedId(sourceOpen ? null : loop.id)}
                     >
                       {sourceOpen ? 'Hide reasons' : 'Why am I seeing this?'}
                     </button>
-                  )}
                 </div>
               </article>
             );
