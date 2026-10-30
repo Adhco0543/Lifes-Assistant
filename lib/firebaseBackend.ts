@@ -104,6 +104,7 @@ export interface OpenLoop {
   linkedView?: string;
   snoozedUntil?: number | null;
   userMarkedImportant?: boolean;
+  archived?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -868,6 +869,7 @@ class FirebaseBackend {
           linkedView: data.linkedView ? String(data.linkedView) : undefined,
           snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
           userMarkedImportant: data.userMarkedImportant === true,
+          archived: data.archived === true,
           createdAt: Number(data.createdAt || Date.now()),
           updatedAt: Number(data.updatedAt || Date.now()),
         } as OpenLoop;
