@@ -7,7 +7,7 @@ import {
   type OpenLoop,
 } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
-import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
+import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, explainRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
 
 interface LifeRadarPanelProps {
   userId: string;
@@ -100,7 +100,7 @@ export default function LifeRadarPanel({
 
     return loops
       .filter((loop) => {
-        if (loop.status === 'resolved') return false;
+        if (loop.archived || loop.status === 'resolved') return false;
         if (
           loop.status === 'snoozed' &&
           loop.snoozedUntil &&
@@ -323,10 +323,11 @@ export default function LifeRadarPanel({
                   )}
                   {!loop.nextAction && <p className="next-action"><span>Next:</span> Choose a next step.</p>}
 
-                  {sourceOpen && loop.sourceExcerpt && (
+                  {sourceOpen && (
                     <div className="source-box">
                       <span>WHY YOU&apos;RE SEEING THIS</span>
-                      <p>“{loop.sourceExcerpt}”</p>
+                      <ul>{explainRadarItem(loop, preferences).map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                      {loop.sourceExcerpt && <p>From saved context: “{loop.sourceExcerpt}”</p>}
                     </div>
                   )}
                 </div>
@@ -343,8 +344,9 @@ export default function LifeRadarPanel({
                   )}
                   <button onClick={() => snooze(loop.id)}>Tomorrow</button>
                   <button onClick={() => resolve(loop.id)}>Resolve</button>
+                  <button onClick={() => void firebaseBackend.updateOpenLoop(loop.id, { archived: true })}>Archive</button>
                   <button aria-pressed={Boolean(loop.userMarkedImportant)} onClick={() => void markImportant(loop)}>{loop.userMarkedImportant ? 'Important ✓' : 'Mark important'}</button>
-                  {loop.sourceExcerpt && (
+                  {(
                     <button
                       className="why"
                       onClick={() =>
@@ -352,7 +354,7 @@ export default function LifeRadarPanel({
                       }
                     >
                       {sourceOpen
-                        ? 'Hide source'
+                        ? 'Hide reasons'
                         : 'Why am I seeing this?'}
                     </button>
                   )}
@@ -368,7 +370,7 @@ export default function LifeRadarPanel({
               {moreLoops.map((loop) => (
                 <article key={loop.id} className={'loop-card ' + loop.priority}>
                   <div className="loop-main"><div className="loop-state"><span className={'priority-dot ' + loop.priority} />{loop.status === 'waiting' ? 'WAITING · ' + Math.max(0, Math.floor((Date.now() - loop.createdAt) / DAY_MS)) + 'D' : 'OPEN'}</div><h3>{loop.title}</h3><p className="next-action"><span>Next:</span> {loop.nextAction || 'Choose a next step.'}</p></div>
-                  <div className="loop-actions"><button className="handle" onClick={() => handleLoop(loop)}>Handle it</button><button onClick={() => void snooze(loop.id)}>Tomorrow</button><button onClick={() => void resolve(loop.id)}>Resolve</button></div>
+                  <div className="loop-actions"><button className="handle" onClick={() => handleLoop(loop)}>Handle it</button><button onClick={() => void snooze(loop.id)}>Tomorrow</button><button onClick={() => void resolve(loop.id)}>Resolve</button><button onClick={() => void firebaseBackend.updateOpenLoop(loop.id, { archived: true })}>Archive</button></div>
                 </article>
               ))}
             </div>
