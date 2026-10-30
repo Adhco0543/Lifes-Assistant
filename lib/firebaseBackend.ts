@@ -3,6 +3,7 @@ import { getApp, getApps, initializeApp } from "firebase/app";
 import type { Auth, User } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
+  onAuthStateChanged,
   getAuth,
   GoogleAuthProvider,
   browserPopupRedirectResolver,
@@ -156,6 +157,20 @@ class FirebaseBackend {
 
   getCurrentUser(): User | null {
     return this.auth?.currentUser ?? null;
+  }
+
+  async waitForCurrentUser(): Promise<User | null> {
+    await this.initialize();
+    const auth = this.auth;
+    if (!auth) return null;
+    return new Promise((resolve) => {
+      let unsubscribe = () => {};
+      unsubscribe = onAuthStateChanged(
+        auth,
+        (user) => { unsubscribe(); resolve(user); },
+        () => { unsubscribe(); resolve(null); }
+      );
+    });
   }
 
   getAuth(): Auth | null {
@@ -565,7 +580,11 @@ class FirebaseBackend {
     if (!legacy.exists()) return null;
     const profile = legacy.data();
     if (profile.mode) {
-      await setDoc(doc(db, "users", userId), { profile }, { merge: true });
+      try {
+        await setDoc(doc(db, "users", userId), { profile }, { merge: true });
+      } catch (error) {
+        console.warn("Legacy Life profile loaded; canonical migration will retry later.", error);
+      }
     }
     return profile;
   }
