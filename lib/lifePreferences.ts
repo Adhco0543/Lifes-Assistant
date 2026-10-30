@@ -177,7 +177,7 @@ export function scoreRadarItem(
   else if (/quote|invoice/.test(text)) type = 'quote';
   else if (/client|customer/.test(text)) type = 'client_followup';
   else if (/project|estimate/.test(text)) type = 'project';
-  else if (/material|spatial|room/.test(text)) type = 'material';
+  else if (/material|room/.test(text)) type = 'material';
   else if (/follow-up|follow up|reply|email|waiting/.test(text)) type = 'personal_followup';
   score *= modeConfig[preferences.mode].radarWeights[type];
 
