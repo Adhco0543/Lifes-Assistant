@@ -165,7 +165,7 @@ export const App: React.FC = () => {
   const hydrate = useCallback(async () => {
     try {
       await firebaseBackend.initialize();
-      const user = firebaseBackend.getCurrentUser();
+      const user = await firebaseBackend.waitForCurrentUser();
 
       if (user) {
         setIsAuthenticated(true);
