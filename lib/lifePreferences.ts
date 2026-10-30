@@ -95,8 +95,9 @@ export function normalizeLifePreferences(value: unknown): LifePreferences {
   const overrides = record.tool_overrides && typeof record.tool_overrides === 'object'
     ? record.tool_overrides as Record<string, unknown>
     : {};
+  const availableTools = new Set(Object.values(MODE_TOOL_ORDER).flat());
   const normalizeTools = (items: unknown) => Array.isArray(items)
-    ? [...new Set(items.filter((item): item is string => typeof item === 'string' && MODE_TOOL_ORDER.mix.includes(item)))]
+    ? [...new Set(items.filter((item): item is string => typeof item === 'string' && availableTools.has(item)))]
     : [];
   const tool_overrides = { pinned: normalizeTools(overrides.pinned), hidden: normalizeTools(overrides.hidden) };
   return { mode, primary_slips, capture_pref, important_signals, tool_overrides };
@@ -127,6 +128,29 @@ export function buildLifeProfileDocument(
     onboarding_completed_at: Number.isFinite(parsedTime) ? new Date(parsedTime).toISOString() : now,
     tool_overrides: normalized.tool_overrides,
   };
+}
+
+export function explainRadarItem(
+  item: { title: string; summary?: string; source?: string; linkedView?: string; status?: string; priority?: string; nextAction?: string; createdAt?: number; updatedAt?: number; dueAt?: number | null; userMarkedImportant?: boolean },
+  preferences: LifePreferences,
+  now = Date.now()
+): string[] {
+  const text = `${item.title} ${item.summary || ''} ${item.source || ''} ${item.linkedView || ''}`.toLowerCase();
+  const reasons: string[] = [];
+  const ageDays = item.createdAt ? Math.floor(Math.max(0, now - item.createdAt) / (24 * 60 * 60 * 1000)) : 0;
+  if (item.dueAt && item.dueAt <= now) reasons.push('Its due date has passed.');
+  else if (item.status === 'waiting' && ageDays >= 7) reasons.push(`It has been waiting for ${ageDays} days.`);
+  else if (ageDays >= 7) reasons.push(`It has been open for ${ageDays} days.`);
+  if (item.nextAction?.trim()) reasons.push('There is a clear next step.');
+  if (item.userMarkedImportant) reasons.push('You marked this as important.');
+  if (preferences.important_signals?.includes(`view:${item.linkedView}`) && item.linkedView) reasons.push('You marked similar items as important.');
+  const matches = PRIMARY_SLIPS.filter(slip => preferences.primary_slips.includes(slip.id) && slip.terms.some(term => text.includes(term)));
+  if (matches.length) reasons.push(`Matches your priority: ${matches.map(item => item.label).join(', ')}.`);
+  const typeWeights = modeConfig[preferences.mode].radarWeights;
+  const matchingType = Object.entries(typeWeights).find(([type]) => type !== 'other' && text.includes(type.replace('_', ' ')));
+  if (matchingType && matchingType[1] > 1) reasons.push(`Ranked higher for your ${preferences.mode === 'business' ? 'Business' : 'Everyday'} mode.`);
+  if (!reasons.length) reasons.push('Radar found this in your saved workspace and ranked it by age and current status.');
+  return reasons.slice(0, 3);
 }
 
 export function scoreRadarItem(
