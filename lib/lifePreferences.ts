@@ -33,8 +33,8 @@ export const DEFAULT_LIFE_PREFERENCES: LifePreferences = {
   tool_overrides: { pinned: [], hidden: [] },
 };
 
-import { modeConfig } from './modeConfig';
-export { modeConfig, getOrderedTools } from './modeConfig';
+import { modeConfig, ALL_MODE_TOOL_IDS } from './modeConfig';
+export { modeConfig, getOrderedTools, ALL_MODE_TOOL_IDS } from './modeConfig';
 
 export const MODE_TOOL_ORDER: Record<LifeMode, string[]> = {
   everyday: modeConfig.everyday.toolOrder,
@@ -95,7 +95,7 @@ export function normalizeLifePreferences(value: unknown): LifePreferences {
   const overrides = record.tool_overrides && typeof record.tool_overrides === 'object'
     ? record.tool_overrides as Record<string, unknown>
     : {};
-  const availableTools = new Set(Object.values(MODE_TOOL_ORDER).flat());
+  const availableTools = new Set<string>(ALL_MODE_TOOL_IDS);
   const normalizeTools = (items: unknown) => Array.isArray(items)
     ? [...new Set(items.filter((item): item is string => typeof item === 'string' && availableTools.has(item)))]
     : [];
