@@ -57,15 +57,12 @@ type ViewType =
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'memory', label: 'Memory', icon: '◉' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
-  { id: 'receipts', label: 'Receipts', icon: '◎' },
-  { id: 'system', label: 'System Check', icon: '◇' },
 ];
 
 const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'quotes', label: 'Quotes', icon: '▤' },
   { id: 'notes', label: 'Notes', icon: '✎' },
   { id: 'email', label: 'Email drafts', icon: '↗' },
-  { id: 'materials', label: 'Materials', icon: '◇' },
 ];
 
 const VIEW_LABELS: Partial<Record<ViewType, string>> = {
