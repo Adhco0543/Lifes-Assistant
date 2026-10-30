@@ -92,7 +92,7 @@ export default function RadarCenter({
   const counts = useMemo(() => {
     return {
       active: loops.filter(isVisibleActive).length,
-      waiting: loops.filter((loop) => loop.status === 'waiting').length,
+      waiting: loops.filter((loop) => !loop.archived && loop.status === 'waiting').length,
       snoozed: loops.filter(
         (loop) =>
           loop.status === 'snoozed' &&
@@ -110,10 +110,10 @@ export default function RadarCenter({
         if (filter === 'archived') return Boolean(loop.archived);
         if (filter === 'all') return !loop.archived;
         if (filter === 'active') return isVisibleActive(loop);
-        if (filter === 'waiting') return loop.status === 'waiting';
-        if (filter === 'resolved') return loop.status === 'resolved';
+        if (filter === 'waiting') return !loop.archived && loop.status === 'waiting';
+        if (filter === 'resolved') return !loop.archived && loop.status === 'resolved';
         return (
-          loop.status === 'snoozed' &&
+          !loop.archived && loop.status === 'snoozed' &&
           Boolean(loop.snoozedUntil && loop.snoozedUntil > Date.now())
         );
       })
