@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
-import { normalizeLifePreferences, PRIMARY_SLIPS, MODE_TOOL_ORDER, ALL_MODE_TOOL_IDS, type LifeMode, type CapturePreference } from '../lib/lifePreferences';
+import { normalizeLifePreferences, PRIMARY_SLIPS, ALL_MODE_TOOL_IDS, type LifeMode, type CapturePreference } from '../lib/lifePreferences';
 
 type SettingCategory = 'general' | 'assistant' | 'appearance' | 'privacy' | 'integrations';
 
