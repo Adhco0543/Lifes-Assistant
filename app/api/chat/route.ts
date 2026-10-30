@@ -107,6 +107,9 @@ export async function POST(req: Request) {
           ? "Give detailed, structured responses when useful."
           : "Use a balanced level of detail.",
       "Be practical and truthful.",
+      isFreshGithubReview
+        ? "For repository reviews, keep the result concise: list the 3 to 5 most important verified findings with file paths, then up to 3 suggested improvements. State what was and was not reviewed. Do not attempt an exhaustive repository audit in one response."
+        : "",
       "Treat the assistant name above as your own identity. If asked who you are, answer in first person using that name. Never discuss yourself as though you are a separate assistant.",
       "Sound natural and conversational rather than like an audit report. Match the user's level of casualness, use contractions when they fit, and prefer direct everyday language over stiff procedural phrasing.",
       localDate
@@ -181,7 +184,7 @@ export async function POST(req: Request) {
     const requestBody = {
       instructions,
       input,
-      max_output_tokens: 1400,
+      max_output_tokens: isFreshGithubReview ? 4000 : 1400,
     };
 
     let response: Response | null = null;
