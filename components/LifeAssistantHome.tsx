@@ -76,7 +76,10 @@ export default function LifeAssistantHome({
     return getVisibleTools(preferences, QUICK_ACTIONS);
   }, [preferences.mode, preferences.tool_overrides]);
   const coreLimit = MODE_TOOL_ORDER[preferences.mode].length;
-  const coreActions = orderedActions.filter((action) => MODE_TOOL_ORDER[preferences.mode].indexOf(action.id) < coreLimit || preferences.tool_overrides.pinned.includes(action.id));
+  const coreActions = orderedActions.filter((action) => {
+    const modeIndex = MODE_TOOL_ORDER[preferences.mode].indexOf(action.id);
+    return (modeIndex >= 0 && modeIndex < coreLimit) || preferences.tool_overrides.pinned.includes(action.id);
+  });
   const moreActions = orderedActions.filter((action) => !coreActions.some((core) => core.id === action.id));
 
   useEffect(() => {
