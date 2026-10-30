@@ -301,8 +301,8 @@ export default function RadarCenter({
       <section className="list">
         {visible.length === 0 ? (
           <div className="empty">
-            <strong>No items here.</strong>
-            <p>Radar has nothing matching this filter.</p>
+            <strong>{filter === 'active' ? (preferences.mode === 'business' ? 'No client or project loops need attention.' : preferences.mode === 'everyday' ? 'Nothing personal needs attention right now.' : 'Nothing needs attention right now.') : filter === 'archived' ? 'Your archive is clear.' : 'No items here.'}</strong>
+            <p>{filter === 'active' ? 'New items from your saved workspace will appear here.' : filter === 'archived' ? 'Archived items can be restored at any time.' : 'Radar has nothing matching this filter.'}</p>
           </div>
         ) : (
           visible.map((loop) => {
