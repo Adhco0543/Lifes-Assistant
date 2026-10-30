@@ -146,9 +146,16 @@ export function explainRadarItem(
   if (preferences.important_signals?.includes(`view:${item.linkedView}`) && item.linkedView) reasons.push('You marked similar items as important.');
   const matches = PRIMARY_SLIPS.filter(slip => preferences.primary_slips.includes(slip.id) && slip.terms.some(term => text.includes(term)));
   if (matches.length) reasons.push(`Matches your priority: ${matches.map(item => item.label).join(', ')}.`);
-  const typeWeights = modeConfig[preferences.mode].radarWeights;
-  const matchingType = Object.entries(typeWeights).find(([type]) => type !== 'other' && text.includes(type.replace('_', ' ')));
-  if (matchingType && matchingType[1] > 1) reasons.push(`Ranked higher for your ${preferences.mode === 'business' ? 'Business' : 'Everyday'} mode.`);
+  const modeWeights = modeConfig[preferences.mode].radarWeights;
+  const modeType = /quote|invoice|estimate/.test(text) ? 'quote'
+    : /client|customer/.test(text) ? 'client_followup'
+    : /project|milestone/.test(text) ? 'project'
+    : /material|room/.test(text) ? 'material'
+    : /appointment|bill|renewal|personal|calendar/.test(text) ? 'appointment'
+    : /follow.?up|reply|email|waiting/.test(text) ? 'personal_followup'
+    : 'other';
+  if (modeWeights[modeType] > 1) reasons.push('Ranked higher for your ' + preferences.mode + ' mode.');
+  else if (modeWeights[modeType] < 1) reasons.push('Ranked lower for your ' + preferences.mode + ' mode, so mode-specific work can rise above it.');
   if (!reasons.length) reasons.push('Radar found this in your saved workspace and ranked it by age and current status.');
   return reasons.slice(0, 3);
 }
