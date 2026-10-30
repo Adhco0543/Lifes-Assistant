@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLifeProfileDocument, getVisibleTools, modeConfig, normalizeLifePreferences, scoreRadarItem, MODE_TOOL_ORDER, suggestedRadarView } from '../lib/lifePreferences.ts';
+import { buildLifeProfileDocument, getVisibleTools, modeConfig, normalizeLifePreferences, scoreRadarItem, explainRadarItem, MODE_TOOL_ORDER, suggestedRadarView } from '../lib/lifePreferences.ts';
 
 test('normalizes saved mode, slips, capture preference, and tool overrides', () => {
   const profile = normalizeLifePreferences({
@@ -46,6 +46,21 @@ test('mode ranking favors the selected kind of work and includes age and next ac
   const business = normalizeLifePreferences({ mode: 'business', primary_slips: ['quotes'] });
   assert.ok(scoreRadarItem(quote, business, now) > scoreRadarItem(quote, everyday, now));
   assert.ok(scoreRadarItem(quote, business, now) > scoreRadarItem({ ...quote, nextAction: '' }, business, now));
+});
+
+test('primary slips raise matching loops and explain Radar decisions', () => {
+  const now = 2_000_000_000;
+  const item = { title: 'Reply to a client email', status: 'open', priority: 'medium', createdAt: now - 2 * 86400000 };
+  const baseline = normalizeLifePreferences({ mode: 'business' });
+  const prioritized = normalizeLifePreferences({ mode: 'business', primary_slips: ['followups'] });
+  assert.ok(scoreRadarItem(item, prioritized, now) > scoreRadarItem(item, baseline, now));
+  assert.ok(explainRadarItem(item, prioritized, now).some((reason) => reason.includes('priority')));
+});
+
+test('pin and hide overrides support tools outside the mode defaults', () => {
+  const profile = normalizeLifePreferences({ mode: 'everyday', tool_overrides: { pinned: ['projects'], hidden: [] } });
+  const tools = getVisibleTools(profile, [{ id: 'radar' }, { id: 'projects' }, { id: 'chat' }]);
+  assert.deepEqual(tools.map((tool) => tool.id), ['projects', 'radar', 'chat']);
 });
 
 test('mode tool order keeps the core first and changes business tool prominence', () => {
