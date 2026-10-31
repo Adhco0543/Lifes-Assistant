@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { updateUserProfile } from '../lib/profile';
 import { normalizeLifePreferences, PRIMARY_SLIPS, type CapturePreference, type LifeMode } from '../lib/lifePreferences';
 
 interface ProgressiveOnboardingProps {
@@ -10,7 +11,7 @@ interface ProgressiveOnboardingProps {
   onStepChange?: (step: number) => void;
 }
 
-type StepId = 'mode' | 'slips' | 'capture' | 'confirm';
+type StepId = 'mode' | 'slips' | 'capture';
 
 const steps: Array<{ id: StepId; title: string; kicker: string; description: string }> = [
   {
@@ -19,17 +20,13 @@ const steps: Array<{ id: StepId; title: string; kicker: string; description: str
   },
   {
     id: 'slips', title: 'What do you most often forget or let sit too long?', kicker: 'YOUR PRIORITIES',
-    description: 'We’ll prioritize this in Life Radar. Choose the one you most want to stay on top of.',
+    description: 'Choose up to three priorities. You can change them later.',
   },
   {
     id: 'capture', title: 'How do you usually capture things?', kicker: 'CAPTURE',
     description: 'Optional. Choose a preference or skip to finish setup.',
   },
-  {
-    id: 'confirm', title: 'You’re set.', kicker: 'READY',
-    description: 'Here’s what Life’s Assistant will prioritize for you.',
-  },
-];
+ ];
 
 export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   userId = 'guest',
@@ -79,12 +76,8 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
         tool_overrides: { pinned: [], hidden: [] },
       };
 
-      await firebaseBackend.updateUserProfile(userId, profile);
-      try {
-        await firebaseBackend.saveDraft('assistant-preferences', profile);
-      } catch (error) {
-        console.warn('Life preferences were saved, but the compatibility copy could not be updated:', error);
-      }
+      await updateUserProfile(userId, profile);
+      void firebaseBackend.saveDraft('assistant-preferences', profile).catch(error => console.warn('Optional preferences backup failed:', error));
       try {
         localStorage.setItem(`lifes-assistant-preferences:${userId}`, JSON.stringify(profile));
       } catch (error) {
@@ -152,9 +145,6 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
                   <button type="button" key={value} className={mode === value ? 'option selected' : 'option'} onClick={() => {
                       setMode(value);
                       setStatus('');
-                      const nextIndex = 1;
-                      setStepIndex(nextIndex);
-                      onStepChange?.(nextIndex + 1);
                     }} aria-pressed={mode === value}>
                     <span className="option-mark">{mode === value ? '✓' : '+'}</span><span><b>{label}</b><small className="option-description">{description}</small></span>
                   </button>
@@ -169,7 +159,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           {step.id === 'slips' && (
             <>
             <p className="slip-selection-count" aria-live="polite">
-              {primarySlips.length === 0 ? 'Choose one priority to continue.' : `Priority selected.`}
+              {primarySlips.length === 0 ? 'Choose at least one priority.' : `${primarySlips.length} of 3 priorities selected.`}
             </p>
             <div className="option-grid">
               {PRIMARY_SLIPS.map((item) => (
@@ -177,7 +167,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
                   type="button"
                   key={item.id}
                   className={primarySlips.includes(item.id) ? 'option selected' : 'option'}
-                  onClick={() => { setPrimarySlips([item.id]); setStepIndex(2); onStepChange?.(3); }}
+                  onClick={() => toggleSlip(item.id)}
                   aria-pressed={primarySlips.includes(item.id)}
                 >
                   <span className="option-mark">{primarySlips.includes(item.id) ? '✓' : '+'}</span>
@@ -193,15 +183,15 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
               {([
                 ['chat', 'Chat / type'], ['voice', 'Voice'], ['forward', 'Forward emails or notes later'],
               ] as Array<[Exclude<CapturePreference, ''>, string]>).map(([value, label]) => (
-                <button type="button" key={value} className={capturePref === value ? 'option selected' : 'option'} onClick={() => { setCapturePref(value); setStepIndex(3); onStepChange?.(4); }} aria-pressed={capturePref === value}>
+                <button type="button" key={value} className={capturePref === value ? 'option selected' : 'option'} onClick={() => setCapturePref(value)} aria-pressed={capturePref === value}>
                   <span className="option-mark">{capturePref === value ? '✓' : '+'}</span><span>{label}</span>
                 </button>
               ))}
-              <button type="button" className={!capturePref ? 'skip-option selected' : 'skip-option'} onClick={() => { setCapturePref(''); setStepIndex(3); onStepChange?.(4); }}>No preference</button>
+              <button type="button" className={!capturePref ? 'skip-option selected' : 'skip-option'} onClick={() => setCapturePref('')}>No preference</button>
             </div>
           )}
 
-          {step.id === 'confirm' && (
+          {false && (
             <div className="confirmation-card">
               <span className="confirm-check">✓</span>
               <p>Got it. I’ll prioritize <strong>{mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'}</strong> and surface things related to <strong>{primarySlips.includes('unsure') ? 'a bit of everything' : primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ')}</strong>.</p>
@@ -215,7 +205,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
             <button className="back" type="button" onClick={back} disabled={stepIndex === 0 || saving}>Back</button>
             {step.id === 'capture' && <button className="back" type="button" onClick={() => { setCapturePref(''); void next(); }} disabled={saving}>Skip</button>}
             <button className="next" type="button" onClick={next} disabled={!canContinue || saving}>
-              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Go to Life’s Assistant' : 'Continue'}
+              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Finish setup and open Life’s Assistant' : 'Continue'}
             </button>
           </footer>
         </main>

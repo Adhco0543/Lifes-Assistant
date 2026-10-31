@@ -3,14 +3,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
-import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
+import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, explainRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
 
 interface RadarCenterProps {
   userId: string;
   onNavigate: (view: string) => void;
 }
 
-type Filter = 'active' | 'waiting' | 'snoozed' | 'resolved' | 'all';
+type Filter = 'active' | 'waiting' | 'snoozed' | 'resolved' | 'archived' | 'all';
 
 function formatAge(timestamp: number): string {
   const days = Math.floor(Math.max(0, Date.now() - timestamp) / DAY_MS);
@@ -20,7 +20,7 @@ function formatAge(timestamp: number): string {
 }
 
 function isVisibleActive(loop: OpenLoop): boolean {
-  if (loop.status === 'resolved') return false;
+  if (loop.archived || loop.status === 'resolved') return false;
   if (
     loop.status === 'snoozed' &&
     loop.snoozedUntil &&
@@ -38,6 +38,8 @@ export default function RadarCenter({
   const [loops, setLoops] = useState<OpenLoop[]>([]);
   const [filter, setFilter] = useState<Filter>('active');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [status, setStatus] = useState('Loading Radar…');
   const [scanning, setScanning] = useState(false);
   const [preferences, setPreferences] = useState<LifePreferences>(DEFAULT_LIFE_PREFERENCES);
@@ -90,26 +92,28 @@ export default function RadarCenter({
   const counts = useMemo(() => {
     return {
       active: loops.filter(isVisibleActive).length,
-      waiting: loops.filter((loop) => loop.status === 'waiting').length,
+      waiting: loops.filter((loop) => !loop.archived && loop.status === 'waiting').length,
       snoozed: loops.filter(
         (loop) =>
-          loop.status === 'snoozed' &&
+          !loop.archived && loop.status === 'snoozed' &&
           Boolean(loop.snoozedUntil && loop.snoozedUntil > Date.now())
       ).length,
-      resolved: loops.filter((loop) => loop.status === 'resolved').length,
-      all: loops.length,
+      resolved: loops.filter((loop) => loop.status === 'resolved' && !loop.archived).length,
+      archived: loops.filter((loop) => loop.archived).length,
+      all: loops.filter((loop) => !loop.archived).length,
     };
   }, [loops]);
 
   const visible = useMemo(() => {
     return loops
       .filter((loop) => {
-        if (filter === 'all') return true;
+        if (filter === 'archived') return Boolean(loop.archived);
+        if (filter === 'all') return !loop.archived;
         if (filter === 'active') return isVisibleActive(loop);
-        if (filter === 'waiting') return loop.status === 'waiting';
-        if (filter === 'resolved') return loop.status === 'resolved';
+        if (filter === 'waiting') return !loop.archived && loop.status === 'waiting';
+        if (filter === 'resolved') return !loop.archived && loop.status === 'resolved';
         return (
-          loop.status === 'snoozed' &&
+          !loop.archived && loop.status === 'snoozed' &&
           Boolean(loop.snoozedUntil && loop.snoozedUntil > Date.now())
         );
       })
@@ -121,6 +125,46 @@ export default function RadarCenter({
       });
   }, [filter, loops, preferences]);
 
+  const toggleSelected = (id: string) => {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  };
+
+  const bulkResolve = async () => {
+    setBulkBusy(true);
+    try {
+      await Promise.all(selectedIds.map((id) => firebaseBackend.resolveOpenLoop(id)));
+      setSelectedIds([]);
+      setStatus('Selected items resolved.');
+    } catch {
+      setStatus('Some items could not be resolved. Try again.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkArchive = async (ids = selectedIds) => {
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      await Promise.all(ids.map((id) => firebaseBackend.updateOpenLoop(id, { archived: true })));
+      setSelectedIds((current) => current.filter((id) => !ids.includes(id)));
+      setStatus(ids.length + ' ' + (ids.length === 1 ? 'item' : 'items') + ' archived. You can restore them from Archived.');
+    } catch {
+      setStatus('Some items could not be archived. Try again.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const archiveOld = () => {
+    const cutoff = Date.now() - 14 * DAY_MS;
+    const oldIds = loops.filter((loop) => !loop.archived && loop.status !== 'resolved' && loop.createdAt < cutoff).map((loop) => loop.id);
+    void bulkArchive(oldIds);
+  };
+
+  const restore = async (loop: OpenLoop) => {
+    await firebaseBackend.updateOpenLoop(loop.id, { archived: false });
+  };
   const scanNow = () => {
     setScanning(true);
     setStatus('Scanning Chat and workspace…');
@@ -184,6 +228,7 @@ export default function RadarCenter({
     { id: 'waiting', label: 'Waiting' },
     { id: 'snoozed', label: 'Snoozed' },
     { id: 'resolved', label: 'Resolved' },
+    { id: 'archived', label: 'Archived' },
     { id: 'all', label: 'All' },
   ];
 
@@ -232,6 +277,14 @@ export default function RadarCenter({
         </section>
       )}
 
+      {(filter === 'active' || filter === 'waiting' || filter === 'all') && (
+        <div className="bulk-tools" aria-label="Bulk Radar actions">
+          <span>{selectedIds.length ? selectedIds.length + ' selected' : 'Clean up older items'}</span>
+          <button type="button" onClick={() => void bulkResolve()} disabled={!selectedIds.length || bulkBusy}>Resolve selected</button>
+          <button type="button" onClick={() => void bulkArchive()} disabled={!selectedIds.length || bulkBusy}>Archive selected</button>
+          <button type="button" onClick={archiveOld} disabled={bulkBusy}>Archive old (14+ days)</button>
+        </div>
+      )}
       <nav className="filters" aria-label="Radar filters">
         {filters.map((item) => (
           <button
@@ -248,8 +301,8 @@ export default function RadarCenter({
       <section className="list">
         {visible.length === 0 ? (
           <div className="empty">
-            <strong>No items here.</strong>
-            <p>Radar has nothing matching this filter.</p>
+            <strong>{filter === 'active' ? (preferences.mode === 'business' ? 'No client or project loops need attention.' : preferences.mode === 'everyday' ? 'Nothing personal needs attention right now.' : 'Nothing needs attention right now.') : filter === 'archived' ? 'Your archive is clear.' : 'No items here.'}</strong>
+            <p>{filter === 'active' ? 'New items from your saved workspace will appear here.' : filter === 'archived' ? 'Archived items can be restored at any time.' : 'Radar has nothing matching this filter.'}</p>
           </div>
         ) : (
           visible.map((loop) => {
@@ -261,6 +314,7 @@ export default function RadarCenter({
 
             return (
               <article className={'card ' + loop.priority} key={loop.id}>
+                <label className="select-loop"><input type="checkbox" checked={selectedIds.includes(loop.id)} onChange={() => toggleSelected(loop.id)} aria-label={'Select ' + loop.title} /></label>
                 <div className="card-copy">
                   <div className="meta">
                     <span className={'dot ' + loop.priority} />
@@ -282,16 +336,19 @@ export default function RadarCenter({
                       <span>Next:</span> {loop.nextAction}
                     </p>
                   )}
-                  {sourceOpen && loop.sourceExcerpt && (
+                  {sourceOpen && (
                     <div className="source">
-                      <span>WHY RADAR CAUGHT THIS</span>
-                      <p>“{loop.sourceExcerpt}”</p>
+                      <span>WHY THIS IS SHOWING</span>
+                      <ul>{explainRadarItem(loop, preferences).map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                      {loop.sourceExcerpt && <p className="source-excerpt">From your saved context: “{loop.sourceExcerpt}”</p>}
                     </div>
                   )}
                 </div>
 
                 <div className="actions">
-                  {loop.status === 'resolved' ? (
+                  {loop.archived ? (
+                    <button onClick={() => restore(loop)}>Restore</button>
+                  ) : loop.status === 'resolved' ? (
                     <button onClick={() => reopen(loop)}>Reopen</button>
                   ) : (
                     <>
@@ -306,16 +363,15 @@ export default function RadarCenter({
                       )}
                       <button onClick={() => snooze(loop)}>Tomorrow</button>
                       <button onClick={() => resolve(loop)}>Resolve</button>
+                      <button onClick={() => void bulkArchive([loop.id])}>Archive</button>
                     </>
                   )}
-                  {loop.sourceExcerpt && (
-                    <button
+                  <button
                       className="why"
                       onClick={() => setExpandedId(sourceOpen ? null : loop.id)}
                     >
-                      {sourceOpen ? 'Hide source' : 'Why?'}
+                      {sourceOpen ? 'Hide reasons' : 'Why am I seeing this?'}
                     </button>
-                  )}
                 </div>
               </article>
             );
@@ -420,6 +476,8 @@ export default function RadarCenter({
           flex: 0 0 auto;
           padding: 8px 11px;
         }
+        .bulk-tools { max-width: 1100px; margin: 12px auto 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #777; font-size: .65rem; }
+        .bulk-tools button { padding: 7px 10px; font-size: .62rem; }
         .filters {
           max-width: 1100px;
           margin: 18px auto 0;
@@ -456,12 +514,14 @@ export default function RadarCenter({
           border-radius: 14px;
           padding: 14px;
           display: grid;
-          grid-template-columns: minmax(0, 1fr) auto;
+          grid-template-columns: 20px minmax(0, 1fr) auto;
           gap: 16px;
         }
         .card.high { border-left-color: #a46d62; }
         .card.medium { border-left-color: #9b8554; }
         .card.low { border-left-color: #587663; }
+        .select-loop { display: flex; align-items: flex-start; padding-top: 3px; }
+        .select-loop input { accent-color: #91c6a0; }
         .meta {
           display: flex;
           align-items: center;
@@ -505,6 +565,7 @@ export default function RadarCenter({
           letter-spacing: .1em;
           font-weight: 800;
         }
+        .source ul { margin: 6px 0 0; padding-left: 18px; color: #b7b7b7; font-size: .66rem; line-height: 1.55; }
         .source p {
           margin: 5px 0 0;
           color: #999;
@@ -542,7 +603,8 @@ export default function RadarCenter({
           .radar-center { padding: 18px 12px; }
           .hero { align-items: center; }
           .score-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .card { grid-template-columns: 1fr; }
+          .card { grid-template-columns: 20px minmax(0, 1fr); }
+          .card .actions { grid-column: 2; }
           .actions { flex-direction: row; flex-wrap: wrap; }
           .top-card { align-items: flex-start; }
         }

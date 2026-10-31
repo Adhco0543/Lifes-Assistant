@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
-import { normalizeLifePreferences, PRIMARY_SLIPS, MODE_TOOL_ORDER, type LifeMode, type CapturePreference } from '../lib/lifePreferences';
+import { normalizeLifePreferences, PRIMARY_SLIPS, ALL_MODE_TOOL_IDS, type LifeMode, type CapturePreference } from '../lib/lifePreferences';
 
 type SettingCategory = 'general' | 'assistant' | 'appearance' | 'privacy' | 'integrations';
 
@@ -239,7 +239,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
                   return <button key={slip.id} type="button" className={selected ? 'preference-chip selected' : 'preference-chip'} aria-pressed={selected} onClick={toggle}>{slip.label}</button>;
                 })}</div></div>
                 <label className="field"><span>Capture preference</span><select value={prefs.capture_pref} onChange={(event) => update('capture_pref', event.target.value as CapturePreference)}><option value="">Not set</option><option value="chat">Chat / type</option><option value="voice">Voice</option><option value="forward">Forward emails or notes later</option></select></label>
-                <div className="field"><span>Pin or hide tools</span><small>Pinned tools move to the top. Hidden tools leave the home grid.</small><div className="tool-overrides">{MODE_TOOL_ORDER.mix.map((tool) => {
+                <div className="field"><span>Pin or hide tools</span><small>Pinned tools move to the top. Hidden tools leave the home grid.</small><div className="tool-overrides">{ALL_MODE_TOOL_IDS.map((tool) => {
                   const pinned = prefs.tool_overrides.pinned.includes(tool);
                   const hidden = prefs.tool_overrides.hidden.includes(tool);
                   const updateOverrides = (next: { pinned: string[]; hidden: string[] }) => update('tool_overrides', next);

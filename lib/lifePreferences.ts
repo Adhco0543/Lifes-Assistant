@@ -33,45 +33,8 @@ export const DEFAULT_LIFE_PREFERENCES: LifePreferences = {
   tool_overrides: { pinned: [], hidden: [] },
 };
 
-export const modeConfig: Record<LifeMode, {
-  toolOrder: string[];
-  examplePrompts: string[];
-  radarWeights: Record<string, number>;
-  placeholderText: string;
-}> = {
-  everyday: {
-    toolOrder: ['radar', 'chat', 'tasks', 'people', 'memory', 'brief', 'search', 'email', 'quotes', 'materials', 'projects'],
-    examplePrompts: [
-    'Help me plan everything I need to get done tomorrow.',
-    'Draft a follow-up and let me approve it before anything is sent.',
-    'What am I forgetting this week?',
-    'Remind me to renew car registration.',
-    ],
-    radarWeights: { personal_followup: 1.5, appointment: 1.4, quote: 0.7, client_followup: 0.8, project: 1, material: 0.6, other: 1 },
-    placeholderText: 'Example: Remind me to renew my registration next week.',
-  },
-  business: {
-    toolOrder: ['radar', 'chat', 'quotes', 'email', 'materials', 'tasks', 'people', 'memory', 'brief', 'search', 'projects'],
-    examplePrompts: [
-    'Turn these rough notes into a professional quote.',
-    'Follow up on the unfinished quote for Allen.',
-    'Break this project into steps and tell me what I should do first.',
-    'Draft a follow-up email and let me approve it.',
-    ],
-    radarWeights: { personal_followup: 0.8, appointment: 0.7, quote: 1.6, client_followup: 1.5, project: 1.3, material: 1.2, other: 1 },
-    placeholderText: 'Example: Turn these notes into a quote for the client.',
-  },
-  mix: {
-    toolOrder: ['radar', 'chat', 'tasks', 'email', 'people', 'memory', 'brief', 'search', 'quotes', 'materials', 'projects'],
-    examplePrompts: [
-    'What am I forgetting this week?',
-    'Help me plan tomorrow and break this project into steps.',
-    'Draft a follow-up and let me approve it before anything is sent.',
-    ],
-    radarWeights: { personal_followup: 1.2, appointment: 1.1, quote: 1.2, client_followup: 1.2, project: 1.1, material: 0.9, other: 1 },
-    placeholderText: 'Example: Remind me to call Allen tomorrow and draft what I should say.',
-  },
-};
+import { modeConfig, ALL_MODE_TOOL_IDS } from './modeConfig';
+export { modeConfig, getOrderedTools, ALL_MODE_TOOL_IDS } from './modeConfig';
 
 export const MODE_TOOL_ORDER: Record<LifeMode, string[]> = {
   everyday: modeConfig.everyday.toolOrder,
@@ -132,8 +95,9 @@ export function normalizeLifePreferences(value: unknown): LifePreferences {
   const overrides = record.tool_overrides && typeof record.tool_overrides === 'object'
     ? record.tool_overrides as Record<string, unknown>
     : {};
+  const availableTools = new Set<string>(ALL_MODE_TOOL_IDS);
   const normalizeTools = (items: unknown) => Array.isArray(items)
-    ? [...new Set(items.filter((item): item is string => typeof item === 'string' && MODE_TOOL_ORDER.mix.includes(item)))]
+    ? [...new Set(items.filter((item): item is string => typeof item === 'string' && availableTools.has(item)))]
     : [];
   const tool_overrides = { pinned: normalizeTools(overrides.pinned), hidden: normalizeTools(overrides.hidden) };
   return { mode, primary_slips, capture_pref, important_signals, tool_overrides };
@@ -166,6 +130,36 @@ export function buildLifeProfileDocument(
   };
 }
 
+export function explainRadarItem(
+  item: { title: string; summary?: string; source?: string; linkedView?: string; status?: string; priority?: string; nextAction?: string; createdAt?: number; updatedAt?: number; dueAt?: number | null; userMarkedImportant?: boolean },
+  preferences: LifePreferences,
+  now = Date.now()
+): string[] {
+  const text = `${item.title} ${item.summary || ''} ${item.source || ''} ${item.linkedView || ''}`.toLowerCase();
+  const reasons: string[] = [];
+  const ageDays = item.createdAt ? Math.floor(Math.max(0, now - item.createdAt) / (24 * 60 * 60 * 1000)) : 0;
+  if (item.dueAt && item.dueAt <= now) reasons.push('Its due date has passed.');
+  else if (item.status === 'waiting' && ageDays >= 7) reasons.push(`It has been waiting for ${ageDays} days.`);
+  else if (ageDays >= 7) reasons.push(`It has been open for ${ageDays} days.`);
+  if (item.nextAction?.trim()) reasons.push('There is a clear next step.');
+  if (item.userMarkedImportant) reasons.push('You marked this as important.');
+  if (preferences.important_signals?.includes(`view:${item.linkedView}`) && item.linkedView) reasons.push('You marked similar items as important.');
+  const matches = PRIMARY_SLIPS.filter(slip => preferences.primary_slips.includes(slip.id) && slip.terms.some(term => text.includes(term)));
+  if (matches.length) reasons.push(`Matches your priority: ${matches.map(item => item.label).join(', ')}.`);
+  const modeWeights = modeConfig[preferences.mode].radarWeights;
+  const modeType = /quote|invoice|estimate/.test(text) ? 'quote'
+    : /client|customer/.test(text) ? 'client_followup'
+    : /project|milestone/.test(text) ? 'project'
+    : /material|room/.test(text) ? 'material'
+    : /appointment|bill|renewal|personal|calendar/.test(text) ? 'appointment'
+    : /follow.?up|reply|email|waiting/.test(text) ? 'personal_followup'
+    : 'other';
+  if (modeWeights[modeType] > 1) reasons.push('Ranked higher for your ' + preferences.mode + ' mode.');
+  else if (modeWeights[modeType] < 1) reasons.push('Ranked lower for your ' + preferences.mode + ' mode, so mode-specific work can rise above it.');
+  if (!reasons.length) reasons.push('Radar found this in your saved workspace and ranked it by age and current status.');
+  return reasons.slice(0, 3);
+}
+
 export function scoreRadarItem(
   item: { title: string; summary?: string; source?: string; linkedView?: string; status?: string; priority?: string; nextAction?: string; createdAt?: number; updatedAt?: number; dueAt?: number | null; userMarkedImportant?: boolean },
   preferences: LifePreferences,
@@ -183,7 +177,7 @@ export function scoreRadarItem(
   else if (/quote|invoice/.test(text)) type = 'quote';
   else if (/client|customer/.test(text)) type = 'client_followup';
   else if (/project|estimate/.test(text)) type = 'project';
-  else if (/material|spatial|room/.test(text)) type = 'material';
+  else if (/material|room/.test(text)) type = 'material';
   else if (/follow-up|follow up|reply|email|waiting/.test(text)) type = 'personal_followup';
   score *= modeConfig[preferences.mode].radarWeights[type];
 

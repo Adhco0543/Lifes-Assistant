@@ -7,6 +7,7 @@ import Progressiveonboarding from './Progressiveonboarding';
 import AuthForm from './AuthForm';
 import { businessProfileManager } from '../lib/businessProfile';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { getUserProfile } from '../lib/profile';
 import { AIQuoteBuilder } from './AIQuoteBuilder';
 import { AINoteEditor } from './AINoteEditor';
 import { AIEmailComposer } from './AIEmailComposer';
@@ -56,15 +57,12 @@ type ViewType =
   { id: 'chat', label: 'Chat', icon: '✦' },
   { id: 'memory', label: 'Memory', icon: '◉' },
   { id: 'tasks', label: 'Tasks', icon: '✓' },
-  { id: 'receipts', label: 'Receipts', icon: '◎' },
-  { id: 'system', label: 'System Check', icon: '◇' },
 ];
 
 const WORKSPACE_ITEMS: Array<{ id: ViewType; label: string; icon: string }> = [
   { id: 'quotes', label: 'Quotes', icon: '▤' },
   { id: 'notes', label: 'Notes', icon: '✎' },
   { id: 'email', label: 'Email drafts', icon: '↗' },
-  { id: 'materials', label: 'Materials', icon: '◇' },
 ];
 
 const VIEW_LABELS: Partial<Record<ViewType, string>> = {
@@ -107,11 +105,19 @@ export const App: React.FC = () => {
 
   const loadProfile = useCallback(async (targetUserId: string) => {
     try {
-      const userPreferences = await firebaseBackend.getUserProfile(targetUserId);
+      const userPreferences = await getUserProfile(targetUserId);
       if (!userPreferences || (userPreferences.mode !== 'everyday' && userPreferences.mode !== 'business' && userPreferences.mode !== 'mix')) {
+        window.history.replaceState(null, '', '/onboarding');
         setCurrentView('onboarding');
         return;
       }
+
+      // A valid Firebase user profile completes onboarding even when the
+      // optional workspace draft has never been created.
+      if (window.location.pathname === '/onboarding') window.history.replaceState(null, '', '/');
+      setBusinessType(userPreferences.mode === 'everyday' ? 'personal' : userPreferences.mode);
+      setBusinessName('My Life');
+      setCurrentView('home');
 
       const cloudProfile = await firebaseBackend.getLatestDraft('workspace-profile');
       if (cloudProfile?.businessName) {
@@ -145,7 +151,9 @@ export const App: React.FC = () => {
 
     const profile = businessProfileManager.loadProfile(targetUserId);
     if (!profile) {
-      setCurrentView('onboarding');
+      // A read error is not evidence that onboarding is incomplete.
+      // Stay on the signed-in home screen instead of trapping users in setup.
+      setCurrentView('home');
       return;
     }
 
@@ -157,7 +165,7 @@ export const App: React.FC = () => {
   const hydrate = useCallback(async () => {
     try {
       await firebaseBackend.initialize();
-      const user = firebaseBackend.getCurrentUser();
+      const user = await firebaseBackend.waitForCurrentUser();
 
       if (user) {
         setIsAuthenticated(true);

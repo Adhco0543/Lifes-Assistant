@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLifeProfileDocument, getVisibleTools, modeConfig, normalizeLifePreferences, scoreRadarItem, MODE_TOOL_ORDER, suggestedRadarView } from '../lib/lifePreferences.ts';
+import { buildLifeProfileDocument, getVisibleTools, modeConfig, normalizeLifePreferences, scoreRadarItem, explainRadarItem, MODE_TOOL_ORDER, suggestedRadarView } from '../lib/lifePreferences.ts';
 
 test('normalizes saved mode, slips, capture preference, and tool overrides', () => {
   const profile = normalizeLifePreferences({
@@ -48,13 +48,28 @@ test('mode ranking favors the selected kind of work and includes age and next ac
   assert.ok(scoreRadarItem(quote, business, now) > scoreRadarItem({ ...quote, nextAction: '' }, business, now));
 });
 
+test('primary slips raise matching loops and explain Radar decisions', () => {
+  const now = 2_000_000_000;
+  const item = { title: 'Reply to a client email', status: 'open', priority: 'medium', createdAt: now - 2 * 86400000 };
+  const baseline = normalizeLifePreferences({ mode: 'business' });
+  const prioritized = normalizeLifePreferences({ mode: 'business', primary_slips: ['followups'] });
+  assert.ok(scoreRadarItem(item, prioritized, now) > scoreRadarItem(item, baseline, now));
+  assert.ok(explainRadarItem(item, prioritized, now).some((reason) => reason.includes('priority')));
+});
+
+test('pin and hide overrides support tools outside the mode defaults', () => {
+  const profile = normalizeLifePreferences({ mode: 'everyday', tool_overrides: { pinned: ['projects'], hidden: [] } });
+  const tools = getVisibleTools(profile, [{ id: 'radar' }, { id: 'projects' }, { id: 'chat' }]);
+  assert.deepEqual(tools.map((tool) => tool.id), ['projects', 'radar', 'chat']);
+});
+
 test('mode tool order keeps the core first and changes business tool prominence', () => {
   assert.deepEqual(MODE_TOOL_ORDER.everyday.slice(0, 7), ['radar', 'chat', 'tasks', 'people', 'memory', 'brief', 'search']);
-  assert.ok(MODE_TOOL_ORDER.business.indexOf('quotes') < MODE_TOOL_ORDER.everyday.indexOf('quotes'));
+  assert.ok(MODE_TOOL_ORDER.business.indexOf('quotes') < (MODE_TOOL_ORDER.everyday.indexOf('quotes') < 0 ? Infinity : MODE_TOOL_ORDER.everyday.indexOf('quotes')));
 });
 
 test('mode config drives prompts, radar weights, and pinned tool ordering', () => {
-  assert.equal(modeConfig.everyday.radarWeights.quote, 0.7);
+  assert.equal(modeConfig.everyday.radarWeights.quote, 0.6);
   assert.ok(modeConfig.business.examplePrompts[0].includes('quote'));
   const profile = normalizeLifePreferences({ mode: 'everyday', tool_overrides: { pinned: ['quotes'], hidden: ['email'] } });
   const tools = getVisibleTools(profile, [{ id: 'email' }, { id: 'quotes' }, { id: 'radar' }, { id: 'chat' }]);

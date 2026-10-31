@@ -3,6 +3,7 @@ import { getApp, getApps, initializeApp } from "firebase/app";
 import type { Auth, User } from "firebase/auth";
 import {
   createUserWithEmailAndPassword,
+  onAuthStateChanged,
   getAuth,
   GoogleAuthProvider,
   browserPopupRedirectResolver,
@@ -104,6 +105,7 @@ export interface OpenLoop {
   linkedView?: string;
   snoozedUntil?: number | null;
   userMarkedImportant?: boolean;
+  archived?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -155,6 +157,20 @@ class FirebaseBackend {
 
   getCurrentUser(): User | null {
     return this.auth?.currentUser ?? null;
+  }
+
+  async waitForCurrentUser(): Promise<User | null> {
+    await this.initialize();
+    const auth = this.auth;
+    if (!auth) return null;
+    return new Promise((resolve) => {
+      let unsubscribe = () => {};
+      unsubscribe = onAuthStateChanged(
+        auth,
+        (user) => { unsubscribe(); resolve(user); },
+        () => { unsubscribe(); resolve(null); }
+      );
+    });
   }
 
   getAuth(): Auth | null {
@@ -541,10 +557,13 @@ class FirebaseBackend {
     const user = auth.currentUser;
     if (!user) throw new Error("Authentication required to save Life preferences.");
     if (user.uid !== userId) throw new Error("Cannot update another user's profile.");
-    const profileRef = doc(db, "users", userId, "settings", "lifeProfile");
+    // The authenticated user's root document is the canonical profile location.
+    // Merge only the profile field to preserve account metadata and other data.
+    const profileRef = doc(db, "users", userId);
     const existing = await getDoc(profileRef);
-    const previous = existing.exists() ? existing.data() : {};
-    await setDoc(profileRef, buildLifeProfileDocument(data, previous));
+    const previous = existing.exists() ? (existing.data().profile as Record<string, unknown> | undefined) : undefined;
+    const profile = buildLifeProfileDocument(data, previous || {});
+    await setDoc(profileRef, { profile }, { merge: true });
   }
 
   async getUserProfile(userId: string): Promise<Record<string, unknown> | null> {
@@ -552,8 +571,22 @@ class FirebaseBackend {
     const user = auth.currentUser;
     if (!user) return null;
     if (user.uid !== userId) throw new Error("Cannot read another user's profile.");
-    const snapshot = await getDoc(doc(db, "users", userId, "settings", "lifeProfile"));
-    return snapshot.exists() ? snapshot.data() : null;
+    const snapshot = await getDoc(doc(db, "users", userId));
+    if (snapshot.exists() && snapshot.data().profile) {
+      return snapshot.data().profile as Record<string, unknown>;
+    }
+    // Existing users may have completed onboarding under the previous path.
+    const legacy = await getDoc(doc(db, "users", userId, "settings", "lifeProfile"));
+    if (!legacy.exists()) return null;
+    const profile = legacy.data();
+    if (profile.mode) {
+      try {
+        await setDoc(doc(db, "users", userId), { profile }, { merge: true });
+      } catch (error) {
+        console.warn("Legacy Life profile loaded; canonical migration will retry later.", error);
+      }
+    }
+    return profile;
   }
 
   async saveLifeProfile(data: Record<string, unknown>): Promise<void> {
@@ -809,6 +842,7 @@ class FirebaseBackend {
         linkedView: data.linkedView ? String(data.linkedView) : undefined,
         snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
         userMarkedImportant: data.userMarkedImportant === true,
+        archived: data.archived === true,
         createdAt: Number(data.createdAt || Date.now()),
         updatedAt: Number(data.updatedAt || Date.now()),
       } as OpenLoop;
@@ -855,6 +889,7 @@ class FirebaseBackend {
           linkedView: data.linkedView ? String(data.linkedView) : undefined,
           snoozedUntil: data.snoozedUntil ? Number(data.snoozedUntil) : null,
           userMarkedImportant: data.userMarkedImportant === true,
+          archived: data.archived === true,
           createdAt: Number(data.createdAt || Date.now()),
           updatedAt: Number(data.updatedAt || Date.now()),
         } as OpenLoop;
