@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import AdvancedConversationalChat from './AdvancedConversationalChat';
 import MaterialEstimator from './MaterialEstimator';
 import Progressiveonboarding from './Progressiveonboarding';
@@ -8,6 +9,7 @@ import AuthForm from './AuthForm';
 import { businessProfileManager } from '../lib/businessProfile';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import { getUserProfile } from '../lib/profile';
+import { modeConfig, type LifeMode } from '../lib/lifePreferences';
 import { AIQuoteBuilder } from './AIQuoteBuilder';
 import { AINoteEditor } from './AINoteEditor';
 import { AIEmailComposer } from './AIEmailComposer';
@@ -92,6 +94,7 @@ function detectDevice(): 'desktop' | 'tablet' | 'phone' | 'unknown' {
 }
 
 export const App: React.FC = () => {
+  const router = useRouter();
   const [currentView, setCurrentView] = useState<ViewType>('home');
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -100,67 +103,35 @@ export const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(true);
   const [radarCount, setRadarCount] = useState(0);
+  const [mode, setMode] = useState<LifeMode>('mix');
+  const [pinnedTools, setPinnedTools] = useState<string[]>([]);
+  const [profileLoadError, setProfileLoadError] = useState('');
 
   const currentUser = firebaseBackend.getCurrentUser();
 
   const loadProfile = useCallback(async (targetUserId: string) => {
+    setProfileLoadError('');
     try {
-      const userPreferences = await getUserProfile(targetUserId);
-      if (!userPreferences || (userPreferences.mode !== 'everyday' && userPreferences.mode !== 'business' && userPreferences.mode !== 'mix')) {
-        window.history.replaceState(null, '', '/onboarding');
+      const profile = await getUserProfile(targetUserId);
+      if (!profile) {
         setCurrentView('onboarding');
+        router.replace('/onboarding');
         return;
       }
-
-      // A valid Firebase user profile completes onboarding even when the
-      // optional workspace draft has never been created.
-      if (window.location.pathname === '/onboarding') window.history.replaceState(null, '', '/');
-      setBusinessType(userPreferences.mode === 'everyday' ? 'personal' : userPreferences.mode);
+      setMode(profile.mode);
+      setPinnedTools(profile.tool_overrides?.pinned || []);
+      setBusinessType(profile.mode === 'everyday' ? 'personal' : profile.mode);
       setBusinessName('My Life');
       setCurrentView('home');
-
-      const cloudProfile = await firebaseBackend.getLatestDraft('workspace-profile');
-      if (cloudProfile?.businessName) {
-        const nextBusinessName = String(cloudProfile.businessName);
-        const nextBusinessType = String(cloudProfile.businessType || 'business');
-
-        setBusinessType(nextBusinessType);
-        setBusinessName(nextBusinessName);
-
-        const localProfile = businessProfileManager.loadProfile(targetUserId);
-        if (localProfile) {
-          businessProfileManager.updateProfile(targetUserId, {
-            businessName: nextBusinessName,
-            businessType: nextBusinessType as any,
-          });
-        } else {
-          businessProfileManager.createProfile(
-            targetUserId,
-            nextBusinessName,
-            nextBusinessType as any,
-            firebaseBackend.getCurrentUser()?.email || 'owner@business.local'
-          );
-        }
-
-        setCurrentView('home');
-        return;
-      }
+      // Workspace naming is optional; it cannot block a completed profile.
+      void firebaseBackend.getLatestDraft('workspace-profile').then((workspace) => {
+        if (workspace?.businessName) setBusinessName(String(workspace.businessName));
+      }).catch(() => {});
     } catch (error) {
-      console.warn('Cloud workspace profile unavailable, checking local fallback:', error);
+      console.warn('Could not verify the signed-in profile:', error);
+      setProfileLoadError('Unable to read your Firebase profile. Try again when your connection is available.');
     }
-
-    const profile = businessProfileManager.loadProfile(targetUserId);
-    if (!profile) {
-      // A read error is not evidence that onboarding is incomplete.
-      // Stay on the signed-in home screen instead of trapping users in setup.
-      setCurrentView('home');
-      return;
-    }
-
-    setBusinessType(profile.businessType || 'business');
-    setBusinessName(profile.businessName || 'My Workspace');
-    setCurrentView('home');
-  }, []);
+  }, [router]);
 
   const hydrate = useCallback(async () => {
     try {
@@ -229,6 +200,24 @@ export const App: React.FC = () => {
       unsubscribe();
     };
   }, [isAuthenticated, currentUser?.uid]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const refreshMode = (event: Event) => {
+      const uid = (event as CustomEvent<{ uid?: string }>).detail?.uid;
+      const currentUid = firebaseBackend.getCurrentUser()?.uid;
+      if (uid && uid === currentUid) {
+        void getUserProfile(uid).then((profile) => {
+          if (!profile) return;
+          setMode(profile.mode);
+          setPinnedTools(profile.tool_overrides?.pinned || []);
+          setBusinessType(profile.mode === 'everyday' ? 'personal' : profile.mode);
+        }).catch(error => console.warn('Could not reload My mode:', error));
+      }
+    };
+    window.addEventListener('life-preferences-updated', refreshMode);
+    return () => window.removeEventListener('life-preferences-updated', refreshMode);
+  }, [isAuthenticated]);
 
   const handleAuthSuccess = useCallback(async () => {
     setIsLoading(true);
@@ -326,6 +315,22 @@ export const App: React.FC = () => {
     }
   };
 
+  const orderedSidebarItems = useMemo(() => {
+    const order = modeConfig[mode].toolOrder;
+    const available = new Set([...order, ...pinnedTools, 'connections', 'notes']);
+    if (mode !== 'business') available.delete('materials');
+    const sorter = (a: { id: ViewType }, b: { id: ViewType }) => {
+      const score = (id: ViewType) => {
+        const pinIndex = pinnedTools.indexOf(id);
+        if (pinIndex >= 0) return pinIndex - 100;
+        const index = order.indexOf(id);
+        return index === -1 ? 999 : index;
+      };
+      return score(a.id) - score(b.id);
+    };
+    return [...ASSISTANT_ITEMS, ...WORKSPACE_ITEMS].filter(item => available.has(item.id)).sort(sorter);
+  }, [mode, pinnedTools]);
+
   const activeLabel = useMemo(() => {
     return [...ASSISTANT_ITEMS, ...WORKSPACE_ITEMS, { id: 'settings' as ViewType, label: 'Settings', icon: '⚙' }]
       .find((item) => item.id === currentView)?.label || "Life's Assistant";
@@ -342,6 +347,9 @@ export const App: React.FC = () => {
 
   if (!isAuthenticated) {
     return <AuthForm onSuccess={handleAuthSuccess} />;
+  }
+  if (profileLoadError) {
+    return <div className="boot-screen" role="alert"><p>{profileLoadError}</p><button type="button" onClick={() => void hydrate()}>Retry</button></div>;
   }
 
   // Never derive a workspace identity from a caller-supplied or shared ID.
@@ -386,7 +394,7 @@ export const App: React.FC = () => {
 
         <div className="nav-section">
           <div className="section-label">ASSISTANT</div>
-          {ASSISTANT_ITEMS.map((item) => (
+          {orderedSidebarItems.filter(item => !WORKSPACE_ITEMS.some(work => work.id === item.id)).map((item) => (
             <button
               key={item.id}
               className={`nav-item ${currentView === item.id ? 'active' : ''}`}
@@ -408,7 +416,7 @@ export const App: React.FC = () => {
           </button>
           {workspaceOpen && (
             <div className="submenu">
-              {WORKSPACE_ITEMS.map((item) => (
+              {orderedSidebarItems.filter(item => WORKSPACE_ITEMS.some(work => work.id === item.id)).map((item) => (
                 <button
                   key={item.id}
                   className={`nav-item submenu-item ${currentView === item.id ? 'active' : ''}`}
