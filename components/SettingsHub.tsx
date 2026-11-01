@@ -52,6 +52,8 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
   const [active, setActive] = useState<SettingCategory>('general');
   const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [cloudSync, setCloudSync] = useState<'checking' | 'on' | 'off'>('checking');
   const [cloudCheckedAt, setCloudCheckedAt] = useState<number | null>(null);
 
@@ -137,33 +139,35 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
   };
 
   const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError('');
     try {
-      localStorage.setItem(storageKey, JSON.stringify(prefs));
-      localStorage.setItem('chatbot_name:' + userId, prefs.assistantName);
-
-      await firebaseBackend.saveDraft('assistant-preferences', {
-        assistantName: prefs.assistantName,
-        tone: prefs.tone,
-        memoryEnabled: prefs.memoryEnabled,
-        compactMode: prefs.compactMode,
-        timezone: prefs.timezone,
-        mode: prefs.mode,
-        primary_slips: prefs.primary_slips,
-        capture_pref: prefs.capture_pref,
-        tool_overrides: prefs.tool_overrides,
-        updatedAt: Date.now(),
-      });
       await firebaseBackend.updateUserProfile(userId, {
         mode: prefs.mode,
         primary_slips: prefs.primary_slips,
         capture_pref: prefs.capture_pref || null,
         tool_overrides: prefs.tool_overrides,
       });
-
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(prefs));
+        localStorage.setItem('chatbot_name:' + userId, prefs.assistantName);
+      } catch (error) { console.warn('Local preferences unavailable:', error); }
+      void firebaseBackend.saveDraft('assistant-preferences', {
+        assistantName: prefs.assistantName, tone: prefs.tone,
+        memoryEnabled: prefs.memoryEnabled, compactMode: prefs.compactMode,
+        timezone: prefs.timezone, mode: prefs.mode,
+        primary_slips: prefs.primary_slips, capture_pref: prefs.capture_pref,
+        tool_overrides: prefs.tool_overrides, updatedAt: Date.now(),
+      }).catch(error => console.warn('Optional preferences backup failed:', error));
+      window.dispatchEvent(new CustomEvent('life-preferences-updated', { detail: { uid: userId } }));
       setSaved(true);
-      window.setTimeout(() => setSaved(false), 1800);
-    } catch {
+    } catch (error) {
+      console.warn('Could not save My mode:', error);
       setSaved(false);
+      setSaveError('Could not save your mode to Firebase. Try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -197,6 +201,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
             {active === 'general' && (
               <div className="section-content">
                 <div className="section-title"><span className="eyebrow">GENERAL</span><h2>Workspace basics</h2></div>
+                <label className="field"><span>My mode</span><select aria-label="My mode" value={prefs.mode} onChange={(event) => update('mode', event.target.value as LifeMode)}><option value="everyday">Everyday / Personal</option><option value="business">Business / Freelance</option><option value="mix">Mix of both</option></select><small>Changes tools, suggested prompts, and Radar priorities. Select a mode, then Save preferences.</small></label>
                 <label className="field">
                   <span>Timezone</span>
                   <select value={prefs.timezone} onChange={(event) => update('timezone', event.target.value)}>
@@ -239,7 +244,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
                   return <button key={slip.id} type="button" className={selected ? 'preference-chip selected' : 'preference-chip'} aria-pressed={selected} onClick={toggle}>{slip.label}</button>;
                 })}</div></div>
                 <label className="field"><span>Capture preference</span><select value={prefs.capture_pref} onChange={(event) => update('capture_pref', event.target.value as CapturePreference)}><option value="">Not set</option><option value="chat">Chat / type</option><option value="voice">Voice</option><option value="forward">Forward emails or notes later</option></select></label>
-                <div className="field"><span>Pin or hide tools</span><small>Pinned tools move to the top. Hidden tools leave the home grid.</small><div className="tool-overrides">{ALL_MODE_TOOL_IDS.map((tool) => {
+                <div className="field"><span>Pin or hide tools</span><small>Pinned tools move to the top. Hidden tools leave the home grid.</small><div className="tool-overrides">{ALL_MODE_TOOL_IDS.filter(tool => tool !== 'materials' || prefs.mode === 'business').map((tool) => {
                   const pinned = prefs.tool_overrides.pinned.includes(tool);
                   const hidden = prefs.tool_overrides.hidden.includes(tool);
                   const updateOverrides = (next: { pinned: string[]; hidden: string[] }) => update('tool_overrides', next);
@@ -308,7 +313,7 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
               </div>
             )}
 
-            <div className="save-row"><span className={`saved ${saved ? 'show' : ''}`}>Saved</span><button onClick={save}>Save preferences</button></div>
+            <div className="save-row"><span className={`saved ${saved || saveError ? 'show' : ''}`} role="status">{saveError || (saved ? 'Saved to Firebase' : '')}</span><button type="button" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save preferences'}</button></div>
           </section>
         </div>
       </div>
