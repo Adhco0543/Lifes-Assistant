@@ -30,6 +30,7 @@ const QUICK_ACTIONS = [
   { id: 'quotes', icon: '▤', title: 'Build a quote', detail: 'Turn scope, labor, and materials into a draft.' },
   { id: 'email', icon: '↗', title: 'Email drafts', detail: 'Write a message for your approval.' },
   { id: 'projects', icon: '▦', title: 'Projects', detail: 'Keep goals, context, and status together.' },
+  { id: 'materials', icon: '◇', title: 'Materials', detail: 'Estimate materials for project work.' },
 ];
 
 export default function LifeAssistantHome({
@@ -151,7 +152,7 @@ export default function LifeAssistantHome({
             </div>
             <div className="workspace-label">
               <span className="status-dot" />
-              {businessName || 'Your workspace'} · Release candidate
+              {businessName || 'Your workspace'} · {preferences.mode === 'mix' ? 'Mix' : preferences.mode === 'business' ? 'Business' : 'Everyday'} mode
             </div>
           </div>
 
@@ -268,7 +269,7 @@ export default function LifeAssistantHome({
             </div>
           </div>
 
-          <div className="panel status-panel">
+          {process.env.NODE_ENV === 'development' && <div className="panel status-panel">
             <div className="panel-heading">
               <span className="section-kicker">LIVE STATUS</span>
               <h3>What is real right now</h3>
@@ -302,7 +303,7 @@ export default function LifeAssistantHome({
                 <p>Still being hardened so scheduled work can run even when the browser is closed.</p>
               </div>
             </div>
-          </div>
+          </div>}
         </section>
       </div>
 
