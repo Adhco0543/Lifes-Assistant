@@ -56,17 +56,25 @@ export default function LifeAssistantHome({
     let active = true;
     const load = async () => {
       try {
-        const [stored, cloud, lifeProfile] = await Promise.all([
-          Promise.resolve(localStorage.getItem(`lifes-assistant-preferences:${userId}`)),
-          firebaseBackend.getLatestDraft('assistant-preferences'),
-          firebaseBackend.getUserProfile(userId),
-        ]);
+        const profile = await firebaseBackend.getUserProfile(userId);
+        if (profile) {
+          if (active) setPreferences(normalizeLifePreferences(profile));
+          return;
+        }
+        // The Firebase profile is authoritative. Compatibility copies are
+        // only used if an older profile has not yet been migrated.
+        const stored = localStorage.getItem(`lifes-assistant-preferences:${userId}`);
         const local = stored ? JSON.parse(stored) as unknown : null;
-        const source = lifeProfile || (cloud && ('mode' in cloud || 'primary_slips' in cloud) ? cloud : local);
-        if (active) setPreferences(normalizeLifePreferences(source));
+        const cloud = await firebaseBackend.getLatestDraft('assistant-preferences').catch(() => null);
+        if (active) setPreferences(normalizeLifePreferences(cloud || local));
       } catch (error) {
         console.warn('Could not load Life profile preferences:', error);
-        if (active) setPreferences(DEFAULT_LIFE_PREFERENCES);
+        try {
+          const local = localStorage.getItem(`lifes-assistant-preferences:${userId}`);
+          if (active) setPreferences(normalizeLifePreferences(local ? JSON.parse(local) : null));
+        } catch {
+          if (active) setPreferences(DEFAULT_LIFE_PREFERENCES);
+        }
       }
     };
     void load();
