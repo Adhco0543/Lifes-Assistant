@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
+import { getRadarArchiveCandidates, isAllenQuoteLoop } from '../lib/radarArchive';
 import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, explainRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
 
 interface RadarCenterProps {
@@ -40,6 +41,7 @@ export default function RadarCenter({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [archiveDays, setArchiveDays] = useState(14);
   const [status, setStatus] = useState('Loading Radar…');
   const [scanning, setScanning] = useState(false);
   const [preferences, setPreferences] = useState<LifePreferences>(DEFAULT_LIFE_PREFERENCES);
@@ -143,23 +145,30 @@ export default function RadarCenter({
   };
 
   const bulkArchive = async (ids = selectedIds) => {
-    if (!ids.length) return;
+    if (!ids.length || bulkBusy) return;
     setBulkBusy(true);
-    try {
-      await Promise.all(ids.map((id) => firebaseBackend.updateOpenLoop(id, { archived: true })));
-      setSelectedIds((current) => current.filter((id) => !ids.includes(id)));
-      setStatus(ids.length + ' ' + (ids.length === 1 ? 'item' : 'items') + ' archived. You can restore them from Archived.');
-    } catch {
-      setStatus('Some items could not be archived. Try again.');
-    } finally {
-      setBulkBusy(false);
+    const results = await Promise.allSettled(ids.map((id) => firebaseBackend.updateOpenLoop(id, { archived: true })));
+    const archived = ids.filter((_, index) => results[index].status === 'fulfilled');
+    setSelectedIds((current) => current.filter((id) => !archived.includes(id)));
+    setStatus(results.some((result) => result.status === 'rejected')
+      ? `${archived.length} archived; some items failed. Try again.`
+      : `${archived.length} archived. Restore them from Archived anytime.`);
+    setBulkBusy(false);
+  };
+
+  const archiveMatching = (kind: 'code-review' | 'older') => {
+    const candidates = getRadarArchiveCandidates(loops, kind, archiveDays);
+    if (!candidates.length) { setStatus('No safe archive candidates found.'); return; }
+    const label = kind === 'code-review' ? 'old code-review test items' : `items older than ${archiveDays} days`;
+    if (window.confirm(`Archive ${candidates.length} ${label}? Important quotes, urgent and pinned loops are excluded. Items can be restored.`)) {
+      void bulkArchive(candidates.map((loop) => loop.id));
     }
   };
 
-  const archiveOld = () => {
-    const cutoff = Date.now() - 14 * DAY_MS;
-    const oldIds = loops.filter((loop) => !loop.archived && loop.status !== 'resolved' && loop.createdAt < cutoff).map((loop) => loop.id);
-    void bulkArchive(oldIds);
+  const handleLoop = (loop: OpenLoop) => {
+    const view = suggestedRadarView(loop);
+    if (view === 'chat') localStorage.setItem('assistant_launch_prompt:' + userId, loop.nextAction || loop.title);
+    onNavigate(view);
   };
 
   const restore = async (loop: OpenLoop) => {
@@ -271,7 +280,7 @@ export default function RadarCenter({
             <strong>{top.title}</strong>
             <small>{top.nextAction || top.summary || 'This is Radar’s top current signal.'}</small>
           </div>
-          <button onClick={() => onNavigate(suggestedRadarView(top))}>
+          <button onClick={() => handleLoop(top)}>
             Open →
           </button>
         </section>
@@ -282,7 +291,12 @@ export default function RadarCenter({
           <span>{selectedIds.length ? selectedIds.length + ' selected' : 'Clean up older items'}</span>
           <button type="button" onClick={() => void bulkResolve()} disabled={!selectedIds.length || bulkBusy}>Resolve selected</button>
           <button type="button" onClick={() => void bulkArchive()} disabled={!selectedIds.length || bulkBusy}>Archive selected</button>
-          <button type="button" onClick={archiveOld} disabled={bulkBusy}>Archive old (14+ days)</button>
+          <button type="button" onClick={() => archiveMatching('code-review')} disabled={bulkBusy || getRadarArchiveCandidates(loops, 'code-review').length === 0}>Archive old code-review loops ({getRadarArchiveCandidates(loops, 'code-review').length})</button>
+          <label htmlFor="radar-archive-days">Older than</label>
+          <select id="radar-archive-days" value={archiveDays} onChange={(event) => setArchiveDays(Number(event.target.value))} disabled={bulkBusy}>
+            {[7, 14, 30, 60, 90].map((days) => <option key={days} value={days}>{days} days</option>)}
+          </select>
+          <button type="button" onClick={() => archiveMatching('older')} disabled={bulkBusy || getRadarArchiveCandidates(loops, 'older', archiveDays).length === 0}>Archive older ({getRadarArchiveCandidates(loops, 'older', archiveDays).length})</button>
         </div>
       )}
       <nav className="filters" aria-label="Radar filters">
@@ -301,8 +315,8 @@ export default function RadarCenter({
       <section className="list">
         {visible.length === 0 ? (
           <div className="empty">
-            <strong>{filter === 'active' ? (preferences.mode === 'business' ? 'No client or project loops need attention.' : preferences.mode === 'everyday' ? 'Nothing personal needs attention right now.' : 'Nothing needs attention right now.') : filter === 'archived' ? 'Your archive is clear.' : 'No items here.'}</strong>
-            <p>{filter === 'active' ? 'New items from your saved workspace will appear here.' : filter === 'archived' ? 'Archived items can be restored at any time.' : 'Radar has nothing matching this filter.'}</p>
+            <strong>{filter === 'active' ? 'Nothing open right now. Tell me what you want to get done.' : filter === 'archived' ? 'Your archive is clear.' : 'No items here.'}</strong>
+            <p>{filter === 'active' ? 'Start a conversation or add a task. Life Radar will help you follow through.' : filter === 'archived' ? 'Archived items can be restored at any time.' : 'Radar has nothing matching this filter.'}</p>
           </div>
         ) : (
           visible.map((loop) => {
@@ -354,7 +368,7 @@ export default function RadarCenter({
                     <>
                       <button
                         className="primary"
-                        onClick={() => onNavigate(suggestedRadarView(loop))}
+                        onClick={() => handleLoop(loop)}
                       >
                         Handle it
                       </button>
