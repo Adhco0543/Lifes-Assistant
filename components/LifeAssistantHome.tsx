@@ -87,7 +87,15 @@ export default function LifeAssistantHome({
         const records = await firebaseBackend.getRecentBusinessRecords(6);
         if (!active) return;
 
-        const mapped = records.slice(0, 5).map((record) => {
+        const mapped = records
+          .filter(record => {
+            const kind = String(record.kind || '').toLowerCase();
+            const data = (record.data || {}) as Record<string, unknown>;
+            const title = String(data.title || data.name || '').toLowerCase();
+            return !/spatial|room.?scan|ar-workspace|webxr/i.test(kind + ' ' + title);
+          })
+          .slice(0, 5)
+          .map((record) => {
           const data = (record.data || {}) as Record<string, unknown>;
           const kind = String(record.kind || 'workspace');
           const title =
@@ -210,7 +218,7 @@ export default function LifeAssistantHome({
               <button
                 key={item.id}
                 className="recent-card"
-                onClick={() => onNavigate(item.kind === 'quote' ? 'quotes' : item.kind === 'note' ? 'notes' : item.kind === 'task' ? 'tasks' : 'receipts')}
+                onClick={() => onNavigate(item.kind === 'quote' ? 'quotes' : item.kind === 'note' ? 'notes' : item.kind === 'task' ? 'tasks' : item.kind === 'project' ? 'projects' : 'search')}
               >
                 <span className="recent-kind">{item.kind.toUpperCase()}</span>
                 <strong>{item.title}</strong>
