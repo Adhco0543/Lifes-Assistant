@@ -857,7 +857,7 @@ class FirebaseBackend {
     const openLoopsQuery = query(
       collection(this.db, "users", this.auth.currentUser.uid, "openLoops"),
       orderBy("updatedAt", "desc"),
-      queryLimit(50)
+      queryLimit(250)
     );
 
     return onSnapshot(openLoopsQuery, (snapshot) => {
