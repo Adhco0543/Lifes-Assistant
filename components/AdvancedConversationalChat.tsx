@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import { modeConfig } from '../lib/modeConfig';
+import type { LifeMode } from '../lib/lifePreferences';
 import type { ChatMessage, Conversation } from '../lib/firebaseBackend';
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, SUPPORTED_ATTACHMENT_EXTENSIONS, formatFileSize, readFileAsDataUrl, prepareImageAttachment } from '../lib/chatAttachments';
 import type { PendingAttachment } from '../lib/chatAttachments';
@@ -94,6 +96,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [persistentMemory, setPersistentMemory] = useState<string[]>([]);
   const [pendingAction, setPendingAction] = useState<ChatApiResponse | null>(null);
   const [queuedLaunch, setQueuedLaunch] = useState(false);
+  const [userMode, setUserMode] = useState<LifeMode>('mix');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [historyStatus, setHistoryStatus] = useState('');
@@ -110,6 +113,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
   useEffect(() => {
     let active = true;
+
+    void firebaseBackend.getUserProfile(userId || '').then(profile => {
+      if (active && (profile?.mode === 'everyday' || profile?.mode === 'business' || profile?.mode === 'mix')) setUserMode(profile.mode);
+    }).catch(() => {});
 
     const loadPreferences = async () => {
       const savedName = localStorage.getItem('chatbot_name:' + userId);
@@ -1192,7 +1199,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               name="message-input"
               ref={inputRef}
               type="text"
-              placeholder={'Message ' + chatbotName}
+              placeholder={modeConfig[userMode].placeholderText}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyPress}
