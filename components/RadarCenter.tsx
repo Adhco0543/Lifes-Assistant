@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
-import { getRadarArchiveCandidates, isAllenQuoteLoop } from '../lib/radarArchive';
+import { getRadarArchiveCandidates } from '../lib/radarArchive';
 import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, explainRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
 
 interface RadarCenterProps {
