@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import { syncWorkspaceRadar } from '../lib/workspaceRadar';
+import { getRadarArchiveCandidates } from '../lib/radarArchive';
 
 interface GlobalRadarScannerProps {
   userId: string;
@@ -27,8 +28,14 @@ export default function GlobalRadarScanner({
 
       try {
         await firebaseBackend.initialize();
-        const current = await firebaseBackend.getOpenLoops(50);
-        const changes = await syncWorkspaceRadar(current);
+        const current = await firebaseBackend.getOpenLoops(250);
+        // One-time, reversible cleanup on a signed-in account: only known old
+        // development-test loop titles, never quotes or important commitments.
+        const staleTests = getRadarArchiveCandidates(current, 'code-review');
+        const cleanup = await Promise.allSettled(staleTests.map(loop => firebaseBackend.updateOpenLoop(loop.id, { archived: true })));
+        const archivedIds = new Set(staleTests.filter((_, i) => cleanup[i].status === 'fulfilled').map(loop => loop.id));
+        const changes = archivedIds.size + await syncWorkspaceRadar(current.map(loop => archivedIds.has(loop.id) ? { ...loop, archived: true } : loop));
+        if (cleanup.some(result => result.status === 'rejected')) console.warn('Some old test loops could not be archived.');
 
         if (!cancelled) {
           window.dispatchEvent(
