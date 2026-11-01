@@ -8,7 +8,7 @@ export function isAllenQuoteLoop(loop: Pick<RadarArchiveLoop, 'title'>): boolean
 }
 
 export function isLegacyCodeReviewLoop(loop: Pick<RadarArchiveLoop, 'title'>): boolean {
-  return /\b(?:review(?:\s+(?:the|my))?\s+code|github\s+repository|(?:retriev(?:e|ing)\s+(?:the\s+|my\s+)?(?:github\s+|source\s+)?(?:repository|source\s+files?)|source\s+files?))\b/i.test(loop.title);
+  return /\b(?:review(?:\s+(?:the|my))?\s+code|github\s+repository|retriev(?:e|ing)\s+github|(?:retriev(?:e|ing)\s+(?:the\s+|my\s+)?(?:github\s+|source\s+)?(?:repository|source\s+files?)|source\s+files?))\b/i.test(loop.title);
 }
 
 function isImportantWork(loop: RadarArchiveLoop, now: number): boolean {
