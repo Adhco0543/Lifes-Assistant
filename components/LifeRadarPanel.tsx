@@ -277,13 +277,13 @@ export default function LifeRadarPanel({
           <div className="radar-clear">
             <div className="clear-mark">✓</div>
             <div>
-              <strong>Radar is clear.</strong>
+              <strong>Nothing open right now.</strong>
               <p>
                 {preferences.mode === 'business'
-                  ? 'No client follow-ups, quotes, or project next steps need attention right now.'
+                  ? 'Tell me what you want to get done. I’ll help keep it moving.'
                   : preferences.mode === 'everyday'
-                    ? 'No appointments, personal follow-ups, or everyday tasks need attention right now.'
-                    : 'No personal or business follow-ups need attention right now.'}
+                    ? 'Tell me what you want to get done. I’ll help you remember.'
+                    : 'Tell me what you want to get done and I’ll help you follow through.'}
               </p>
             </div>
             <button onClick={() => onNavigate('chat')}>
