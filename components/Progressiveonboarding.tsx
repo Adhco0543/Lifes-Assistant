@@ -191,19 +191,10 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
             </div>
           )}
 
-          {false && (
-            <div className="confirmation-card">
-              <span className="confirm-check">✓</span>
-              <p>Got it. I’ll prioritize <strong>{mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'}</strong> and surface things related to <strong>{primarySlips.includes('unsure') ? 'a bit of everything' : primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ')}</strong>.</p>
-              <small>{capturePref ? `Capture preference: ${capturePref === 'forward' ? 'forward emails or notes later' : capturePref}.` : 'Capture preference skipped.'} You can change this anytime in Settings.</small>
-            </div>
-          )}
-
           {status && <div className="status">{status}</div>}
 
           <footer>
             <button className="back" type="button" onClick={back} disabled={stepIndex === 0 || saving}>Back</button>
-            {step.id === 'capture' && <button className="back" type="button" onClick={() => { setCapturePref(''); void next(); }} disabled={saving}>Skip</button>}
             <button className="next" type="button" onClick={next} disabled={!canContinue || saving}>
               {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Finish setup and open Life’s Assistant' : 'Continue'}
             </button>
