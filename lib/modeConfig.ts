@@ -24,8 +24,8 @@ export const modeConfig: Record<LifeMode, {toolOrder: string[]; examplePrompts: 
 export function getOrderedTools(profile: {mode?: LifeMode;tool_overrides?: {pinned?: string[];hidden?: string[]}} | null | undefined): string[] {
   const config = modeConfig[profile?.mode || 'mix'];
   const hidden = new Set(profile?.tool_overrides?.hidden || []);
-  const pinned = (profile?.tool_overrides?.pinned || []).filter(id => !hidden.has(id) && config.toolOrder.includes(id));
+  const pinned = (profile?.tool_overrides?.pinned || []).filter(id => !hidden.has(id) && (config.toolOrder.includes(id) || (profile?.mode === 'business' && id === 'materials')));
   return [...new Set([...pinned, ...config.toolOrder.filter(id => !hidden.has(id))])];
 }
 
-export const ALL_MODE_TOOL_IDS = ['radar', 'chat', 'tasks', 'people', 'memory', 'brief', 'search', 'quotes', 'email', 'projects'] as const;
+export const ALL_MODE_TOOL_IDS = ['radar', 'chat', 'tasks', 'people', 'memory', 'brief', 'search', 'quotes', 'email', 'projects', 'materials'] as const;
