@@ -56,7 +56,9 @@ export function getVisibleTools<T extends { id: string }>(profile: Pick<LifePref
   const hidden = new Set(profile.tool_overrides.hidden);
   const pinned = profile.tool_overrides.pinned.filter((id) => !hidden.has(id));
   const order = modeConfig[profile.mode].toolOrder;
-  return tools.filter((tool) => !hidden.has(tool.id)).sort((a, b) => {
+  const allowed = new Set([...order, ...pinned]);
+  if (profile.mode !== 'business') allowed.delete('materials');
+  return tools.filter((tool) => !hidden.has(tool.id) && allowed.has(tool.id)).sort((a, b) => {
     const aPinned = pinned.indexOf(a.id);
     const bPinned = pinned.indexOf(b.id);
     if (aPinned >= 0 || bPinned >= 0) return aPinned < 0 ? 1 : bPinned < 0 ? -1 : aPinned - bPinned;
