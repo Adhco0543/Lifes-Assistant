@@ -443,7 +443,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       const activeConversationLoops = existing
         .filter(
           (loop) =>
-            loop.status !== 'resolved' &&
+            loop.status !== 'resolved' && !loop.archived &&
             loop.source === 'conversation'
         )
         .slice(0, 20);
