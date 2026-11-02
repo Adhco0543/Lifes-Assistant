@@ -86,7 +86,15 @@ export default function LifeAssistantHome({
         const records = await firebaseBackend.getRecentBusinessRecords(6);
         if (!active) return;
 
-        const mapped = records.slice(0, 5).map((record) => {
+        const visibleRecords = records.filter((record) => {
+          const data = (record.data || {}) as Record<string, unknown>;
+          const kind = String(record.kind || '').toLowerCase();
+          const title = String(data.title || '').toLowerCase();
+
+          return !kind.includes('spatial') && !title.includes('room scan');
+        });
+
+        const mapped = visibleRecords.slice(0, 5).map((record) => {
           const data = (record.data || {}) as Record<string, unknown>;
           const kind = String(record.kind || 'workspace');
           const title =
