@@ -89,23 +89,67 @@ export default function RadarCenter({
     };
   }, [userId]);
 
+  const radarLoops = useMemo(() => {
+    const unique = new Map<string, OpenLoop>();
+    for (const loop of loops) {
+      if (loop.archived || loop.status === 'resolved') {
+        unique.set(loop.id, loop);
+        continue;
+      }
+      const key = loop.title.toLowerCase().replace(/\s+/g, ' ').trim();
+      const existing = unique.get(key);
+      if (!existing || scoreRadarItem(loop, preferences) > scoreRadarItem(existing, preferences) || loop.updatedAt > existing.updatedAt) {
+        unique.set(key, loop);
+      }
+    }
+    return [...unique.values()];
+  }, [loops, preferences]);
+
+  const emptySuggestions = preferences.mode === 'business'
+    ? ['Draft a client follow-up for me.', 'Help me choose the next project step.']
+    : preferences.mode === 'everyday'
+      ? ['Help me plan the rest of today.', 'What should I remember this week?']
+      : ['Help me choose today’s top priority.', 'What should I follow up on next?'];
+
+  const startPrompt = (prompt: string) => {
+    localStorage.setItem('assistant_launch_prompt:' + userId, prompt);
+    onNavigate('chat');
+  };
+
+  const handleLoop = async (loop: OpenLoop) => {
+    const view = suggestedRadarView(loop);
+    const context = loop.nextAction || loop.summary || loop.title;
+    if (view === 'quotes') {
+      const draft = { projectDescription: loop.title, notes: context, sourceOpenLoopId: loop.id, updatedAt: Date.now() };
+      localStorage.setItem('quote_draft', JSON.stringify(draft));
+      await firebaseBackend.saveDraft('handoff-quote', draft).catch(() => undefined);
+    } else if (view === 'email') {
+      const draft = { subject: loop.title, request: context, sourceOpenLoopId: loop.id, updatedAt: Date.now() };
+      localStorage.setItem('email_draft', JSON.stringify(draft));
+      await firebaseBackend.saveDraft('handoff-email', draft).catch(() => undefined);
+    } else if (view === 'chat') {
+      localStorage.setItem('assistant_launch_prompt:' + userId, context);
+    }
+    onNavigate(view);
+  };
+
   const counts = useMemo(() => {
     return {
-      active: loops.filter(isVisibleActive).length,
-      waiting: loops.filter((loop) => !loop.archived && loop.status === 'waiting').length,
-      snoozed: loops.filter(
+      active: radarLoops.filter(isVisibleActive).length,
+      waiting: radarLoops.filter((loop) => !loop.archived && loop.status === 'waiting').length,
+      snoozed: radarLoops.filter(
         (loop) =>
           !loop.archived && loop.status === 'snoozed' &&
           Boolean(loop.snoozedUntil && loop.snoozedUntil > Date.now())
       ).length,
-      resolved: loops.filter((loop) => loop.status === 'resolved' && !loop.archived).length,
-      archived: loops.filter((loop) => loop.archived).length,
-      all: loops.filter((loop) => !loop.archived).length,
+      resolved: radarLoops.filter((loop) => loop.status === 'resolved' && !loop.archived).length,
+      archived: radarLoops.filter((loop) => loop.archived).length,
+      all: radarLoops.filter((loop) => !loop.archived).length,
     };
-  }, [loops]);
+  }, [radarLoops]);
 
   const visible = useMemo(() => {
-    return loops
+    return radarLoops
       .filter((loop) => {
         if (filter === 'archived') return Boolean(loop.archived);
         if (filter === 'all') return !loop.archived;
@@ -123,7 +167,7 @@ export default function RadarCenter({
         if (attention) return attention;
         return b.updatedAt - a.updatedAt;
       });
-  }, [filter, loops, preferences]);
+  }, [filter, preferences, radarLoops]);
 
   const toggleSelected = (id: string) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -158,7 +202,7 @@ export default function RadarCenter({
 
   const archiveOld = () => {
     const cutoff = Date.now() - 14 * DAY_MS;
-    const oldIds = loops.filter((loop) => !loop.archived && loop.status !== 'resolved' && loop.createdAt < cutoff).map((loop) => loop.id);
+    const oldIds = radarLoops.filter((loop) => !loop.archived && loop.status !== 'resolved' && loop.createdAt < cutoff).map((loop) => loop.id);
     void bulkArchive(oldIds);
   };
 
@@ -217,7 +261,7 @@ export default function RadarCenter({
     await firebaseBackend.resolveOpenLoop(loop.id);
   };
 
-  const top = loops.filter(isVisibleActive).sort((a, b) => {
+  const top = radarLoops.filter(isVisibleActive).sort((a, b) => {
     const attention = scoreRadarItem(b, preferences) - scoreRadarItem(a, preferences);
     if (attention) return attention;
     return b.updatedAt - a.updatedAt;
@@ -271,7 +315,7 @@ export default function RadarCenter({
             <strong>{top.title}</strong>
             <small>{top.nextAction || top.summary || 'This is Radar’s top current signal.'}</small>
           </div>
-          <button onClick={() => onNavigate(suggestedRadarView(top))}>
+          <button onClick={() => void handleLoop(top)}>
             Open →
           </button>
         </section>
@@ -301,8 +345,9 @@ export default function RadarCenter({
       <section className="list">
         {visible.length === 0 ? (
           <div className="empty">
-            <strong>{filter === 'active' ? (preferences.mode === 'business' ? 'No client or project loops need attention.' : preferences.mode === 'everyday' ? 'Nothing personal needs attention right now.' : 'Nothing needs attention right now.') : filter === 'archived' ? 'Your archive is clear.' : 'No items here.'}</strong>
-            <p>{filter === 'active' ? 'New items from your saved workspace will appear here.' : filter === 'archived' ? 'Archived items can be restored at any time.' : 'Radar has nothing matching this filter.'}</p>
+            <strong>{filter === 'active' ? 'Nothing open right now.' : filter === 'archived' ? 'Your archive is clear.' : 'No items here.'}</strong>
+            <p>{filter === 'active' ? 'Tell me what you want to get done today.' : filter === 'archived' ? 'Archived items can be restored at any time.' : 'Radar has nothing matching this filter.'}</p>
+            {filter === 'active' && <div className="empty-actions">{emptySuggestions.map((prompt) => <button key={prompt} onClick={() => startPrompt(prompt)}>{prompt}</button>)}</div>}
           </div>
         ) : (
           visible.map((loop) => {
@@ -354,7 +399,7 @@ export default function RadarCenter({
                     <>
                       <button
                         className="primary"
-                        onClick={() => onNavigate(suggestedRadarView(loop))}
+                        onClick={() => void handleLoop(loop)}
                       >
                         Handle it
                       </button>
@@ -599,6 +644,8 @@ export default function RadarCenter({
         }
         .empty strong { color: #c8c8c8; }
         .empty p { margin: 4px 0 0; font-size: .7rem; }
+        .empty-actions { margin-top: 12px; display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; }
+        .empty-actions button { padding: 8px 10px; font-size: .64rem; }
         @media (max-width: 720px) {
           .radar-center { padding: 18px 12px; }
           .hero { align-items: center; }
