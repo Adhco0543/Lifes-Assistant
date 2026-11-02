@@ -29,7 +29,6 @@ const QUICK_ACTIONS = [
   { id: 'search', icon: '⌕', title: 'Search', detail: 'Find saved tasks, notes, people, and conversations.' },
   { id: 'quotes', icon: '▤', title: 'Build a quote', detail: 'Turn scope, labor, and materials into a draft.' },
   { id: 'email', icon: '↗', title: 'Email drafts', detail: 'Write a message for your approval.' },
-  { id: 'projects', icon: '▦', title: 'Projects', detail: 'Keep goals, context, and status together.' },
 ];
 
 export default function LifeAssistantHome({
@@ -76,7 +75,6 @@ export default function LifeAssistantHome({
     return getVisibleTools(preferences, QUICK_ACTIONS);
   }, [preferences.mode, preferences.tool_overrides]);
   const coreActions = orderedActions.filter((action) => MODE_TOOL_ORDER[preferences.mode].includes(action.id) || preferences.tool_overrides.pinned.includes(action.id));
-  const moreActions = orderedActions.filter((action) => !coreActions.some((core) => core.id === action.id));
 
   useEffect(() => {
     let active = true;
@@ -142,6 +140,26 @@ export default function LifeAssistantHome({
 
     localStorage.setItem('assistant_launch_prompt:' + userId, prompt);
     setCommand('');
+    onNavigate('chat');
+  };
+
+  const openRecentItem = (item: RecentItem) => {
+    const view = item.kind === 'quote'
+      ? 'quotes'
+      : item.kind === 'note'
+        ? 'notes'
+        : item.kind === 'task'
+          ? 'tasks'
+          : 'chat';
+
+    if (view === 'chat') {
+      localStorage.setItem('assistant_launch_prompt:' + userId, 'Continue: ' + item.title);
+    }
+    onNavigate(view);
+  };
+
+  const startPrompt = (prompt: string) => {
+    localStorage.setItem('assistant_launch_prompt:' + userId, prompt);
     onNavigate('chat');
   };
 
@@ -219,11 +237,11 @@ export default function LifeAssistantHome({
                 <span><strong>Start with one thought</strong><small>Your saved work will begin appearing here.</small></span>
                 <span className="arrow">→</span>
               </button>
-            ) : recentItems.map((item) => (
+            ) : recentItems.map((item, index) => (
               <button
                 key={item.id}
-                className="recent-card"
-                onClick={() => onNavigate(item.kind === 'quote' ? 'quotes' : item.kind === 'note' ? 'notes' : item.kind === 'task' ? 'tasks' : 'receipts')}
+                className={index === 0 ? 'recent-card featured' : 'recent-card'}
+                onClick={() => openRecentItem(item)}
               >
                 <span className="recent-kind">{item.kind.toUpperCase()}</span>
                 <strong>{item.title}</strong>
@@ -254,16 +272,6 @@ export default function LifeAssistantHome({
               </button>
             ))}
           </div>
-          <details className="more-tools">
-            <summary>More tools</summary>
-            <div className="quick-grid">
-              {moreActions.map((action) => (
-                <button key={action.id} className="quick-card" onClick={() => onNavigate(action.id)}>
-                  <span className="quick-icon">{action.icon}</span><span className="quick-copy"><strong>{action.title}</strong><small>{action.detail}</small></span><span className="arrow">↗</span>
-                </button>
-              ))}
-            </div>
-          </details>
         </section>
 
         <section className="lower-grid">
@@ -282,39 +290,15 @@ export default function LifeAssistantHome({
             </div>
           </div>
 
-          <div className="panel status-panel">
+          <div className="panel focus-panel">
             <div className="panel-heading">
-              <span className="section-kicker">LIVE STATUS</span>
-              <h3>What is real right now</h3>
+              <span className="section-kicker">TODAY&apos;S FOCUS</span>
+              <h3>Three quick ways to move today forward.</h3>
             </div>
-
-            <div className="status-row">
-              <span className="status-icon ok">✓</span>
-              <div>
-                <strong>Separate user accounts</strong>
-                <p>Allen can create his own sign-in and get his own workspace.</p>
-              </div>
-            </div>
-            <div className="status-row">
-              <span className="status-icon ok">✓</span>
-              <div>
-                <strong>Conversation storage</strong>
-                <p>Firebase sync is configured for signed-in chat, with local fallback if Firestore access is restricted.</p>
-              </div>
-            </div>
-            <div className="status-row">
-              <span className="status-icon guard">◇</span>
-              <div>
-                <strong>Approval-first actions</strong>
-                <p>Sending or changing things outside the app should require confirmation.</p>
-              </div>
-            </div>
-            <div className="status-row">
-              <span className="status-icon build">↻</span>
-              <div>
-                <strong>Persistent agent mode</strong>
-                <p>Still being hardened so scheduled work can run even when the browser is closed.</p>
-              </div>
+            <div className="focus-list">
+              <button onClick={() => onNavigate('radar')}><span>1</span><strong>Check what needs attention</strong><small>Open Life Radar</small></button>
+              {recentItems[0] && <button onClick={() => openRecentItem(recentItems[0])}><span>2</span><strong>Continue {recentItems[0].title}</strong><small>Pick up where you stopped</small></button>}
+              <button onClick={() => startPrompt(TRY_ASKING_BY_MODE[preferences.mode][0])}><span>{recentItems[0] ? '3' : '2'}</span><strong>{TRY_ASKING_BY_MODE[preferences.mode][0]}</strong><small>Start in under 30 seconds</small></button>
             </div>
           </div>
         </section>
@@ -514,6 +498,11 @@ export default function LifeAssistantHome({
           cursor: pointer;
         }
         .recent-card { display: flex; flex-direction: column; }
+        .recent-card.featured {
+          grid-column: span 2;
+          border-color: #47524c;
+          background: linear-gradient(135deg, #2b332f, #272727 62%);
+        }
         .recent-card:hover, .recent-empty:hover { background: #2d2d2d; border-color: #414141; }
         .recent-kind {
           color: #707070;
@@ -565,9 +554,6 @@ export default function LifeAssistantHome({
           grid-template-columns: repeat(8, minmax(0, 1fr));
           gap: 10px;
         }
-        .more-tools { margin-top: 12px; }
-        .more-tools summary { width: fit-content; color: #a6a6a6; font-size: .72rem; cursor: pointer; padding: 8px 0; }
-        .more-tools[open] .quick-grid { margin-top: 8px; }
         .quick-card {
           min-height: 142px;
           padding: 16px;
@@ -634,33 +620,35 @@ export default function LifeAssistantHome({
           cursor: pointer;
         }
         .prompt-list button:hover { background: #333; color: #ededed; }
-        .status-panel { display: flex; flex-direction: column; }
-        .status-row {
+        .focus-list { display: grid; gap: 8px; }
+        .focus-list button {
+          min-height: 58px;
           display: grid;
-          grid-template-columns: 30px 1fr;
+          grid-template-columns: 28px 1fr auto;
+          align-items: center;
           gap: 10px;
-          padding: 10px 0;
-          border-top: 1px solid #303030;
+          padding: 10px 12px;
+          border: 1px solid #353535;
+          border-radius: 12px;
+          background: #2b2b2b;
+          color: #ededed;
+          text-align: left;
+          cursor: pointer;
         }
-        .status-icon {
-          width: 27px;
-          height: 27px;
-          border-radius: 8px;
+        .focus-list button:hover { background: #323232; border-color: #454545; }
+        .focus-list button > span {
+          width: 25px;
+          height: 25px;
           display: grid;
           place-items: center;
-          background: #303030;
-          font-size: .75rem;
+          border-radius: 8px;
+          background: #383838;
+          color: #9fd9b8;
+          font-size: .68rem;
+          font-weight: 800;
         }
-        .status-icon.ok { color: #78d7a4; }
-        .status-icon.guard { color: #8fc4ff; }
-        .status-icon.build { color: #e6c477; }
-        .status-row strong { font-size: .8rem; }
-        .status-row p {
-          margin: 3px 0 0;
-          color: #858585;
-          font-size: .72rem;
-          line-height: 1.45;
-        }
+        .focus-list strong { font-size: .77rem; line-height: 1.3; }
+        .focus-list small { color: #7f7f7f; font-size: .65rem; }
         @media (max-width: 1000px) {
           .hero { grid-template-columns: 1fr; }
           .hero-copy { padding-bottom: 0; }
@@ -678,6 +666,9 @@ export default function LifeAssistantHome({
           .hero-copy { padding-top: 16px; }
           .hero-visual { min-height: 280px; border-radius: 17px; }
           .quick-grid, .lower-grid, .recent-strip { grid-template-columns: 1fr; }
+          .recent-card.featured { grid-column: auto; }
+          .focus-list button { grid-template-columns: 28px 1fr; }
+          .focus-list small { grid-column: 2; }
           .command-box { grid-template-columns: 1fr; }
           .command-box button { min-height: 42px; }
           .section-heading { align-items: start; flex-direction: column; }
