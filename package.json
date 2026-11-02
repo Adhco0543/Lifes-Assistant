@@ -7,6 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "cleanup:radar": "node --env-file=.env.local --experimental-strip-types scripts/cleanupRadar.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --quiet",
     "test": "node --experimental-strip-types --experimental-loader ./tests/resolve-typescript.mjs --test tests/*.test.mjs",
