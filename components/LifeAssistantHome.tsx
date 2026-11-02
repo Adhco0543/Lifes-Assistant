@@ -88,10 +88,16 @@ export default function LifeAssistantHome({
 
         const visibleRecords = records.filter((record) => {
           const data = (record.data || {}) as Record<string, unknown>;
-          const kind = String(record.kind || '').toLowerCase();
+          const type = String(data.type || record.kind || '').toLowerCase();
           const title = String(data.title || '').toLowerCase();
+          const label = String(data.label || '').toUpperCase();
 
-          return !kind.includes('spatial') && !title.includes('room scan');
+          return (
+            type !== 'spatial' &&
+            type !== 'spatial-workspace' &&
+            !title.includes('room scan') &&
+            !label.includes('SPATIAL')
+          );
         });
 
         const mapped = visibleRecords.slice(0, 5).map((record) => {
