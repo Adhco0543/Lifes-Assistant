@@ -74,7 +74,7 @@ export const DEFAULT_AUTONOMY_SETTINGS: AutonomySettings = {
   quoteBehavior: "ask",
   autoSendQuotesUnder: 0, // Never auto-send by default
 
-  jobSearchBehavior: "auto_search",
+  jobSearchBehavior: "ask",
   autoSearchFrequency: "weekly",
 
   autoFollowUpRules: {
@@ -86,8 +86,8 @@ export const DEFAULT_AUTONOMY_SETTINGS: AutonomySettings = {
   backgroundMode: false,
   backgroundModeBehavior: "draft_only",
 
-  autoTaskTypes: ["job_search", "materials", "customer_lookup"],
-  requiresApprovalForTasks: ["email", "quote"],
+  autoTaskTypes: [],
+  requiresApprovalForTasks: ["email", "quote", "reminder", "calendar", "purchase", "delete", "booking", "external_update"],
 
   notifyOnApprovals: true,
   notifyOnAutoExecute: false,
@@ -216,6 +216,29 @@ export class AutonomySettingsManager {
    */
   static getPresets() {
     return {
+      approval_first: {
+        name: "Approval First",
+        description: "Draft and organize freely; ask before any outside action",
+        settings: {
+          emailBehavior: "draft_only" as const,
+          quoteBehavior: "auto_create" as const,
+          jobSearchBehavior: "ask" as const,
+          backgroundMode: false,
+          backgroundModeBehavior: "draft_only" as const,
+          autoTaskTypes: [],
+          requiresApprovalForTasks: [
+            "email",
+            "quote",
+            "reminder",
+            "calendar",
+            "purchase",
+            "delete",
+            "booking",
+            "external_update",
+          ],
+        },
+      },
+
       conservative: {
         name: "Conservative",
         description: "Ask for approval on everything sensitive",
