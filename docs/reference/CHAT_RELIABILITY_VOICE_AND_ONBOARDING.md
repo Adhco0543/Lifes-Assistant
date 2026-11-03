@@ -4,7 +4,7 @@
 
 New users see a guided, one-question-at-a-time interview for mode, priorities, capture preference, assistant focus, and answer style. Answers can be skipped, revisited, and reviewed/edited before the existing authenticated profile writer saves them. An unfinished interview is kept only in the current browser session. Completed profiles are not routed back through onboarding. The short optional focus answer and answer style are bounded and stored with the user's existing profile; the focus can be included in chat context.
 
-The prompts are a fixed guided interview, not a generative AI conversation. This avoids collecting more information than the selected preferences and does not make onboarding depend on AI availability.
+The questions and available preferences are fixed rather than generated. The existing chat AI may provide a brief acknowledgement of selected multiple-choice preferences with tools disabled; that acknowledgement is optional and the fixed interview continues if AI is unavailable. The free-text focus answer is not sent during that acknowledgement, but is stored in the account profile and can be included in later chat context.
 
 ## Chat reliability changes
 
