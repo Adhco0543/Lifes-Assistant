@@ -10,14 +10,25 @@ export type LifeDomainId =
   | "learning"
   | string;
 
+export type DomainAutonomy = "suggest_only" | "draft_then_ask" | "standing_permission";
+
 export interface LifeDomain {
   id: LifeDomainId;
   label: string;
   priority: 1 | 2 | 3 | 4 | 5;
+  autonomy: DomainAutonomy;
   goals: string[];
   activeLoops: string[];
   notes?: string;
   updatedAt: string;
+}
+
+export interface ImportantPerson {
+  id: string;
+  name: string;
+  relationship?: string;
+  handlingPreferences: string[];
+  notes?: string;
 }
 
 export interface RememberedFact {
@@ -40,7 +51,10 @@ export interface UserMemoryProfile {
     detailLevel?: "short" | "balanced" | "detailed";
   };
   lifeDomains: LifeDomain[];
+  importantPeople: ImportantPerson[];
   rememberedFacts: RememberedFact[];
+  neverDo: string[];
+  standingPermissions: string[];
   approvalPreset: "approval_first";
   onboardingConfirmedAt?: string;
   updatedAt: string;
@@ -51,10 +65,36 @@ export const EMPTY_USER_MEMORY_PROFILE: Omit<UserMemoryProfile, "userId"> = {
   primarySlips: [],
   capturePreference: null,
   lifeDomains: [],
+  importantPeople: [],
   rememberedFacts: [],
+  neverDo: [],
+  standingPermissions: [],
   approvalPreset: "approval_first",
   updatedAt: new Date(0).toISOString(),
 };
+
+export function migrateUserMemoryProfile(
+  userId: string,
+  input: Partial<UserMemoryProfile> | null | undefined
+): UserMemoryProfile {
+  return {
+    ...EMPTY_USER_MEMORY_PROFILE,
+    ...input,
+    userId,
+    mode: input?.mode || "mix",
+    primarySlips: Array.isArray(input?.primarySlips) ? input.primarySlips : [],
+    lifeDomains: Array.isArray(input?.lifeDomains) ? input.lifeDomains.map((domain) => ({
+      ...domain,
+      autonomy: domain.autonomy || "draft_then_ask",
+    })) : [],
+    importantPeople: Array.isArray(input?.importantPeople) ? input.importantPeople : [],
+    rememberedFacts: Array.isArray(input?.rememberedFacts) ? input.rememberedFacts : [],
+    neverDo: Array.isArray(input?.neverDo) ? input.neverDo : [],
+    standingPermissions: Array.isArray(input?.standingPermissions) ? input.standingPermissions : [],
+    approvalPreset: "approval_first",
+    updatedAt: input?.updatedAt || new Date().toISOString(),
+  };
+}
 
 export function upsertLifeDomain(
   profile: UserMemoryProfile,
