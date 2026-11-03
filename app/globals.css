@@ -56,3 +56,17 @@ html, body {
 button, input, textarea, select {
   font: inherit;
 }
+
+
+html.demo-page-scroll {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body.demo-page-scroll {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
