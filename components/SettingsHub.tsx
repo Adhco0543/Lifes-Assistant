@@ -2,9 +2,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
+import AutonomySettingsPanel from './AutonomySettingsPanel';
 import { normalizeLifePreferences, PRIMARY_SLIPS, ALL_MODE_TOOL_IDS, type LifeMode, type CapturePreference } from '../lib/lifePreferences';
 
-type SettingCategory = 'general' | 'assistant' | 'appearance' | 'privacy' | 'integrations';
+type SettingCategory = 'general' | 'assistant' | 'autonomy' | 'appearance' | 'privacy' | 'integrations';
 
 interface SettingsHubProps {
   userId: string;
@@ -25,6 +26,7 @@ type Preferences = {
 const CATEGORIES: Array<{ id: SettingCategory; label: string; icon: string; note: string }> = [
   { id: 'general', label: 'General', icon: '⚙', note: 'Workspace basics' },
   { id: 'assistant', label: 'Assistant', icon: '✦', note: 'Name, tone & memory' },
+  { id: 'autonomy', label: 'Autonomy', icon: '⟡', note: 'What it may do alone' },
   { id: 'appearance', label: 'Appearance', icon: '◐', note: 'Interface preferences' },
   { id: 'privacy', label: 'Privacy', icon: '◇', note: 'What is stored where' },
   { id: 'integrations', label: 'Integrations', icon: '↗', note: 'External services' },
@@ -266,6 +268,8 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
               </div>
             )}
 
+            {active === 'autonomy' && <AutonomySettingsPanel userId={userId} />}
+
             {active === 'appearance' && (
               <div className="section-content">
                 <div className="section-title"><span className="eyebrow">APPEARANCE</span><h2>Clean by default</h2></div>
@@ -308,7 +312,9 @@ export const SettingsHub: React.FC<SettingsHubProps> = ({ userId }) => {
               </div>
             )}
 
-            <div className="save-row"><span className={`saved ${saved ? 'show' : ''}`}>Saved</span><button onClick={save}>Save preferences</button></div>
+            {active !== 'autonomy' && (
+              <div className="save-row"><span className={`saved ${saved ? 'show' : ''}`}>Saved</span><button onClick={save}>Save preferences</button></div>
+            )}
           </section>
         </div>
       </div>
