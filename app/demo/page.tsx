@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 type Mode = 'everyday' | 'business';
 type RadarItem = { id: string; state: string; title: string; context: string; next: string };
@@ -106,10 +107,10 @@ export default function PublicDemoPage() {
   return (
     <main className="demo">
       <aside className="sidebar">
-        <a className="brand" href="/" aria-label="Life’s Assistant">
+        <Link className="brand" href="/" aria-label="Life’s Assistant">
           <span className="brand-mark">✦</span>
           <span><strong>Life’s Assistant</strong><small>Personal AI workspace</small></span>
-        </a>
+        </Link>
         <div className="demo-tag"><span /> PREVIEW MODE</div>
         <p className="nav-label">YOUR WORKSPACE</p>
         <nav aria-label="Demo tools" className={transitioning ? 'mode-changing' : ''}>
@@ -119,7 +120,7 @@ export default function PublicDemoPage() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-bottom"><p>Want your own private workspace?</p><a href="/">Create an account <span>→</span></a></div>
+        <div className="sidebar-bottom"><p>Want your own private workspace?</p><Link href="/">Create an account <span>→</span></Link></div>
       </aside>
 
       <section className="main">
@@ -209,7 +210,7 @@ export default function PublicDemoPage() {
             <div className="assistant-message">{sampleReply(mode, chatPrompt)}<div><button onClick={() => setExpandedId(radarItems[0].id)}>Show me the first item →</button></div></div>
           </section>}
 
-          <footer><span>Life’s Assistant</span><span>Preview link · no account needed</span><a href="/">Open sign-in page →</a></footer>
+          <footer><span>Life’s Assistant</span><span>Preview link · no account needed</span><Link href="/">Open sign-in page →</Link></footer>
         </div>
       </section>
 

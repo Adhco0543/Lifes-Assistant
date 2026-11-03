@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { firebaseBackend } from '../lib/firebaseBackend';
+import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
 import LifeRadarPanel from './LifeRadarPanel';
-import { DEFAULT_LIFE_PREFERENCES, MODE_TOOL_ORDER, MODE_PLACEHOLDERS, TRY_ASKING_BY_MODE, getVisibleTools, normalizeLifePreferences, type LifePreferences } from '../lib/lifePreferences';
+import { DEFAULT_LIFE_PREFERENCES, MODE_TOOL_ORDER, MODE_PLACEHOLDERS, TRY_ASKING_BY_MODE, getVisibleTools, normalizeLifePreferences, scoreRadarItem, type LifePreferences } from '../lib/lifePreferences';
 
 interface LifeAssistantHomeProps {
   displayName?: string;
@@ -48,6 +48,8 @@ export default function LifeAssistantHome({
   const [command, setCommand] = useState('');
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const [recentStatus, setRecentStatus] = useState('Loading your workspace…');
+  const [todayLoops, setTodayLoops] = useState<OpenLoop[]>([]);
+  const [openTaskCount, setOpenTaskCount] = useState<number | null>(null);
   const [preferences, setPreferences] = useState<LifePreferences>(DEFAULT_LIFE_PREFERENCES);
 
   useEffect(() => {
@@ -134,6 +136,54 @@ export default function LifeAssistantHome({
     };
   }, [userId]);
 
+  useEffect(() => {
+    let active = true;
+    const loadToday = async () => {
+      try {
+        const [loops, records] = await Promise.all([
+          firebaseBackend.getOpenLoops(40),
+          firebaseBackend.getRecentBusinessRecords(120),
+        ]);
+        if (!active) return;
+        const now = Date.now();
+        setTodayLoops(
+          loops.filter((loop) =>
+            !loop.archived &&
+            loop.status !== 'resolved' &&
+            !(loop.status === 'snoozed' && loop.snoozedUntil && loop.snoozedUntil > now)
+          )
+        );
+        setOpenTaskCount(
+          records.filter((record) => {
+            const data = (record.data || {}) as Record<string, unknown>;
+            return String(record.kind || '') === 'task' && String(data.status || 'open') !== 'done';
+          }).length
+        );
+      } catch {
+        if (!active) return;
+        setTodayLoops([]);
+        setOpenTaskCount(null);
+      }
+    };
+    void loadToday();
+    const refresh = () => { void loadToday(); };
+    window.addEventListener('life-workspace-changed', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('life-workspace-changed', refresh);
+    };
+  }, [userId]);
+
+  const topLoop = useMemo(() => {
+    if (!todayLoops.length) return null;
+    return [...todayLoops].sort((a, b) => scoreRadarItem(b, preferences) - scoreRadarItem(a, preferences))[0];
+  }, [todayLoops, preferences]);
+  const waitingCount = todayLoops.filter((loop) => loop.status === 'waiting').length;
+  const todayLabel = useMemo(
+    () => new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
+    []
+  );
+
   const launchCommand = () => {
     const prompt = command.trim();
     if (!prompt) return;
@@ -187,8 +237,54 @@ export default function LifeAssistantHome({
             </div>
           </div>
 
-          <div className="hero-visual" role="img" aria-label="Professional working at a laptop">
-            <div className="visual-overlay" />
+          <aside className="hero-visual" aria-label="Today at a glance">
+            <div className="today-head">
+              <span className="section-kicker">TODAY</span>
+              <span className="today-date">{todayLabel}</span>
+            </div>
+
+            {topLoop ? (
+              <button className="today-top" onClick={() => onNavigate('radar')}>
+                <span className="today-top-label">Handle first</span>
+                <strong>{topLoop.title}</strong>
+                <small>{topLoop.nextAction || topLoop.summary || 'Open Life Radar to see why this is up.'}</small>
+                <span className="today-top-go">Open in Life Radar →</span>
+              </button>
+            ) : (
+              <button className="today-top quiet" onClick={() => onNavigate('radar')}>
+                <span className="today-top-label">Radar is clear</span>
+                <strong>Nothing is slipping right now.</strong>
+                <small>Life Radar watches quotes, follow-ups, drafts, and stalled projects for you.</small>
+              </button>
+            )}
+
+            {todayLoops.length > 1 && topLoop ? (
+              <div className="today-also">
+                <span className="today-also-label">Also on your radar</span>
+                {todayLoops.filter((loop) => loop.id !== topLoop.id).slice(0, 2).map((loop) => (
+                  <button key={loop.id} onClick={() => onNavigate('radar')}>
+                    <span className={'today-dot ' + loop.status} />
+                    <span>{loop.title}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="today-stats">
+              <button onClick={() => onNavigate('radar')}>
+                <strong>{todayLoops.length}</strong>
+                <span>need{todayLoops.length === 1 ? 's' : ''} attention</span>
+              </button>
+              <button onClick={() => onNavigate('radar')}>
+                <strong>{waitingCount}</strong>
+                <span>waiting on others</span>
+              </button>
+              <button onClick={() => onNavigate('tasks')}>
+                <strong>{openTaskCount === null ? '–' : openTaskCount}</strong>
+                <span>open task{openTaskCount === 1 ? '' : 's'}</span>
+              </button>
+            </div>
+
             <div className="visual-card">
               <div className="visual-icon">✦</div>
               <div>
@@ -196,8 +292,7 @@ export default function LifeAssistantHome({
                 <span>Approval-first for external actions</span>
               </div>
             </div>
-            <div className="photo-credit">Photo via Unsplash</div>
-          </div>
+          </aside>
         </section>
 
         <section className="command-center">
@@ -380,26 +475,99 @@ export default function LifeAssistantHome({
           box-shadow: 0 0 0 3px rgba(99, 210, 151, .09);
         }
         .hero-visual {
-          min-height: 390px;
+          min-height: 0;
           border-radius: 22px;
-          overflow: hidden;
           position: relative;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          padding: 18px;
           border: 1px solid #343434;
           background:
-            linear-gradient(180deg, transparent 15%, rgba(17,17,17,.15) 55%, rgba(17,17,17,.82) 100%),
-            url('https://images.unsplash.com/photo-1758873272345-40f377c21e7f?auto=format&fit=crop&fm=jpg&q=82&w=1600') center/cover no-repeat;
+            radial-gradient(120% 90% at 100% 0%, rgba(159,217,184,.12), transparent 55%),
+            radial-gradient(90% 80% at 0% 100%, rgba(99,140,210,.10), transparent 60%),
+            linear-gradient(180deg, #262626, #1f1f1f);
           box-shadow: 0 24px 70px rgba(0,0,0,.26);
         }
-        .visual-overlay {
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(135deg, rgba(46, 71, 110, .04), rgba(0,0,0,.08));
+        .today-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+        .today-date { color: #8d8d8d; font-size: .72rem; }
+        .today-top {
+          text-align: left;
+          display: grid;
+          gap: 6px;
+          padding: 15px 16px;
+          border-radius: 16px;
+          border: 1px solid #4a5a52;
+          background: linear-gradient(135deg, #2b3a33, #262a28 70%);
+          color: #f0f0f0;
+          cursor: pointer;
+          transition: transform .16s ease, border-color .16s ease;
         }
+        .today-top:hover { transform: translateY(-1px); border-color: #6b8a7a; }
+        .today-top.quiet { border-color: #3a3a3a; background: #262626; }
+        .today-top-label { color: #9fd9b8; font-size: .6rem; letter-spacing: .14em; font-weight: 800; }
+        .today-top.quiet .today-top-label { color: #8f8f8f; }
+        .today-top strong {
+          font-size: 1.02rem;
+          line-height: 1.3;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .today-top small {
+          color: #9d9d9d;
+          font-size: .74rem;
+          line-height: 1.45;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .today-top-go { color: #c3ead4; font-size: .72rem; font-weight: 700; margin-top: 2px; }
+        .today-also { display: grid; gap: 4px; }
+        .today-also-label { color: #7d7d7d; font-size: .6rem; letter-spacing: .12em; font-weight: 800; margin-bottom: 2px; }
+        .today-also button {
+          display: grid;
+          grid-template-columns: 10px minmax(0, 1fr);
+          align-items: center;
+          gap: 10px;
+          padding: 8px 10px;
+          border-radius: 10px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: #cfcfcf;
+          font-size: .78rem;
+          text-align: left;
+          cursor: pointer;
+          white-space: nowrap;
+          overflow: hidden;
+        }
+        .today-also button span:last-child { overflow: hidden; text-overflow: ellipsis; }
+        .today-also button:hover { background: #2a2a2a; border-color: #3a3a3a; }
+        .today-dot { width: 8px; height: 8px; border-radius: 50%; background: #9fd9b8; }
+        .today-dot.waiting { background: #d9c27a; }
+        .today-stats {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+        }
+        .today-stats button {
+          display: grid;
+          gap: 2px;
+          padding: 11px 12px;
+          border-radius: 13px;
+          border: 1px solid #353535;
+          background: #272727;
+          color: #e6e6e6;
+          text-align: left;
+          cursor: pointer;
+        }
+        .today-stats button:hover { background: #2d2d2d; border-color: #444; }
+        .today-stats strong { font-size: 1.25rem; line-height: 1.1; }
+        .today-stats span { color: #8a8a8a; font-size: .66rem; line-height: 1.3; }
         .visual-card {
-          position: absolute;
-          left: 18px;
-          right: 18px;
-          bottom: 18px;
+          margin-top: auto;
           display: flex;
           align-items: center;
           gap: 12px;
@@ -421,14 +589,6 @@ export default function LifeAssistantHome({
         .visual-card strong, .visual-card span { display: block; }
         .visual-card strong { font-size: .86rem; }
         .visual-card span { color: #9a9a9a; font-size: .72rem; margin-top: 3px; }
-        .photo-credit {
-          position: absolute;
-          top: 10px;
-          right: 12px;
-          color: rgba(255,255,255,.56);
-          font-size: .62rem;
-          text-shadow: 0 1px 5px #000;
-        }
         .command-center {
           margin-top: 22px;
           padding: 18px;
@@ -551,7 +711,7 @@ export default function LifeAssistantHome({
         .section-note { color: #777; font-size: .74rem; }
         .quick-grid {
           display: grid;
-          grid-template-columns: repeat(8, minmax(0, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
           gap: 10px;
         }
         .quick-card {
@@ -583,8 +743,9 @@ export default function LifeAssistantHome({
           background: #333;
           color: #d8d8d8;
         }
-        .quick-copy strong, .quick-copy small { display: block; }
-        .quick-copy strong { font-size: .86rem; }
+        .quick-copy { min-width: 0; }
+        .quick-copy strong, .quick-copy small { display: block; overflow-wrap: anywhere; }
+        .quick-copy strong { font-size: .86rem; line-height: 1.3; }
         .quick-copy small {
           margin-top: 8px;
           color: #8f8f8f;
@@ -652,8 +813,8 @@ export default function LifeAssistantHome({
         @media (max-width: 1000px) {
           .hero { grid-template-columns: 1fr; }
           .hero-copy { padding-bottom: 0; }
-          .hero-visual { min-height: 320px; }
-          .quick-grid { grid-template-columns: repeat(2, 1fr); }
+          .hero-visual { min-height: 0; }
+          .quick-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
           .recent-strip { grid-template-columns: repeat(2, 1fr); }
           .command-center { grid-template-columns: 1fr; }
         }
@@ -664,8 +825,14 @@ export default function LifeAssistantHome({
             padding-bottom: calc(110px + env(safe-area-inset-bottom));
           }
           .hero-copy { padding-top: 16px; }
-          .hero-visual { min-height: 280px; border-radius: 17px; }
-          .quick-grid, .lower-grid, .recent-strip { grid-template-columns: 1fr; }
+          .hero-visual { border-radius: 17px; padding: 14px; }
+          .today-stats strong { font-size: 1.1rem; }
+          .lower-grid, .recent-strip { grid-template-columns: 1fr; }
+          .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+          .quick-card { min-height: 0; padding: 13px; grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+          .quick-card .arrow { display: none; }
+          .quick-copy strong { font-size: .8rem; }
+          .quick-copy small { margin-top: 5px; font-size: .68rem; }
           .recent-card.featured { grid-column: auto; }
           .focus-list button { grid-template-columns: 28px 1fr; }
           .focus-list small { grid-column: 2; }
