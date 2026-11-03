@@ -7,6 +7,7 @@ import { analyticsTracker, EngagementMetrics } from '../lib/analytics';
 import { RichMedia } from './Richmedia';
 import { DashboardCommandCenter } from './DashboardCommandCenter';
 import { BusinessRecommendations } from './BusinessRecommendations';
+import { AssistantTransparencyPanel } from './AssistantTransparencyPanel';
 
 interface DashboardProps {
   userId: string;
@@ -97,6 +98,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ userId, businessType = 'bu
         <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937', margin: '0 0 0.5rem 0' }}>Welcome back, {businessProfile.businessName}!</h1>
         <p style={{ fontSize: '1rem', color: '#6b7280', margin: 0 }}>{businessProfile.businessType}</p>
       </div>
+
+      <AssistantTransparencyPanel
+        knownItems={[
+          `Mode: ${businessType === 'business' ? 'Business' : 'Everyday'}`,
+          businessProfile.businessName ? `Workspace: ${businessProfile.businessName}` : 'Your confirmed life profile',
+          'Only facts you explicitly approved for memory',
+        ]}
+      />
 
       {/* Two-column layout */}
       <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '2rem' }}>
