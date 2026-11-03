@@ -439,11 +439,20 @@ export const AIQuoteBuilder: React.FC<AIQuoteBuilderProps> = ({ userId }) => {
                   <strong style={{ fontSize: '0.75rem' }}>{'Total: $' + total.toFixed(2)}</strong>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 95px 70px 58px', gap: '6px' }}>
-                  <input style={inputStyle} value={itemName} onChange={(event) => setItemName(event.target.value)} placeholder="Item" />
-                  <input style={inputStyle} type="number" min="0" step="0.01" value={itemPrice} onChange={(event) => setItemPrice(event.target.value)} placeholder="Price" />
-                  <input style={inputStyle} type="number" min="1" step="1" value={itemQuantity} onChange={(event) => setItemQuantity(event.target.value)} placeholder="Qty" />
-                  <button style={buttonStyle} onClick={addItem}>Add</button>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <input
+                    style={{ ...inputStyle, minWidth: 0 }}
+                    value={itemName}
+                    onChange={(event) => setItemName(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') addItem(); }}
+                    placeholder="Item (e.g. Composite decking, 20 boards)"
+                    aria-label="Line item description"
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr) auto', gap: '6px' }}>
+                    <input style={{ ...inputStyle, minWidth: 0 }} type="number" inputMode="decimal" min="0" step="0.01" value={itemPrice} onChange={(event) => setItemPrice(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addItem(); }} placeholder="Price" aria-label="Unit price" />
+                    <input style={{ ...inputStyle, minWidth: 0 }} type="number" inputMode="numeric" min="1" step="1" value={itemQuantity} onChange={(event) => setItemQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addItem(); }} placeholder="Qty" aria-label="Quantity" />
+                    <button style={{ ...buttonStyle, whiteSpace: 'nowrap' }} onClick={addItem}>Add item</button>
+                  </div>
                 </div>
 
                 {items.length > 0 && (

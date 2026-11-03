@@ -1,5 +1,15 @@
-import { Timestamp, doc, getDoc, setDoc, collection } from "firebase/firestore";
-import { db } from "../public/src/lib/firebase";
+import { Timestamp, doc, getDoc, setDoc, collection, getFirestore, type Firestore } from "firebase/firestore";
+import { firebaseBackend } from "./firebaseBackend";
+
+// Resolve Firestore through the shared backend so the default Firebase app is
+// always initialized with the real config before this module touches it.
+async function getDb(): Promise<Firestore> {
+  await firebaseBackend.initialize();
+  if (!firebaseBackend.isAvailable()) {
+    throw new Error("Firebase is not configured, so autonomy settings cannot be loaded.");
+  }
+  return getFirestore();
+}
 
 export interface AutonomySettings {
   // Email settings
@@ -117,6 +127,7 @@ export class AutonomySettingsManager {
    */
   static async getSettings(userId: string): Promise<AutonomySettings> {
     try {
+      const db = await getDb();
       const docRef = doc(collection(db, "users", userId, "settings"), "autonomy");
       const docSnap = await getDoc(docRef);
 
@@ -143,6 +154,7 @@ export class AutonomySettingsManager {
    */
   static async updateSettings(userId: string, settings: Partial<AutonomySettings>): Promise<void> {
     try {
+      const db = await getDb();
       const docRef = doc(collection(db, "users", userId, "settings"), "autonomy");
       const current = await this.getSettings(userId);
 
