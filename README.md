@@ -56,7 +56,7 @@ docs/           Documentation (below)
 
 - [`docs/setup/`](docs/setup/) – Firebase, Vercel, OpenAI, email setup.
 - [`docs/reference/`](docs/reference/) – Architecture, API reference, features, developer and multi-user guides, roadmap.
-- `docs/TOOL_LAYER.md` (added by the tool-layer PR) and `TOOL_EXECUTION_LAYER.md` – How the assistant acts: tools, autonomy policy, action receipts.
+- [`docs/TOOL_LAYER.md`](docs/TOOL_LAYER.md) – How the assistant acts: tools, autonomy policy, action receipts. (`TOOL_EXECUTION_LAYER.md` is the older design sketch.)
 - [`docs/archive/`](docs/archive/) – Older status reports and design sketches. Historical only; do not treat as a description of current behavior.
 
 ## Principles
