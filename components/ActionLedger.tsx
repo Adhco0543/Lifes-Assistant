@@ -22,10 +22,28 @@ const LABELS: Record<string, { title: string; detail: string; icon: string }> = 
   'person.saved': { title: 'Person saved', detail: 'Personal context was added to the workspace.', icon: '◎' },
   'project.saved': { title: 'Project saved', detail: 'A project was added to the workspace.', icon: '▦' },
   'project.status': { title: 'Project status changed', detail: 'A project status was updated.', icon: '▦' },
+  'email.drafted': { title: 'Email drafted', detail: 'A draft was placed in Email drafts. Nothing was sent.', icon: '✎' },
+  'quote.drafted': { title: 'Quote drafted', detail: 'A draft was placed in the Quote builder. Nothing was sent.', icon: '▤' },
+  'life_radar.snoozed': { title: 'Radar item snoozed', detail: 'A Life Radar item was snoozed.', icon: '◌' },
+  'life_radar.resolved': { title: 'Radar item resolved', detail: 'A Life Radar item was marked handled.', icon: '◌' },
+  'action.approval_required': { title: 'Waiting for your approval', detail: 'The assistant prepared an action but did not carry it out.', icon: '⏸' },
+  'action.blocked': { title: 'Action not taken', detail: 'Your autonomy settings stopped this action.', icon: '⛔' },
+  'action.failed': { title: 'Action failed', detail: 'The assistant tried this, but it did not go through.', icon: '!' },
+};
+
+const actorNote = (receipt: Receipt): string => {
+  const data = receipt.data || {};
+  if (data.actor !== 'assistant') return '';
+  const reason = typeof data.reason === 'string' && data.reason ? ' · ' + data.reason : '';
+  return data.approvedBy === 'user' ? 'By the assistant, approved by you' + reason : 'By the assistant' + reason;
 };
 
 const receiptProof = (receipt: Receipt): string => {
   const data = receipt.data || {};
+
+  if (receipt.eventName.startsWith('action.') || receipt.eventName === 'email.drafted' || receipt.eventName === 'quote.drafted' || receipt.eventName.startsWith('life_radar.')) {
+    return String(data.summary || data.title || data.subject || data.clientName || 'Assistant action recorded.');
+  }
 
   if (receipt.eventName === 'email.sent') {
     const recipient = String(data.to || 'recipient');
@@ -152,10 +170,15 @@ export default function ActionLedger() {
                     <span style={{ display: 'block', marginTop: 5, color: '#a2a2a2', fontSize: '.64rem', lineHeight: 1.4 }}>
                       {receiptProof(receipt)}
                     </span>
+                    {actorNote(receipt) ? (
+                      <span style={{ display: 'block', marginTop: 3, color: '#8fd4a8', fontSize: '.6rem', lineHeight: 1.4 }}>
+                        {actorNote(receipt)}
+                      </span>
+                    ) : null}
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span style={{ display: 'inline-flex', padding: '3px 7px', borderRadius: 999, background: '#303a34', color: '#78d7a4', fontSize: '.56rem', marginBottom: 5 }}>
-                      PROOF
+                    <span style={{ display: 'inline-flex', padding: '3px 7px', borderRadius: 999, background: receipt.eventName.startsWith('action.') ? '#3a3324' : '#303a34', color: receipt.eventName.startsWith('action.') ? '#e6c36a' : '#78d7a4', fontSize: '.56rem', marginBottom: 5 }}>
+                      {receipt.eventName === 'action.approval_required' ? 'PENDING' : receipt.eventName.startsWith('action.') ? 'NOT DONE' : 'PROOF'}
                     </span>
                     <time style={{ display: 'block', color: '#686868', fontSize: '.62rem', whiteSpace: 'nowrap' }}>
                       {new Date(receipt.createdAt).toLocaleString()}

@@ -259,17 +259,33 @@ export const App: React.FC = () => {
     const openEmail = () => navigate('email');
     const openTasks = () => navigate('tasks');
     const openConnections = () => navigate('connections');
+    // Deep links from assistant action receipts.
+    const openRadar = () => navigate('radar');
+    const openPeople = () => navigate('people');
+    const openProjects = () => navigate('projects');
+    const openNotes = () => navigate('notes');
+    const openMemory = () => navigate('memory');
 
     window.addEventListener('open-quote-builder', openQuote);
     window.addEventListener('open-email', openEmail);
     window.addEventListener('open-tasks', openTasks);
     window.addEventListener('open-connections', openConnections);
+    window.addEventListener('open-life-radar', openRadar);
+    window.addEventListener('open-people', openPeople);
+    window.addEventListener('open-projects', openProjects);
+    window.addEventListener('open-notes', openNotes);
+    window.addEventListener('open-memory', openMemory);
 
     return () => {
       window.removeEventListener('open-quote-builder', openQuote);
       window.removeEventListener('open-email', openEmail);
       window.removeEventListener('open-tasks', openTasks);
       window.removeEventListener('open-connections', openConnections);
+      window.removeEventListener('open-life-radar', openRadar);
+      window.removeEventListener('open-people', openPeople);
+      window.removeEventListener('open-projects', openProjects);
+      window.removeEventListener('open-notes', openNotes);
+      window.removeEventListener('open-memory', openMemory);
     };
   }, [navigate]);
 

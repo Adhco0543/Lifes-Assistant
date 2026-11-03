@@ -52,3 +52,37 @@ test('chat flow context respects memory order and bounded history', () => {
   assert.ok(compacted.length <= 8);
   assert.ok(compacted.every((item) => item.content.length <= 900));
 });
+
+test('responses parser surfaces function calls for the tool loop', () => {
+  const result = parseResponsesApiResult({
+    status: 'completed',
+    output: [
+      { type: 'function_call', call_id: 'call_1', name: 'create_task', arguments: '{"title":"Call Allen"}' },
+      { type: 'function_call', call_id: 'call_2', name: 'list_open_items' },
+      { type: 'function_call', name: 'missing_call_id', arguments: '{}' },
+      { type: 'message', content: [{ type: 'output_text', text: 'Working on it.' }] },
+    ],
+  });
+  assert.deepEqual(result.functionCalls, [
+    { call_id: 'call_1', name: 'create_task', arguments: '{"title":"Call Allen"}' },
+    { call_id: 'call_2', name: 'list_open_items', arguments: '{}' },
+  ]);
+  assert.equal(parseResponsesApiResult({ output: [] }).functionCalls, undefined);
+});
+
+test('chat response parser accepts well-formed action receipts and drops malformed ones', () => {
+  const parsed = parseChatApiResponse({
+    type: 'chat',
+    message: 'Done.',
+    actions: [
+      { callId: 'c1', tool: 'create_task', label: 'Task created', summary: 'Call Allen', status: 'done', reason: 'Saved.', policyCode: 'workspace_write', recordId: 'r1', linkedView: 'tasks', at: 1 },
+      { callId: 'c2', tool: 'send_email', label: 'Email sent', summary: 'Quote → a@b.com', status: 'approval_required', reason: 'Asks first.', policyCode: 'email_ask', pendingAction: { tool: 'send_email', args: { to: 'a@b.com' } }, at: 2 },
+      { tool: 'send_email', summary: 'bad status', status: 'maybe' },
+      'not an object',
+    ],
+  });
+  assert.equal(parsed.actions.length, 2);
+  assert.equal(parsed.actions[0].status, 'done');
+  assert.equal(parsed.actions[1].pendingAction.args.to, 'a@b.com');
+  assert.equal(parseChatApiResponse({ message: 'Hi' }).actions, undefined);
+});

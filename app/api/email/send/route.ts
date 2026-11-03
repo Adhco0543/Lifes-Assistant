@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyFirebaseRequest } from '../../../../lib/serverAuth';
+import { deliverEmail } from '../../../../lib/emailDelivery';
 
 type EmailRequest = {
   to?: string;
@@ -30,39 +31,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Email is too large to send.' }, { status: 400 });
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
-  const domainVerified = process.env.EMAIL_DOMAIN_VERIFIED === 'true';
-
-  if (!apiKey || !from || !domainVerified) {
-    return NextResponse.json(
-      { error: "Email delivery is waiting for a dedicated Life's Assistant sending domain." },
-      { status: 503 }
-    );
+  const delivery = await deliverEmail({ to: recipient, subject: emailSubject, text: emailText });
+  if (!delivery.ok) {
+    return NextResponse.json({ error: delivery.error }, { status: delivery.status });
   }
 
-  const providerResponse = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from,
-      to: [recipient],
-      subject: emailSubject,
-      text: emailText,
-    }),
-  });
-
-  const result = await providerResponse.json().catch(() => ({}));
-
-  if (!providerResponse.ok) {
-    return NextResponse.json(
-      { error: result?.message || 'Email provider rejected the message.' },
-      { status: providerResponse.status }
-    );
-  }
-
-  return NextResponse.json({ ok: true, id: result?.id || null, provider: 'resend' });
+  return NextResponse.json({ ok: true, id: delivery.id, provider: delivery.provider });
 }
