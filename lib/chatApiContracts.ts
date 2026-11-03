@@ -1,9 +1,58 @@
+export type ChatActionStatus = 'done' | 'approval_required' | 'blocked' | 'failed';
+
+/** One thing the assistant did (or tried to do) while answering. Mirrors lib/tools/executor ActionReceipt. */
+export type ChatAction = {
+  callId: string;
+  tool: string;
+  label: string;
+  summary: string;
+  status: ChatActionStatus;
+  reason: string;
+  policyCode: string;
+  recordId?: string | null;
+  linkedView?: string | null;
+  pendingAction?: { tool: string; args: Record<string, unknown> } | null;
+  at: number;
+};
+
 export type ChatApiResponse = {
   type: 'chat' | 'quote' | 'email' | 'task';
   message: string;
   githubReviewStatus?: string;
   data?: Record<string, unknown>;
+  actions?: ChatAction[];
 };
+
+const ACTION_STATUSES: ChatActionStatus[] = ['done', 'approval_required', 'blocked', 'failed'];
+
+export function parseChatActions(value: unknown): ChatAction[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.tool !== 'string' || typeof record.summary !== 'string') return [];
+    if (!ACTION_STATUSES.includes(record.status as ChatActionStatus)) return [];
+    const pending = record.pendingAction;
+    return [{
+      callId: typeof record.callId === 'string' ? record.callId.slice(0, 120) : '',
+      tool: record.tool.slice(0, 80),
+      label: typeof record.label === 'string' ? record.label.slice(0, 80) : record.tool,
+      summary: record.summary.slice(0, 300),
+      status: record.status as ChatActionStatus,
+      reason: typeof record.reason === 'string' ? record.reason.slice(0, 300) : '',
+      policyCode: typeof record.policyCode === 'string' ? record.policyCode.slice(0, 60) : '',
+      recordId: typeof record.recordId === 'string' ? record.recordId.slice(0, 120) : null,
+      linkedView: typeof record.linkedView === 'string' ? record.linkedView.slice(0, 40) : null,
+      pendingAction:
+        pending && typeof pending === 'object' && !Array.isArray(pending) &&
+        typeof (pending as Record<string, unknown>).tool === 'string' &&
+        (pending as Record<string, unknown>).args && typeof (pending as Record<string, unknown>).args === 'object'
+          ? { tool: String((pending as Record<string, unknown>).tool), args: (pending as Record<string, unknown>).args as Record<string, unknown> }
+          : null,
+      at: typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : Date.now(),
+    }];
+  });
+}
 
 export function parseChatApiResponse(value: unknown): ChatApiResponse {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -23,11 +72,13 @@ export function parseChatApiResponse(value: unknown): ChatApiResponse {
   if (record.githubReviewStatus !== undefined && (typeof record.githubReviewStatus !== 'string' || record.githubReviewStatus.length > 2000)) {
     throw new Error('Invalid chat response.');
   }
+  const actions = parseChatActions(record.actions);
   return {
     type: (record.type as ChatApiResponse['type']) || 'chat',
     message: record.message,
     ...(typeof record.githubReviewStatus === 'string' ? { githubReviewStatus: record.githubReviewStatus } : {}),
     ...(record.data && typeof record.data === 'object' ? { data: record.data as Record<string, unknown> } : {}),
+    ...(actions.length ? { actions } : {}),
   };
 }
 
@@ -77,12 +128,19 @@ export function validateChatRequest(value: unknown):
   return { valid: true, body };
 }
 
+export type ResponsesFunctionCall = {
+  call_id: string;
+  name: string;
+  arguments: string;
+};
+
 export type ResponsesApiResult = {
   status?: string;
   incomplete_details?: { reason?: string };
   usage?: { output_tokens?: number };
   output_text?: string;
   output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+  functionCalls?: ResponsesFunctionCall[];
 };
 
 export function parseResponsesApiResult(value: unknown): ResponsesApiResult {
@@ -115,6 +173,20 @@ export function parseResponsesApiResult(value: unknown): ResponsesApiResult {
         }))
         : undefined,
     }));
+    const functionCalls = data.output
+      .filter((item): item is Record<string, unknown> =>
+        !!item && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).type === 'function_call'
+      )
+      .slice(0, 10)
+      .flatMap((item) => {
+        if (typeof item.call_id !== 'string' || typeof item.name !== 'string') return [];
+        return [{
+          call_id: item.call_id.slice(0, 200),
+          name: item.name.slice(0, 80),
+          arguments: typeof item.arguments === 'string' ? item.arguments.slice(0, 60_000) : '{}',
+        }];
+      });
+    if (functionCalls.length) result.functionCalls = functionCalls;
   }
   return result;
 }

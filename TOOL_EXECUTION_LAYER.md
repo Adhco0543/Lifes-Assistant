@@ -1,5 +1,7 @@
 # Tool Execution Layer & Autonomy Settings
 
+> **Status note:** this file is the original design sketch. For what is actually implemented (tools, policy rules, receipt format, tests) see [`docs/TOOL_LAYER.md`](docs/TOOL_LAYER.md).
+
 ## Overview
 
 The Tool Execution Layer gives your AI Assistant the ability to **actually do things** - send emails, create quotes, search jobs, and more. Combined with **Autonomy Settings**, users have complete control over what the AI can do automatically.

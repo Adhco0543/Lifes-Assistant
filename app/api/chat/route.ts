@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { getVercelOidcToken } from "@vercel/oidc";
-import { verifyFirebaseRequest } from "../../../lib/serverAuth";
+import { getFirebaseRequestUser } from "../../../lib/serverAuth";
 import { getPublicGithubContext } from "../../../lib/publicGithubContext";
 import { validateChatRequest, parseResponsesApiResult } from "../../../lib/chatApiContracts";
 import type { ResponsesApiResult } from "../../../lib/chatApiContracts";
 import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
+import { toolsForResponsesApi } from "../../../lib/tools/registry";
+import { ToolExecutor, type ActionReceipt } from "../../../lib/tools/executor";
+import { TOOL_INSTRUCTIONS } from "../../../lib/tools/instructions";
+
+const MAX_TOOL_ROUNDS = 4;
 
 type HistoryMessage = {
   role: "user" | "assistant";
@@ -20,9 +25,12 @@ type AttachmentInput = {
 
 export async function POST(req: Request) {
   try {
-    if (!(await verifyFirebaseRequest(req))) {
+    const requestUser = await getFirebaseRequestUser(req);
+    if (!requestUser) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
+    const authorizationHeader = req.headers.get("authorization") || "";
+    const idToken = authorizationHeader.startsWith("Bearer ") ? authorizationHeader.slice(7).trim() : "";
 
     const contentLength = Number(req.headers.get('content-length') || 0);
     if (contentLength > 4_000_000) {
@@ -95,6 +103,12 @@ export async function POST(req: Request) {
       /review|audit|inspect|analy[sz]e|look at|check|improv/i.test(requestMessage) &&
       !/yesterday|previous conversation|what did we|remember/i.test(requestMessage);
 
+    // Tools are opt-in per request so helper calls (quote polish, note cleanup,
+    // focus brief) stay pure text. The main chat sends enableTools: true.
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "";
+    const toolsEnabled = body.enableTools === true && Boolean(projectId) && Boolean(idToken) && !isFreshGithubReview;
+    const conversationId = typeof body.conversationId === "string" ? body.conversationId.slice(0, 120) : undefined;
+
     const omittedCurrentMessages = memoryEnabled
       ? Math.max(0, Math.floor(Number(body.omittedCurrentMessages) || 0))
       : 0;
@@ -121,6 +135,7 @@ export async function POST(req: Request) {
       "Help with work, planning, quotes, notes, email drafts, reminders, research plans, and everyday organization.",
       "Never claim you sent an email, placed an order, changed a calendar, spent money, contacted someone, or completed another external action unless a connected tool result explicitly confirms it.",
       "For consequential external actions, prepare the action and require the user\'s approval before execution.",
+      toolsEnabled ? TOOL_INSTRUCTIONS : "",
       "If information is uncertain, say so rather than inventing facts.",
       "When asked about prior conversations, use the saved transcript evidence below and distinguish exact retrieved text from inference. Never claim you saw an entire conversation if the supplied transcript says content was omitted.",
       "When saved conversation transcripts are supplied by the system, refer to them naturally as our saved or prior conversation when appropriate. Do not say the user pasted a transcript unless the current request actually contains one.",
@@ -181,13 +196,13 @@ export async function POST(req: Request) {
     const directFallbackModel = configuredFallbackModel.replace(/^openai\//, "");
     const directModels = [...new Set([directModel, directFallbackModel])];
     const gatewayModel = "openai/" + directModel;
-    const requestBody = {
+    const requestBody: Record<string, unknown> = {
       instructions,
       input,
       max_output_tokens: isFreshGithubReview ? 4000 : 1400,
+      ...(toolsEnabled ? { tools: toolsForResponsesApi(), tool_choice: "auto", parallel_tool_calls: true } : {}),
     };
 
-    let response: Response | null = null;
     let gatewayBillingRequired = false;
     let directRateLimited = false;
     let directCreditsExhausted = false;
@@ -196,70 +211,81 @@ export async function POST(req: Request) {
 
     const openAIKey = process.env.OPENAI_API_KEY?.trim();
 
-    if (openAIKey) {
-      for (const candidateModel of directModels) {
-        model = candidateModel;
-        provider = candidateModel === directModel ? "openai-direct" : "openai-direct-fallback";
+    // One model round trip with the existing provider fallback chain
+    // (direct OpenAI → fallback model → Vercel AI Gateway). Used once for a plain
+    // reply and again for each tool round.
+    const callModel = async (payload: Record<string, unknown>): Promise<Response | null> => {
+      let response: Response | null = null;
 
-        const attempt = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            Authorization: "Bearer " + openAIKey,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...requestBody,
-            model: candidateModel,
-          }),
-        });
+      if (openAIKey) {
+        for (const candidateModel of directModels) {
+          model = candidateModel;
+          provider = candidateModel === directModel ? "openai-direct" : "openai-direct-fallback";
 
-        if (attempt.ok) {
-          response = attempt;
-          break;
-        }
-
-        const detail = await attempt.text();
-        directRateLimited = directRateLimited ||
-          (attempt.status === 429 && /rate_limit|rate limit|tokens per min/i.test(detail));
-        directCreditsExhausted = directCreditsExhausted ||
-          /credit_balance_exhausted|insufficient_quota|no credits remaining/i.test(detail);
-        reportIntegrationFailure('openai', 'request', attempt.status);
-      }
-    }
-
-    if (!response) {
-      provider = "vercel-ai-gateway";
-      model = gatewayModel;
-
-      try {
-        const gatewayToken =
-          process.env.AI_GATEWAY_API_KEY?.trim() ||
-          (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
-
-        if (gatewayToken) {
-          response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+          const attempt = await fetch("https://api.openai.com/v1/responses", {
             method: "POST",
             headers: {
-              Authorization: "Bearer " + gatewayToken,
+              Authorization: "Bearer " + openAIKey,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              ...requestBody,
-              model: gatewayModel,
+              ...payload,
+              model: candidateModel,
             }),
           });
+
+          if (attempt.ok) {
+            response = attempt;
+            break;
+          }
+
+          const detail = await attempt.text();
+          directRateLimited = directRateLimited ||
+            (attempt.status === 429 && /rate_limit|rate limit|tokens per min/i.test(detail));
+          directCreditsExhausted = directCreditsExhausted ||
+            /credit_balance_exhausted|insufficient_quota|no credits remaining/i.test(detail);
+          reportIntegrationFailure('openai', 'request', attempt.status);
         }
-      } catch {
-        reportIntegrationFailure('gateway', 'request');
       }
 
-      if (response && !response.ok) {
-        const detail = await response.text();
-        gatewayBillingRequired = response.status === 403 && detail.includes("customer_verification_required");
-        reportIntegrationFailure('gateway', 'request', response.status);
-        response = null;
+      if (!response) {
+        provider = "vercel-ai-gateway";
+        model = gatewayModel;
+
+        try {
+          const gatewayToken =
+            process.env.AI_GATEWAY_API_KEY?.trim() ||
+            (await getVercelOidcToken({ expirationBufferMs: 60_000 }));
+
+          if (gatewayToken) {
+            response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+              method: "POST",
+              headers: {
+                Authorization: "Bearer " + gatewayToken,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                ...payload,
+                model: gatewayModel,
+              }),
+            });
+          }
+        } catch {
+          reportIntegrationFailure('gateway', 'request');
+        }
+
+        if (response && !response.ok) {
+          const detail = await response.text();
+          gatewayBillingRequired = response.status === 403 && detail.includes("customer_verification_required");
+          reportIntegrationFailure('gateway', 'request', response.status);
+          response = null;
+        }
       }
-    }
+
+      return response;
+    };
+
+    const response = await callModel(requestBody);
 
     if (!response || !response.ok) {
       const localFallback = buildLocalFallback(
@@ -295,8 +321,50 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = parseResponsesApiResult(await response.json());
-    const reply = extractOutputText(result);
+    let result = parseResponsesApiResult(await response.json());
+
+    // ---- Tool loop ---------------------------------------------------------
+    // The model may ask to run tools. Each call goes through the autonomy policy
+    // and leaves a receipt. Results are fed back until the model answers in text.
+    const actions: ActionReceipt[] = [];
+    if (toolsEnabled && result.functionCalls?.length) {
+      const executor = new ToolExecutor({
+        uid: requestUser.uid,
+        idToken,
+        projectId,
+        timeZone: timeZone || undefined,
+        conversationId,
+      });
+      let conversation: unknown[] = [...input];
+
+      for (let round = 0; round < MAX_TOOL_ROUNDS && result.functionCalls?.length; round += 1) {
+        const outputs: unknown[] = [];
+        for (const call of result.functionCalls) {
+          let parsedArguments: unknown = {};
+          try { parsedArguments = JSON.parse(call.arguments || "{}"); } catch { parsedArguments = {}; }
+          const execution = await executor.execute({ callId: call.call_id, name: call.name, arguments: parsedArguments });
+          if (execution.receipt) actions.push(execution.receipt);
+          conversation.push({ type: "function_call", call_id: call.call_id, name: call.name, arguments: call.arguments || "{}" });
+          outputs.push({ type: "function_call_output", call_id: call.call_id, output: execution.modelOutput });
+        }
+        conversation = [...conversation, ...outputs];
+
+        const lastRound = round === MAX_TOOL_ROUNDS - 1;
+        const followUp = await callModel({
+          ...requestBody,
+          input: conversation,
+          // On the final round, force a text answer so the user always gets a reply.
+          ...(lastRound ? { tool_choice: "none" } : {}),
+        });
+        if (!followUp || !followUp.ok) {
+          result = { output_text: summarizeActionsForUser(actions) };
+          break;
+        }
+        result = parseResponsesApiResult(await followUp.json());
+      }
+    }
+
+    const reply = extractOutputText(result) || (actions.length ? summarizeActionsForUser(actions) : "");
     if (!reply) {
       reportIntegrationFailure('chat', 'parse-response');
       return NextResponse.json({
@@ -308,12 +376,17 @@ export async function POST(req: Request) {
       }, { status: 503 });
     }
 
+    // When Bella already acted through tools, don't also hand the client a
+    // keyword-classified "pending action" for the same request.
+    const classifiedType = actions.length ? "chat" : action;
+
     return NextResponse.json({
-      type: action,
+      type: classifiedType,
       message:
         reply ||
         "I received your request, but I could not produce a useful response. Please try again.",
-      data: buildDraft(action, requestMessage),
+      data: classifiedType === "chat" ? undefined : buildDraft(action, requestMessage),
+      actions: actions.length ? actions : undefined,
       model,
       provider,
       githubReviewStatus: githubContext?.status || undefined,
@@ -467,6 +540,18 @@ function buildLocalFallback(
   }
 
   return parts.join(" ");
+}
+
+/** Plain-language fallback when the model can't produce a closing message after acting. */
+function summarizeActionsForUser(actions: ActionReceipt[]): string {
+  if (!actions.length) return "";
+  const lines = actions.map((receipt) => {
+    if (receipt.status === "done") return "Done: " + receipt.label.toLowerCase() + " — " + receipt.summary + ".";
+    if (receipt.status === "approval_required") return "Waiting for your approval: " + receipt.summary + " (" + receipt.reason + ")";
+    if (receipt.status === "blocked") return "Not done: " + receipt.summary + " — " + receipt.reason;
+    return "Failed: " + receipt.summary;
+  });
+  return lines.join("\n");
 }
 
 function extractOutputText(result: ResponsesApiResult): string {

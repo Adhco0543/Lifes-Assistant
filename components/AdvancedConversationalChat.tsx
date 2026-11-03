@@ -7,7 +7,8 @@ import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, SUPPORTED_ATTACHMENT_EXTENSIONS,
 import type { PendingAttachment } from '../lib/chatAttachments';
 import { currentChatContext, recallKeywords, compactConversationMessages } from '../lib/chatContext';
 import { parseChatApiResponse } from '../lib/chatApiContracts';
-import type { ChatApiResponse } from '../lib/chatApiContracts';
+import type { ChatApiResponse, ChatAction } from '../lib/chatApiContracts';
+import ChatActionReceipts from './ChatActionReceipts';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 
 interface AdvancedChatProps {
@@ -93,6 +94,15 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [persistentMemory, setPersistentMemory] = useState<string[]>([]);
   const [pendingAction, setPendingAction] = useState<ChatApiResponse | null>(null);
+  // Receipts for tool actions, keyed by the assistant message they belong to.
+  // Kept in memory; the durable copy is in the Action Ledger (users/{uid}/events).
+  const [messageActions, setMessageActions] = useState<Record<string, ChatAction[]>>({});
+  const updateMessageAction = useCallback((messageId: string, callId: string, patch: Partial<ChatAction>) => {
+    setMessageActions((current) => ({
+      ...current,
+      [messageId]: (current[messageId] || []).map((item) => (item.callId === callId ? { ...item, ...patch } : item)),
+    }));
+  }, []);
   const [queuedLaunch, setQueuedLaunch] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
@@ -787,6 +797,8 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           omittedCurrentMessages: chatContext.omitted,
           localDate: localDateKey(),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+          enableTools: true,
+          conversationId: currentConversationId || undefined,
         }),
       });
 
@@ -818,6 +830,14 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
+
+      if (data.actions?.length) {
+        setMessageActions((current) => ({ ...current, [assistantMsg.id]: data.actions || [] }));
+        if (data.actions.some((item) => item.status === 'done')) {
+          // Let Tasks, Radar, People, etc. refresh what Bella just changed.
+          window.dispatchEvent(new CustomEvent('life-workspace-changed', { detail: { type: 'assistant-action' } }));
+        }
+      }
 
       if (firebaseBackend.isAvailable() && currentConversationId && currentConversationId !== 'local') {
         try {
@@ -1042,6 +1062,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
                           </span>
                         ))}
                       </div>
+                    ) : null}
+                    {messageActions[msg.id]?.length ? (
+                      <ChatActionReceipts
+                        actions={messageActions[msg.id]}
+                        onUpdate={(callId, patch) => updateMessageAction(msg.id, callId, patch)}
+                      />
                     ) : null}
                   </div>
                 </div>
