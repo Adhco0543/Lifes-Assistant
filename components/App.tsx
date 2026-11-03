@@ -199,7 +199,7 @@ export const App: React.FC = () => {
       const now = Date.now();
       setRadarCount(
         loops.filter((loop) => {
-          if (loop.status === 'resolved') return false;
+          if (loop.archived || loop.status === 'resolved') return false;
           if (
             loop.status === 'snoozed' &&
             loop.snoozedUntil &&
