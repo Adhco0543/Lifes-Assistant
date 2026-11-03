@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { prepareRadarHandoff } from '../lib/radarHandoff';
 import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
 import { DAY_MS } from '../lib/workspaceRadar';
-import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, explainRadarItem, suggestedRadarView, type LifePreferences } from '../lib/lifePreferences';
+import { DEFAULT_LIFE_PREFERENCES, normalizeLifePreferences, scoreRadarItem, explainRadarItem, type LifePreferences } from '../lib/lifePreferences';
 
 interface RadarCenterProps {
   userId: string;
@@ -117,19 +118,7 @@ export default function RadarCenter({
   };
 
   const handleLoop = async (loop: OpenLoop) => {
-    const view = suggestedRadarView(loop);
-    const context = loop.nextAction || loop.summary || loop.title;
-    if (view === 'quotes') {
-      const draft = { projectDescription: loop.title, notes: context, sourceOpenLoopId: loop.id, updatedAt: Date.now() };
-      localStorage.setItem('quote_draft', JSON.stringify(draft));
-      await firebaseBackend.saveDraft('handoff-quote', draft).catch(() => undefined);
-    } else if (view === 'email') {
-      const draft = { subject: loop.title, request: context, sourceOpenLoopId: loop.id, updatedAt: Date.now() };
-      localStorage.setItem('email_draft', JSON.stringify(draft));
-      await firebaseBackend.saveDraft('handoff-email', draft).catch(() => undefined);
-    } else if (view === 'chat') {
-      localStorage.setItem('assistant_launch_prompt:' + userId, context);
-    }
+    const { view } = await prepareRadarHandoff(loop, userId);
     onNavigate(view);
   };
 

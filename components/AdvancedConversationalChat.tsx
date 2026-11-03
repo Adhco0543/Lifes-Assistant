@@ -9,6 +9,7 @@ import { currentChatContext, recallKeywords, compactConversationMessages } from 
 import { parseChatApiResponse } from '../lib/chatApiContracts';
 import type { ChatApiResponse, ChatAction } from '../lib/chatApiContracts';
 import ChatActionReceipts from './ChatActionReceipts';
+import MarkdownLite from './MarkdownLite';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 
 interface AdvancedChatProps {
@@ -1050,9 +1051,13 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
               messages.map((msg) => (
                 <div key={msg.id} className={`message message-${msg.role}`}>
                   <div className="message-bubble">
-                    {msg.content.split('\n').map((line, idx) => (
-                      <div key={idx}>{line}</div>
-                    ))}
+                    {msg.role === 'assistant' ? (
+                      <MarkdownLite text={msg.content} />
+                    ) : (
+                      msg.content.split('\n').map((line, idx) => (
+                        <div key={idx}>{line}</div>
+                      ))
+                    )}
                     {msg.attachments?.length ? (
                       <div className="message-attachments">
                         {msg.attachments.map((attachment, index) => (
