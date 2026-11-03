@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 type Mode = 'everyday' | 'business';
 
@@ -15,6 +15,14 @@ const promptsByMode: Record<Mode, string[]> = {
 };
 
 export default function PublicDemoPage() {
+  useEffect(() => {
+    document.documentElement.classList.add('demo-page-scroll');
+    document.body.classList.add('demo-page-scroll');
+    return () => {
+      document.documentElement.classList.remove('demo-page-scroll');
+      document.body.classList.remove('demo-page-scroll');
+    };
+  }, []);
   const [mode, setMode] = useState<Mode>('everyday');
   const [activeTool, setActiveTool] = useState('Life Radar');
   const [selectedPrompt, setSelectedPrompt] = useState('');
