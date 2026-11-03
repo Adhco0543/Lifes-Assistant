@@ -8,6 +8,7 @@ import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
 import { toolsForResponsesApi } from "../../../lib/tools/registry";
 import { ToolExecutor, type ActionReceipt } from "../../../lib/tools/executor";
 import { TOOL_INSTRUCTIONS } from "../../../lib/tools/instructions";
+import { FirestoreRestClient, FirestoreRestError } from "../../../lib/tools/firestoreRest";
 
 const MAX_TOOL_ROUNDS = 4;
 
@@ -23,7 +24,100 @@ type AttachmentInput = {
   dataUrl: string;
 };
 
+type ChatRequestCache = {
+  store: FirestoreRestClient;
+  path: string;
+};
+
+type ChatRequestClaim =
+  | { kind: 'owned'; cache: ChatRequestCache }
+  | { kind: 'cached'; body: Record<string, unknown>; status: number }
+  | { kind: 'expired' }
+  | { kind: 'busy' };
+
+const CHAT_REQUEST_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function claimChatRequest(
+  uid: string,
+  idToken: string,
+  projectId: string,
+  requestId: string
+): Promise<ChatRequestClaim> {
+  const createdAt = Number(/^chat-(\d{13})-/.exec(requestId)?.[1]);
+  if (
+    !Number.isFinite(createdAt) ||
+    createdAt > Date.now() + 5 * 60 * 1000 ||
+    Date.now() - createdAt > CHAT_REQUEST_RETENTION_MS
+  ) {
+    return { kind: 'expired' };
+  }
+  const store = new FirestoreRestClient({ projectId, idToken });
+  const userPath = 'users/' + encodeURIComponent(uid);
+  const path = userPath + '/chatRequests/' + encodeURIComponent(requestId);
+  const cache = { store, path };
+  let document = await store.getDocument(path);
+
+  if (!document) {
+    try {
+      await store.createDocument(userPath + '/chatRequests', {
+        requestId,
+        status: 'processing',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        expiresAt: new Date(Date.now() + CHAT_REQUEST_RETENTION_MS),
+      }, requestId);
+      return { kind: 'owned', cache };
+    } catch (error) {
+      if (!(error instanceof FirestoreRestError) || error.status !== 409) throw error;
+      document = await store.getDocument(path);
+    }
+  }
+
+  if (!document) return { kind: 'busy' };
+  if (document.data.status === 'completed') {
+    const body = document.data.responseBody;
+    const status = Number(document.data.responseStatus || 200);
+    if (body && typeof body === 'object' && !Array.isArray(body) && status >= 200 && status <= 599) {
+      return { kind: 'cached', body: body as Record<string, unknown>, status };
+    }
+    return { kind: 'busy' };
+  }
+
+  if (document.data.status !== 'retryable' || !document.updateTime) return { kind: 'busy' };
+  try {
+    await store.patchDocument(path, {
+      status: 'processing',
+      updatedAt: Date.now(),
+    }, document.updateTime);
+    return { kind: 'owned', cache };
+  } catch (error) {
+    if (error instanceof FirestoreRestError && (error.status === 409 || error.status === 400)) {
+      return { kind: 'busy' };
+    }
+    throw error;
+  }
+}
+
 export async function POST(req: Request) {
+  let requestCache: ChatRequestCache | null = null;
+  let actionsMayHaveRun = false;
+  const respond = async (
+    body: Record<string, unknown>,
+    status = 200,
+    retryable = false
+  ) => {
+    if (requestCache) {
+      await requestCache.store.patchDocument(requestCache.path, {
+        status: retryable ? 'retryable' : 'completed',
+        responseStatus: status,
+        responseBody: body,
+        updatedAt: Date.now(),
+        expiresAt: new Date(Date.now() + CHAT_REQUEST_RETENTION_MS),
+      });
+    }
+    return NextResponse.json(body, { status });
+  };
+
   try {
     const requestUser = await getFirebaseRequestUser(req);
     if (!requestUser) {
@@ -41,6 +135,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.body;
+    const requestId = typeof body.requestId === 'string' ? body.requestId : '';
+    if (requestId) {
+      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '';
+      if (!projectId || !idToken) {
+        return NextResponse.json({ error: 'Chat request tracking is unavailable.' }, { status: 503 });
+      }
+      const claim = await claimChatRequest(requestUser.uid, idToken, projectId, requestId);
+      if (claim.kind === 'cached') return NextResponse.json(claim.body, { status: claim.status });
+      if (claim.kind === 'expired') {
+        return NextResponse.json({ error: 'This retry has expired. Check your conversation before starting a new message.' }, { status: 410 });
+      }
+      if (claim.kind === 'busy') {
+        return NextResponse.json(
+          { error: 'This request may still be processing. Check your conversation before trying it again.' },
+          { status: 409 }
+        );
+      }
+      requestCache = claim.cache;
+    }
     const incomingMessages = Array.isArray(body.messages) ? body.messages : [];
     const lastIncoming = incomingMessages[incomingMessages.length - 1];
     const lastMessageContent = lastIncoming && typeof lastIncoming === 'object' &&
@@ -57,7 +170,7 @@ export async function POST(req: Request) {
         : "");
 
     if (!requestMessage) {
-      return NextResponse.json({
+      return respond({
         type: "chat",
         message: "I did not receive a message or attachment. Tell me what you want help with.",
       });
@@ -296,7 +409,7 @@ export async function POST(req: Request) {
       );
 
       if (localFallback) {
-        return NextResponse.json({
+        return respond({
           type: action,
           message: localFallback,
           data: buildDraft(action, requestMessage),
@@ -305,7 +418,7 @@ export async function POST(req: Request) {
         });
       }
 
-      return NextResponse.json(
+      return respond(
         {
           type: action,
           message: directCreditsExhausted
@@ -317,7 +430,8 @@ export async function POST(req: Request) {
               : "The AI service is temporarily unavailable. Your request was preserved so you can try again.",
           data: buildDraft(action, requestMessage),
         },
-        { status: 502 }
+        502,
+        true
       );
     }
 
@@ -340,6 +454,7 @@ export async function POST(req: Request) {
       for (let round = 0; round < MAX_TOOL_ROUNDS && result.functionCalls?.length; round += 1) {
         const outputs: unknown[] = [];
         for (const call of result.functionCalls) {
+          actionsMayHaveRun = true;
           let parsedArguments: unknown = {};
           try { parsedArguments = JSON.parse(call.arguments || "{}"); } catch { parsedArguments = {}; }
           const execution = await executor.execute({ callId: call.call_id, name: call.name, arguments: parsedArguments });
@@ -367,20 +482,20 @@ export async function POST(req: Request) {
     const reply = extractOutputText(result) || (actions.length ? summarizeActionsForUser(actions) : "");
     if (!reply) {
       reportIntegrationFailure('chat', 'parse-response');
-      return NextResponse.json({
+      return respond({
         type: action,
         message: result.incomplete_details?.reason === "max_output_tokens"
           ? "The AI ran out of response space while processing this request. Try asking for a shorter review."
           : "The AI service returned no readable answer. Please try a smaller request.",
         githubReviewStatus: githubContext?.status || undefined,
-      }, { status: 503 });
+      }, 503, actions.length === 0);
     }
 
     // When Bella already acted through tools, don't also hand the client a
     // keyword-classified "pending action" for the same request.
     const classifiedType = actions.length ? "chat" : action;
 
-    return NextResponse.json({
+    return respond({
       type: classifiedType,
       message:
         reply ||
@@ -394,6 +509,16 @@ export async function POST(req: Request) {
   } catch {
     reportIntegrationFailure('chat', 'request');
 
+    if (requestCache && !actionsMayHaveRun) {
+      try {
+        return await respond({
+          type: 'chat',
+          message: 'Something went wrong while processing your message. You can retry safely.',
+        }, 500, true);
+      } catch {
+        // Keep failures private; the client can still show its own retry state.
+      }
+    }
     return NextResponse.json(
       {
         type: "chat",

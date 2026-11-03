@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { firebaseBackend } from '../lib/firebaseBackend';
 import { updateUserProfile } from '../lib/profile';
 import { normalizeLifePreferences, PRIMARY_SLIPS, type CapturePreference, type LifeMode } from '../lib/lifePreferences';
@@ -11,22 +11,34 @@ interface ProgressiveOnboardingProps {
   onStepChange?: (step: number) => void;
 }
 
-type StepId = 'mode' | 'slips' | 'capture';
+type StepId = 'mode' | 'slips' | 'capture' | 'focus' | 'responseStyle' | 'review';
 
 const steps: Array<{ id: StepId; title: string; kicker: string; description: string }> = [
   {
     id: 'mode', title: 'How do you mostly want to use Life’s Assistant?', kicker: 'YOUR MODE',
-    description: 'You can change this later.',
+    description: 'Bella will ask a few short questions, one at a time. You can change these answers later.',
   },
   {
     id: 'slips', title: 'What do you most often forget or let sit too long?', kicker: 'YOUR PRIORITIES',
-    description: 'Choose up to three priorities. You can change them later.',
+    description: 'Choose up to three priorities, or skip this question.',
   },
   {
     id: 'capture', title: 'How do you usually capture things?', kicker: 'CAPTURE',
-    description: 'Optional. Choose a preference or skip to finish setup.',
+    description: 'Optional. Choose a preference or skip this question.',
   },
- ];
+  {
+    id: 'focus', title: 'What would be most useful for Bella to help you stay on top of?', kicker: 'ONE USEFUL DETAIL',
+    description: 'Keep it brief and avoid anything you would not want saved to your account.',
+  },
+  {
+    id: 'responseStyle', title: 'How do you like answers?', kicker: 'YOUR PREFERENCE',
+    description: 'Choose the style that feels most useful. You can skip this question.',
+  },
+  {
+    id: 'review', title: 'Does this look right?', kicker: 'REVIEW',
+    description: 'Review or edit your answers before they are saved to your account.',
+  },
+];
 
 export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   userId = 'guest',
@@ -37,13 +49,65 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   const [mode, setMode] = useState<LifeMode | null>(null);
   const [primarySlips, setPrimarySlips] = useState<string[]>([]);
   const [capturePref, setCapturePref] = useState<CapturePreference>('');
+  const [focus, setFocus] = useState('');
+  const [responseStyle, setResponseStyle] = useState<'concise' | 'balanced' | 'detailed' | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
+  const [loadedForUser, setLoadedForUser] = useState<string | null>(null);
+  const draftKey = `lifes-assistant-onboarding:${userId}`;
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(draftKey);
+      if (saved) {
+        const draft = JSON.parse(saved) as Record<string, unknown>;
+        if (typeof draft.stepIndex === 'number' && Number.isInteger(draft.stepIndex)) {
+          setStepIndex(Math.max(0, Math.min(steps.length - 1, draft.stepIndex)));
+        }
+        if (draft.mode === 'everyday' || draft.mode === 'business' || draft.mode === 'mix') setMode(draft.mode);
+        if (Array.isArray(draft.primarySlips)) {
+          setPrimarySlips(draft.primarySlips.filter((item): item is string =>
+            typeof item === 'string' && PRIMARY_SLIPS.some((slip) => slip.id === item)
+          ).slice(0, 3));
+        }
+        if (draft.capturePref === 'chat' || draft.capturePref === 'voice' || draft.capturePref === 'forward') {
+          setCapturePref(draft.capturePref);
+        }
+        if (typeof draft.focus === 'string') setFocus(draft.focus.slice(0, 240));
+        if (draft.responseStyle === 'concise' || draft.responseStyle === 'balanced' || draft.responseStyle === 'detailed') {
+          setResponseStyle(draft.responseStyle);
+        }
+      }
+    } catch {
+      // A temporary browser draft is optional; the user can continue without it.
+    }
+    setLoadedForUser(userId || 'guest');
+  }, [draftKey, userId]);
+
+  useEffect(() => {
+    if (loadedForUser !== (userId || 'guest')) return;
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify({
+        stepIndex,
+        mode,
+        primarySlips,
+        capturePref,
+        focus,
+        responseStyle,
+      }));
+    } catch {
+      // The form remains usable when session storage is disabled.
+    }
+  }, [draftKey, loadedForUser, userId, stepIndex, mode, primarySlips, capturePref, focus, responseStyle]);
 
   const step = steps[stepIndex];
   const progress = ((stepIndex + 1) / steps.length) * 100;
 
-  const canContinue = step.id === 'mode' ? mode !== null : step.id !== 'slips' || (primarySlips.length > 0 && primarySlips.length <= 3);
+  const canContinue = step.id === 'mode'
+    ? mode !== null
+    : step.id === 'slips'
+      ? primarySlips.length > 0 && primarySlips.length <= 3
+      : true;
 
   const toggleSlip = (item: string) => {
     setPrimarySlips((current) => item === 'unsure'
@@ -65,21 +129,28 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
     setStatus('Saving your workspace…');
 
     try {
-      if (!mode) throw new Error('Choose a mode to continue.');
       const completedAt = new Date().toISOString();
-      const choices = normalizeLifePreferences({ mode, primary_slips: primarySlips, capture_pref: capturePref });
+      const selectedMode = mode || 'mix';
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const choices = normalizeLifePreferences({ mode: selectedMode, primary_slips: primarySlips, capture_pref: capturePref });
       const profile = {
         mode: choices.mode,
         primary_slips: choices.primary_slips,
         capture_pref: capturePref || null,
         onboarding_completed_at: completedAt,
+        timezone: timeZone,
         tool_overrides: { pinned: [], hidden: [] },
+        getting_to_know_you: {
+          focus: focus.trim().slice(0, 240),
+          responseStyle,
+        },
       };
 
       await updateUserProfile(userId, profile);
-      void firebaseBackend.saveDraft('assistant-preferences', profile).catch(error => console.warn('Optional preferences backup failed:', error));
+      void firebaseBackend.saveDraft('assistant-preferences', { ...profile, timezone: timeZone }).catch(error => console.warn('Optional preferences backup failed:', error));
       try {
         localStorage.setItem(`lifes-assistant-preferences:${userId}`, JSON.stringify(profile));
+        sessionStorage.removeItem(draftKey);
       } catch (error) {
         console.warn('Life preferences were saved to the account, but not to local storage:', error);
       }
@@ -88,10 +159,11 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
         timestamp: Date.now(),
         workspaceName: 'My Life',
         businessName: 'My Life',
-        businessType: mode === 'business' ? 'business' : mode === 'everyday' ? 'personal' : 'mix',
-        mode,
+        businessType: selectedMode === 'business' ? 'business' : selectedMode === 'everyday' ? 'personal' : 'mix',
+        mode: selectedMode,
         primary_slips: choices.primary_slips,
         capture_pref: capturePref || null,
+        getting_to_know_you: profile.getting_to_know_you,
       });
     } catch {
       setStatus('I could not save the setup. Try again.');
@@ -102,6 +174,18 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
   const back = () => {
     if (stepIndex === 0 || saving) return;
     const nextIndex = stepIndex - 1;
+    setStepIndex(nextIndex);
+    onStepChange?.(nextIndex + 1);
+  };
+
+  const skip = () => {
+    if (saving || step.id === 'review') return;
+    if (step.id === 'mode') setMode('mix');
+    if (step.id === 'slips') setPrimarySlips([]);
+    if (step.id === 'capture') setCapturePref('');
+    if (step.id === 'focus') setFocus('');
+    if (step.id === 'responseStyle') setResponseStyle(null);
+    const nextIndex = stepIndex + 1;
     setStepIndex(nextIndex);
     onStepChange?.(nextIndex + 1);
   };
@@ -132,6 +216,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
           <div className="progress-track"><div style={{ width: progress + '%' }} /></div>
 
           <div className="step-copy">
+            <span className="conversation-speaker">BELLA</span>
             <h2>{step.title}</h2>
             <p>{step.description}</p>
           </div>
@@ -191,11 +276,53 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
             </div>
           )}
 
-          {false && (
-            <div className="confirmation-card">
-              <span className="confirm-check">✓</span>
-              <p>Got it. I’ll prioritize <strong>{mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'}</strong> and surface things related to <strong>{primarySlips.includes('unsure') ? 'a bit of everything' : primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ')}</strong>.</p>
-              <small>{capturePref ? `Capture preference: ${capturePref === 'forward' ? 'forward emails or notes later' : capturePref}.` : 'Capture preference skipped.'} You can change this anytime in Settings.</small>
+          {step.id === 'focus' && (
+            <div className="field-block">
+              <label htmlFor="onboarding-focus">A short note (optional)</label>
+              <textarea
+                id="onboarding-focus"
+                value={focus}
+                onChange={(event) => setFocus(event.target.value.slice(0, 240))}
+                maxLength={240}
+                placeholder="For example: help me keep track of client follow-ups."
+              />
+            </div>
+          )}
+
+          {step.id === 'responseStyle' && (
+            <div className="option-grid">
+              {([
+                ['concise', 'Short and direct'],
+                ['balanced', 'A useful amount of detail'],
+                ['detailed', 'Step-by-step detail'],
+              ] as const).map(([value, label]) => (
+                <button
+                  type="button"
+                  key={value}
+                  className={responseStyle === value ? 'option selected' : 'option'}
+                  onClick={() => setResponseStyle(value)}
+                  aria-pressed={responseStyle === value}
+                >
+                  <span className="option-mark">{responseStyle === value ? '✓' : '+'}</span><span>{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {step.id === 'review' && (
+            <div className="review-list">
+              {[
+                ['Mode', mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both', 0],
+                ['Priorities', primarySlips.length ? primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ') : 'Skipped', 1],
+                ['Capture', capturePref ? (capturePref === 'forward' ? 'Forward emails or notes later' : capturePref) : 'Skipped', 2],
+                ['Focus', focus.trim() || 'Skipped', 3],
+                ['Answer style', responseStyle || 'Skipped', 4],
+              ].map(([label, answer, editIndex]) => (
+                <div className="review-row" key={String(label)}>
+                  <span><strong>{String(label)}</strong><small>{String(answer)}</small></span>
+                  <button type="button" onClick={() => setStepIndex(Number(editIndex))}>Edit</button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -203,9 +330,9 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
 
           <footer>
             <button className="back" type="button" onClick={back} disabled={stepIndex === 0 || saving}>Back</button>
-            {step.id === 'capture' && <button className="back" type="button" onClick={() => { setCapturePref(''); void next(); }} disabled={saving}>Skip</button>}
+            {step.id !== 'review' && <button className="back" type="button" onClick={skip} disabled={saving}>Skip question</button>}
             <button className="next" type="button" onClick={next} disabled={!canContinue || saving}>
-              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Finish setup and open Life’s Assistant' : 'Continue'}
+              {saving ? 'Saving…' : stepIndex === steps.length - 1 ? 'Save and open Life’s Assistant' : 'Continue'}
             </button>
           </footer>
         </main>
@@ -341,6 +468,13 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
         .field-block textarea { min-height: 130px; resize: vertical; line-height: 1.5; }
         .field-block input:focus, .field-block textarea:focus { border-color: #606060; }
         .field-block small { color: #636363; font-size: .62rem; }
+        .conversation-speaker { display: block; margin-bottom: 9px; color: #8eae97; font-size: .62rem; font-weight: 700; letter-spacing: .12em; }
+        .review-list { margin-top: 24px; display: grid; gap: 8px; }
+        .review-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #363636; border-radius: 12px; background: #252525; }
+        .review-row span, .review-row small { display: grid; gap: 4px; }
+        .review-row strong { font-size: .72rem; color: #eee; }
+        .review-row small { font-size: .68rem; color: #929292; overflow-wrap: anywhere; }
+        .review-row button { min-height: 34px; padding: 0 12px; border: 1px solid #444; border-radius: 8px; color: #ddd; background: #303030; cursor: pointer; }
         .option-grid {
           margin-top: 28px;
           display: grid;

@@ -1,9 +1,8 @@
 // Minimal Firestore REST client for server routes.
 //
-// The server has no Firebase Admin credentials. Instead it forwards the signed-in
-// user's own ID token, so every read and write is subject to the same
-// firestore.rules that protect the client app. Nothing here can touch another
-// user's data.
+// User-request routes forward the signed-in user's ID token, so reads and writes
+// remain subject to firestore.rules. The scheduled Radar route uses a server-only
+// service-account token and derives every document path from a listed user ID.
 
 export type FirestoreValue =
   | string
@@ -25,12 +24,26 @@ export interface FirestoreDocument {
   id: string;
   path: string;
   data: Record<string, FirestoreValue>;
+  updateTime?: string;
+}
+
+export class FirestoreRestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'FirestoreRestError';
+    this.status = status;
+  }
 }
 
 const MAX_STRING_LENGTH = 20_000;
 
 export function encodeValue(value: unknown): RestValue {
   if (value === null || value === undefined) return { nullValue: null };
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? { timestampValue: value.toISOString() } : { nullValue: null };
+  }
   if (typeof value === 'string') return { stringValue: value.slice(0, MAX_STRING_LENGTH) };
   if (typeof value === 'boolean') return { booleanValue: value };
   if (typeof value === 'number') {
@@ -117,8 +130,7 @@ export class FirestoreRestClient {
     });
     if (response.status === 404 && method === 'GET') return null;
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error('Firestore ' + method + ' failed (' + response.status + '): ' + detail.slice(0, 300));
+      throw new FirestoreRestError('Firestore ' + method + ' failed.', response.status);
     }
     return response.json();
   }
@@ -130,13 +142,19 @@ export class FirestoreRestClient {
       id: documentIdFromName(raw.name),
       path,
       data: decodeFields(raw.fields as Record<string, unknown> | undefined),
+      updateTime: typeof raw.updateTime === 'string' ? raw.updateTime : undefined,
     };
   }
 
-  async createDocument(collectionPath: string, data: Record<string, unknown>): Promise<string> {
+  async createDocument(
+    collectionPath: string,
+    data: Record<string, unknown>,
+    documentId?: string
+  ): Promise<string> {
+    const id = documentId ? '?documentId=' + encodeURIComponent(documentId) : '';
     const raw = (await this.request(
       'POST',
-      this.base + '/' + this.root + '/' + collectionPath,
+      this.base + '/' + this.root + '/' + collectionPath + id,
       { fields: encodeFields(data) }
     )) as RestValue;
     if (!raw || typeof raw.name !== 'string') throw new Error('Firestore create returned no document name.');
@@ -144,12 +162,18 @@ export class FirestoreRestClient {
   }
 
   /** Merge-style update: only the supplied keys are written. */
-  async patchDocument(path: string, data: Record<string, unknown>): Promise<void> {
+  async patchDocument(
+    path: string,
+    data: Record<string, unknown>,
+    updateTime?: string
+  ): Promise<void> {
     const keys = Object.keys(data).filter((key) => data[key] !== undefined);
-    const mask = keys.map((key) => 'updateMask.fieldPaths=' + encodeURIComponent(key)).join('&');
+    const query = new URLSearchParams();
+    for (const key of keys) query.append('updateMask.fieldPaths', key);
+    if (updateTime) query.set('currentDocument.updateTime', updateTime);
     await this.request(
       'PATCH',
-      this.base + '/' + this.root + '/' + path + '?' + mask,
+      this.base + '/' + this.root + '/' + path + '?' + query,
       { fields: encodeFields(data) }
     );
   }

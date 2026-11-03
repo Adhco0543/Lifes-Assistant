@@ -89,6 +89,12 @@ export function validateChatRequest(value: unknown):
     return { valid: false, error: 'Expected a JSON object.' };
   }
   const body = value as Record<string, unknown>;
+  if (
+    body.requestId !== undefined &&
+    (typeof body.requestId !== 'string' || !/^chat-\d{13}-[A-Za-z0-9_-]{1,80}$/.test(body.requestId))
+  ) {
+    return { valid: false, error: 'Invalid request id.' };
+  }
   for (const key of ['message', 'input', 'content']) {
     if (body[key] !== undefined && (typeof body[key] !== 'string' || (body[key] as string).length > 60_000)) {
       return { valid: false, error: 'Invalid message input.' };

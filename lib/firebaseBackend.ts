@@ -28,6 +28,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
 } from "firebase/firestore";
@@ -413,21 +414,18 @@ class FirebaseBackend {
 
     const userId = this.getUserId();
     const now = Date.now();
+    const messageRef = doc(db, "users", userId, "conversations", message.conversationId, "messages", message.id);
+    const conversationRef = doc(db, "users", userId, "conversations", message.conversationId);
 
-    await setDoc(
-      doc(db, "users", userId, "conversations", message.conversationId, "messages", message.id),
-      message,
-      { merge: true }
-    );
-
-    await setDoc(
-      doc(db, "users", userId, "conversations", message.conversationId),
-      {
+    await runTransaction(db, async (transaction) => {
+      const savedMessage = await transaction.get(messageRef);
+      if (savedMessage.exists()) return;
+      transaction.set(messageRef, message);
+      transaction.set(conversationRef, {
         updatedAt: now,
         messageCount: increment(1),
-      },
-      { merge: true }
-    );
+      }, { merge: true });
+    });
   }
 
   async getMessages(conversationId: string, maxCount = 100): Promise<ChatMessage[]> {
