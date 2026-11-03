@@ -4,9 +4,11 @@ export interface LifeProfileSummary {
   mode: LifeMode;
   displayName?: string;
   priorities: string[];
-  people: string[];
+  people: Array<{ name: string; handlingPreferences: string[] }>;
   routines: string[];
   currentLooseEnds: string[];
+  neverDo: string[];
+  domainAutonomy: Record<string, "suggest_only" | "draft_then_ask" | "standing_permission">;
   communicationStyle?: string;
   approvalPreset: "approval_first";
 }
@@ -24,10 +26,12 @@ Conversation order:
    errands, learning, or a custom area.
 4. Ask how they prefer to capture things: chat, voice, or forwarding notes later.
 5. Ask for any people, routines, or active loose ends they want the assistant to remember.
-6. Explain the default: the assistant may organize, draft, and suggest, but must ask before
+6. Ask how help should work in each selected domain: suggest only, draft then ask, or a narrow standing permission.
+7. Ask what the assistant must never do, even with automation enabled.
+8. Explain the default: the assistant may organize, draft, and suggest, but must ask before
    sending, purchasing, deleting, booking, or changing external data.
-7. Present a concise "Your life profile" summary and ask: "Does this look right?"
-8. Save only after an explicit yes. If corrected, revise the summary and confirm again.
+9. Present a concise "Your life profile" summary and ask: "Does this look right?"
+10. Save only after an explicit yes. If corrected, revise the summary and confirm again.
 
 End with:
 "You're set. I'll use this profile to decide what belongs on your Radar. I will ask before
@@ -54,10 +58,26 @@ export function buildLifeProfileConfirmation(profile: LifeProfileSummary): strin
     "Your life profile",
     `• Mode: ${profile.mode}`,
     `• Priorities: ${profile.priorities.join(", ") || "None selected"}`,
-    `• Important people: ${profile.people.join(", ") || "None added"}`,
+    `• Important people: ${profile.people.map((person) => person.name).join(", ") || "None added"}`,
     `• Routines: ${profile.routines.join(", ") || "None added"}`,
     `• Open loops: ${profile.currentLooseEnds.join(", ") || "None added"}`,
-    `• Approval: Ask before acting outside Life's Assistant`,
+    `• Never do: ${profile.neverDo.join(", ") || "Nothing added"}`,
+    `• Approval: Ask before acting unless a narrow standing permission exists`,
   ];
   return `${lines.join("\n")}\n\nDoes this look right?`;
+}
+
+
+export function onboardingIsComplete(
+  profile: LifeProfileSummary,
+  confirmedByUser: boolean
+): boolean {
+  return Boolean(
+    confirmedByUser &&
+    profile.mode &&
+    profile.priorities.length > 0 &&
+    profile.approvalPreset === "approval_first" &&
+    Array.isArray(profile.neverDo) &&
+    profile.domainAutonomy
+  );
 }
