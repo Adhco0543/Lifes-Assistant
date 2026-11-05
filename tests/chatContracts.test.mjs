@@ -5,10 +5,12 @@ import { currentChatContext, recallKeywords, compactConversationMessages } from 
 
 test('chat request rejects objects of wrong shape and oversized fields', () => {
   for (const value of [null, [], 'hello', { message: 42 }, { history: 'wrong' },
-    { attachments: [{}, {}, {}, {}] }, { message: 'x'.repeat(60001) }]) {
+    { attachments: [{}, {}, {}, {}] }, { message: 'x'.repeat(60001) },
+    { message: 'hello', requestId: 'unsafe/id' }]) {
     assert.equal(validateChatRequest(value).valid, false);
   }
   assert.equal(validateChatRequest({ message: 'hello', history: [] }).valid, true);
+  assert.equal(validateChatRequest({ message: 'hello', requestId: `chat-${Date.now()}-abc` }).valid, true);
 });
 
 test('chat response rejects missing or invalid message and action payload', () => {

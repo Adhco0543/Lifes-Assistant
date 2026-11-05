@@ -22,7 +22,12 @@ export type StoredLifeProfile = {
   primary_slips: string[];
   capture_pref: Exclude<CapturePreference, ''> | null;
   onboarding_completed_at: string;
+  timezone?: string;
   tool_overrides: { pinned: string[]; hidden: string[] };
+  getting_to_know_you?: {
+    focus: string;
+    responseStyle: 'concise' | 'balanced' | 'detailed' | null;
+  };
 };
 
 export const DEFAULT_LIFE_PREFERENCES: LifePreferences = {
@@ -120,13 +125,41 @@ export function buildLifeProfileDocument(
   const rawCapture = Object.prototype.hasOwnProperty.call(value, 'capture_pref')
     ? value.capture_pref
     : previous.capture_pref;
+  const rawInterview = Object.prototype.hasOwnProperty.call(value, 'getting_to_know_you')
+    ? value.getting_to_know_you
+    : previous.getting_to_know_you;
+  const rawTimeZone = typeof value.timezone === 'string' ? value.timezone : previous.timezone;
+  let timeZone: string | undefined;
+  if (typeof rawTimeZone === 'string' && rawTimeZone.trim().length <= 100) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: rawTimeZone }).format();
+      timeZone = rawTimeZone;
+    } catch {
+      timeZone = undefined;
+    }
+  }
+  const interview = rawInterview && typeof rawInterview === 'object' && !Array.isArray(rawInterview)
+    ? rawInterview as Record<string, unknown>
+    : null;
 
   return {
     mode: normalized.mode,
     primary_slips: normalized.primary_slips,
     capture_pref: rawCapture === 'chat' || rawCapture === 'voice' || rawCapture === 'forward' ? rawCapture : null,
     onboarding_completed_at: Number.isFinite(parsedTime) ? new Date(parsedTime).toISOString() : now,
+    ...(timeZone ? { timezone: timeZone } : {}),
     tool_overrides: normalized.tool_overrides,
+    ...(interview ? {
+      getting_to_know_you: {
+        focus: typeof interview.focus === 'string' ? interview.focus.trim().slice(0, 240) : '',
+        responseStyle:
+          interview.responseStyle === 'concise' ||
+          interview.responseStyle === 'balanced' ||
+          interview.responseStyle === 'detailed'
+            ? interview.responseStyle
+            : null,
+      },
+    } : {}),
   };
 }
 

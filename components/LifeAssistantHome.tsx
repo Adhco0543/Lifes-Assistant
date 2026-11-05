@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { firebaseBackend, type OpenLoop } from '../lib/firebaseBackend';
+import HoldToTalk from './HoldToTalk';
 import LifeRadarPanel from './LifeRadarPanel';
 import { DEFAULT_LIFE_PREFERENCES, MODE_TOOL_ORDER, MODE_PLACEHOLDERS, TRY_ASKING_BY_MODE, getVisibleTools, normalizeLifePreferences, scoreRadarItem, type LifePreferences } from '../lib/lifePreferences';
 
@@ -313,6 +314,7 @@ export default function LifeAssistantHome({
             />
             <button onClick={launchCommand} disabled={!command.trim()}>Go</button>
           </div>
+          <HoldToTalk onUseTranscript={setCommand} />
         </section>
 
         <LifeRadarPanel userId={userId} onNavigate={onNavigate} />

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyFirebaseRequest } from "../../../lib/serverAuth";
+import { reportIntegrationFailure } from "../../../lib/integrationDiagnostics";
+import { TRANSCRIPTION_AUDIO_FIELD } from "../../../lib/transcriptionContracts";
 
 /**
  * POST /api/transcribe
@@ -15,9 +17,9 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
-    const audioFile = formData.get("audio") as File;
+    const audioFile = formData.get(TRANSCRIPTION_AUDIO_FIELD);
 
-    if (!audioFile) {
+    if (!(audioFile instanceof File)) {
       return NextResponse.json(
         { error: "No audio file provided" },
         { status: 400 }
@@ -61,10 +63,9 @@ export async function POST(request: NextRequest) {
     );
 
     if (!whisperResponse.ok) {
-      const error = await whisperResponse.json();
-      console.error("Whisper API error:", error);
+      reportIntegrationFailure("openai", "request", whisperResponse.status);
       return NextResponse.json(
-        { error: "Transcription failed", details: error },
+        { error: "Transcription failed" },
         { status: whisperResponse.status }
       );
     }
@@ -80,9 +81,9 @@ export async function POST(request: NextRequest) {
       duration: audioFile.size / (16000 * 2 / 8), // Rough estimate
     });
   } catch (error) {
-    console.error("Transcription error:", error);
+    reportIntegrationFailure("openai", "request");
     return NextResponse.json(
-      { error: "Transcription failed", message: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Transcription failed" },
       { status: 500 }
     );
   }

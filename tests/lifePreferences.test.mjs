@@ -39,6 +39,31 @@ test('builds the exact persisted user profile shape and preserves its completion
   assert.equal(updated.capture_pref, null);
 });
 
+test('stores bounded onboarding answers and preserves the verified timezone on profile updates', () => {
+  const profile = buildLifeProfileDocument({
+    mode: 'business',
+    timezone: 'America/Los_Angeles',
+    getting_to_know_you: { focus: '  Follow up with customers  ', responseStyle: 'concise', ignored: 'discard' },
+  }, {}, '2026-11-03T12:00:00.000Z');
+  assert.deepEqual(profile.getting_to_know_you, {
+    focus: 'Follow up with customers',
+    responseStyle: 'concise',
+  });
+  assert.equal(profile.timezone, 'America/Los_Angeles');
+
+  const updated = buildLifeProfileDocument({ mode: 'everyday' }, profile, '2026-11-04T12:00:00.000Z');
+  assert.deepEqual(updated.getting_to_know_you, profile.getting_to_know_you);
+  assert.equal(updated.timezone, profile.timezone);
+
+  const bounded = buildLifeProfileDocument({
+    getting_to_know_you: { focus: 'x'.repeat(300), responseStyle: 'unexpected' },
+    timezone: 'not/a-timezone',
+  }, {}, '2026-11-03T12:00:00.000Z');
+  assert.equal(bounded.getting_to_know_you.focus.length, 240);
+  assert.equal(bounded.getting_to_know_you.responseStyle, null);
+  assert.equal(bounded.timezone, undefined);
+});
+
 test('mode ranking favors the selected kind of work and includes age and next action', () => {
   const now = 2_000_000_000;
   const quote = { title: 'Review quote', linkedView: 'quotes', priority: 'medium', status: 'waiting', createdAt: now - 10 * 86400000, updatedAt: now - 3 * 86400000, nextAction: 'Call client' };

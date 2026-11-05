@@ -1,4 +1,14 @@
-import { firebaseBackend, type OpenLoop } from './firebaseBackend';
+import type { OpenLoop } from './firebaseBackend';
+
+type RadarLoopWrite = Omit<OpenLoop, 'id' | 'createdAt' | 'updatedAt'>;
+
+export interface WorkspaceRadarStore {
+  getRecentBusinessRecords(maxCount: number): Promise<Array<Record<string, unknown>>>;
+  getLatestDraft(kind: string): Promise<Record<string, unknown> | null>;
+  createOpenLoop(loop: RadarLoopWrite): Promise<string>;
+  updateOpenLoop(id: string, patch: Partial<OpenLoop>): Promise<void>;
+  resolveOpenLoop(id: string): Promise<void>;
+}
 
 type WorkspaceRadarLoop = {
   title: string;
@@ -25,15 +35,48 @@ const VERY_STALLED_PROJECT_MS = 30 * DAY_MS;
 function recordUpdatedAt(record: Record<string, unknown>): number {
   return Number(record.updatedAt || record.createdAt || Date.now());
 }
-function localDateKey(date = new Date()): string {
+function localDateKey(date = new Date(), timeZone?: string): string {
+  if (timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(date);
+      const part = (type: string) => parts.find((item) => item.type === type)?.value || '';
+      return `${part('year')}-${part('month')}-${part('day')}`;
+    } catch {
+      // Fall back to the server's local date when a stored timezone is invalid.
+    }
+  }
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return year + '-' + month + '-' + day;
 }
 
-function localNoonFromDateKey(dateKey: string): number {
+export function localNoonFromDateKey(dateKey: string, timeZone?: string): number {
   const [year, month, day] = dateKey.split('-').map(Number);
+  if (timeZone) {
+    try {
+      const target = Date.UTC(year, month - 1, day, 12);
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(new Date(target));
+      const part = (type: string) => Number(parts.find((item) => item.type === type)?.value || 0);
+      const zonedAsUtc = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'));
+      return target + target - zonedAsUtc;
+    } catch {
+      // Fall back to the server's local noon when a stored timezone is invalid.
+    }
+  }
   return new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
 }
 
@@ -62,18 +105,27 @@ function hasEmailDraft(data: Record<string, unknown>): boolean {
   );
 }
 
-export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<number> {
+export async function syncWorkspaceRadar(
+  existingLoops: OpenLoop[],
+  backend?: WorkspaceRadarStore,
+  timeZone?: string
+): Promise<number> {
+  const storage = backend || (await import('./firebaseBackend')).firebaseBackend;
   const now = Date.now();
-  const todayKey = localDateKey();
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowKey = localDateKey(tomorrow);
+  const todayKey = localDateKey(new Date(now), timeZone);
+  const [year, month, day] = todayKey.split('-').map(Number);
+  const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
+  const tomorrowKey = [
+    tomorrow.getUTCFullYear(),
+    String(tomorrow.getUTCMonth() + 1).padStart(2, '0'),
+    String(tomorrow.getUTCDate()).padStart(2, '0'),
+  ].join('-');
   const desired: WorkspaceRadarLoop[] = [];
 
   const [records, quoteDraft, emailDraft] = await Promise.all([
-    firebaseBackend.getRecentBusinessRecords(250),
-    firebaseBackend.getLatestDraft('work-quote'),
-    firebaseBackend.getLatestDraft('work-email'),
+    storage.getRecentBusinessRecords(250),
+    storage.getLatestDraft('work-quote'),
+    storage.getLatestDraft('work-email'),
   ]);
 
   const projectActivity = new Map<string, number>();
@@ -118,7 +170,7 @@ export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<num
       const done = data.status === 'done';
 
       if (title && dueDate && !done && dueDate <= tomorrowKey) {
-        const dueAt = localNoonFromDateKey(dueDate);
+        const dueAt = localNoonFromDateKey(dueDate, timeZone);
         const isOverdue = dueDate < todayKey;
         const isToday = dueDate === todayKey;
         const daysOverdue = isOverdue
@@ -303,7 +355,7 @@ export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<num
     } = item;
 
     if (!existing) {
-      await firebaseBackend.createOpenLoop(payload);
+      await storage.createOpenLoop(payload);
       changes += 1;
       continue;
     }
@@ -312,7 +364,7 @@ export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<num
       existing.status === 'resolved' &&
       sourceUpdatedAt > existing.updatedAt + 1000
     ) {
-      await firebaseBackend.updateOpenLoop(existing.id, {
+      await storage.updateOpenLoop(existing.id, {
         ...payload,
         status: item.status,
         snoozedUntil: null,
@@ -347,7 +399,7 @@ export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<num
         (existing.snoozedUntil || null) !== (nextPayload.snoozedUntil || null);
 
       if (changed) {
-        await firebaseBackend.updateOpenLoop(existing.id, nextPayload);
+        await storage.updateOpenLoop(existing.id, nextPayload);
         changes += 1;
       }
     }
@@ -365,12 +417,10 @@ export async function syncWorkspaceRadar(existingLoops: OpenLoop[]): Promise<num
 
     const key = loop.source + ':' + loop.sourceId;
     if (!desiredByKey.has(key)) {
-      await firebaseBackend.resolveOpenLoop(loop.id);
+      await storage.resolveOpenLoop(loop.id);
       changes += 1;
     }
   }
 
   return changes;
 }
-
-

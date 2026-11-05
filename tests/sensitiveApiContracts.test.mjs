@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateEmailSendRequest, parseEmailProviderId } from '../lib/emailApiContracts.ts';
 import { parseFirebaseLookupUser } from '../lib/serverAuth.ts';
-import { parseTranscriptionResult } from '../lib/transcriptionContracts.ts';
+import { parseTranscriptionResult, TRANSCRIPTION_AUDIO_FIELD, transcriptionFileName } from '../lib/transcriptionContracts.ts';
 import { parseRadarApiResponse } from '../lib/radarApiContracts.ts';
+import { encodeValue } from '../lib/tools/firestoreRest.ts';
 
 test('email endpoint contract accepts bounded payloads and rejects malformed input', () => {
   const valid = validateEmailSendRequest({
@@ -37,6 +38,12 @@ test('provider response parsers only return bounded known fields', () => {
   for (const value of [null, [], { text: '' }, { text: 42 }, { text: 'x'.repeat(500_001) }]) {
     assert.equal(parseTranscriptionResult(value), null);
   }
+  assert.equal(TRANSCRIPTION_AUDIO_FIELD, 'audio');
+  assert.equal(transcriptionFileName('audio/webm;codecs=opus'), 'recording.webm');
+  assert.equal(transcriptionFileName('audio/mp4'), 'recording.mp4');
+  assert.deepEqual(encodeValue(new Date('2026-11-03T12:00:00.000Z')), {
+    timestampValue: '2026-11-03T12:00:00.000Z',
+  });
 });
 
 test('Firebase lookup accepts only a well-shaped authenticated user', () => {

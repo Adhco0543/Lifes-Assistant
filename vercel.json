@@ -1,3 +1,9 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/life-radar",
+      "schedule": "0 7 * * *"
+    }
+  ]
 }

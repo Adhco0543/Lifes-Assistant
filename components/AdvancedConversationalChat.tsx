@@ -10,6 +10,7 @@ import { parseChatApiResponse } from '../lib/chatApiContracts';
 import type { ChatApiResponse, ChatAction } from '../lib/chatApiContracts';
 import ChatActionReceipts from './ChatActionReceipts';
 import MarkdownLite from './MarkdownLite';
+import HoldToTalk from './HoldToTalk';
 import { reportIntegrationFailure } from '../lib/integrationDiagnostics';
 
 interface AdvancedChatProps {
@@ -39,6 +40,19 @@ type RadarApiResponse = {
   openLoops?: RadarApiLoop[];
   resolveLoopIds?: string[];
 };
+
+type RetryableChatRequest = {
+  requestId: string;
+  userMessage: ChatMessage;
+  attachments: PendingAttachment[];
+};
+
+function createChatRequestId(): string {
+  const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+  return 'chat-' + Date.now() + '-' + randomPart;
+}
 
 function normalizeLoopKey(title: string, waitingOn?: string): string {
   return (title + '|' + (waitingOn || ''))
@@ -84,6 +98,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [failedRequest, setFailedRequest] = useState<RetryableChatRequest | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState('');
@@ -112,6 +127,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
   const [loadingConversationId, setLoadingConversationId] = useState('');
   const [conversationLoadError, setConversationLoadError] = useState('');
   const conversationLoadSequence = useRef(0);
+  const sendLockRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -134,20 +150,36 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       }
 
       try {
-        const cloudPrefs = await firebaseBackend.getLatestDraft('assistant-preferences');
-        if (!active || !cloudPrefs) return;
+        const [cloudPrefs, lifeProfile] = await Promise.all([
+          firebaseBackend.getLatestDraft('assistant-preferences'),
+          firebaseBackend.getUserProfile(userId),
+        ]);
+        if (!active) return;
 
-        if (typeof cloudPrefs.assistantName === 'string' && cloudPrefs.assistantName.trim()) {
+        if (typeof cloudPrefs?.assistantName === 'string' && cloudPrefs.assistantName.trim()) {
           const resolvedName = normalizeAssistantName(cloudPrefs.assistantName);
           setChatbotName(resolvedName);
           setNameInput(resolvedName);
         }
 
-        if (cloudPrefs.tone === 'concise' || cloudPrefs.tone === 'balanced' || cloudPrefs.tone === 'detailed') {
+        if (cloudPrefs?.tone === 'concise' || cloudPrefs?.tone === 'balanced' || cloudPrefs?.tone === 'detailed') {
           setResponseStyle(cloudPrefs.tone);
         }
 
-        if (typeof cloudPrefs.memoryEnabled === 'boolean') {
+        const interview = lifeProfile?.getting_to_know_you as Record<string, unknown> | undefined;
+        if (
+          cloudPrefs?.tone !== 'concise' &&
+          cloudPrefs?.tone !== 'balanced' &&
+          cloudPrefs?.tone !== 'detailed' &&
+          interview &&
+          (interview.responseStyle === 'concise' ||
+            interview.responseStyle === 'balanced' ||
+            interview.responseStyle === 'detailed')
+        ) {
+          setResponseStyle(interview.responseStyle);
+        }
+
+        if (typeof cloudPrefs?.memoryEnabled === 'boolean') {
           setMemoryEnabled(cloudPrefs.memoryEnabled);
         }
       } catch {
@@ -166,7 +198,10 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
     const loadPersistentMemory = async () => {
       try {
-        const records = await firebaseBackend.getRecentBusinessRecords(100);
+        const [records, profile] = await Promise.all([
+          firebaseBackend.getRecentBusinessRecords(100),
+          firebaseBackend.getUserProfile(userId),
+        ]);
         if (!active) return;
 
         const memories = records
@@ -208,7 +243,13 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
           })
           .filter(Boolean);
 
-        setPersistentMemory(memories.concat(people, projects).slice(0, 50));
+        const focus = profile?.getting_to_know_you as Record<string, unknown> | undefined;
+        const onboardingFocus =
+          focus && typeof focus === 'object' &&
+          typeof focus.focus === 'string' && focus.focus.trim()
+            ? ['User-selected focus: ' + focus.focus.trim().slice(0, 240)]
+            : [];
+        setPersistentMemory(memories.concat(people, projects, onboardingFocus).slice(0, 50));
       } catch {
         if (active) setPersistentMemory([]);
       }
@@ -639,20 +680,26 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
     setAttachmentError('');
   };
 
-  const handleSendMessage = useCallback(async () => {
-    if ((!input.trim() && !attachments.length) || isLoading) return;
+  const handleSendMessage = useCallback(async (retryRequest?: RetryableChatRequest) => {
+    if (sendLockRef.current || (!retryRequest && !input.trim() && !attachments.length)) return;
+    sendLockRef.current = true;
+    setIsLoading(true);
+    setFailedRequest(null);
 
-    const outgoingAttachments = attachments;
-    const typedMessage = input.trim();
+    const requestId = retryRequest?.requestId || createChatRequestId();
+    const outgoingAttachments = retryRequest?.attachments || attachments;
+    const typedMessage = retryRequest?.userMessage.content.trim() || input.trim();
     const userMessage =
       typedMessage ||
       'Attached ' + outgoingAttachments.map((item) => item.name).join(', ') + '.';
-    setInput('');
-    setAttachments([]);
-    setAttachmentError('');
+    if (!retryRequest) {
+      setInput('');
+      setAttachments([]);
+      setAttachmentError('');
+    }
 
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+    const userMsg: ChatMessage = retryRequest?.userMessage || {
+      id: 'user-' + requestId,
       userId: firebaseBackend.getCurrentUser()?.uid || userId || 'local-user',
       conversationId: currentConversationId || 'local',
       role: 'user',
@@ -661,22 +708,21 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       attachments: outgoingAttachments.map(({ name, type, size }) => ({ name, type, size })),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    if (!retryRequest) setMessages((prev) => [...prev, userMsg]);
 
     if (firebaseBackend.isAvailable() && currentConversationId && currentConversationId !== 'local') {
       try {
         await firebaseBackend.saveMessage(userMsg);
-        await firebaseBackend.trackEvent('message_sent', { length: userMessage.length });
+        if (!retryRequest) await firebaseBackend.trackEvent('message_sent', { length: userMessage.length });
       } catch (error) {
         reportIntegrationFailure('firebase', 'save');
         setHistoryStatus('Could not save your message to the cloud. Check your connection.');
       }
     }
 
-    void captureLifeRadar(userMessage);
+    if (!retryRequest) void captureLifeRadar(userMessage);
 
-    setIsLoading(true);
-
+    let canRetry = true;
     try {
       const token = await firebaseBackend.getIdToken();
       if (!token) throw new Error('Authentication required');
@@ -781,6 +827,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
+          requestId,
           message: userMessage,
           businessContext,
           chatbotName,
@@ -805,9 +852,11 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
       if (!apiResponse.ok) {
         const failure = await apiResponse.json().catch(() => null) as { message?: string; error?: string } | null;
-        const knownMessage = typeof failure?.message === 'string' &&
-          failure.message.length > 0 && failure.message.length <= 500
-          ? failure.message : undefined;
+        if (apiResponse.status === 409) canRetry = false;
+        const candidateMessage = failure?.message || failure?.error;
+        const knownMessage = typeof candidateMessage === 'string' &&
+          candidateMessage.length > 0 && candidateMessage.length <= 500
+          ? candidateMessage : undefined;
         throw new Error('Chat service: ' + (knownMessage ||
           (apiResponse.status === 401 ? 'Please sign in again.' : 'The AI service is unavailable. Please try again.')));
       }
@@ -822,7 +871,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       }
 
       const assistantMsg: ChatMessage = {
-        id: `assistant-${Date.now()}`,
+        id: 'assistant-' + requestId,
         userId: 'ai-assistant',
         conversationId: currentConversationId || 'local',
         role: 'assistant',
@@ -830,7 +879,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         timestamp: Date.now(),
       };
 
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [...prev.filter((message) => message.id !== 'error-' + requestId), assistantMsg]);
 
       if (data.actions?.length) {
         setMessageActions((current) => ({ ...current, [assistantMsg.id]: data.actions || [] }));
@@ -854,11 +903,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
       } else {
         setPendingAction(null);
       }
+      setFailedRequest(null);
     } catch (error) {
       reportIntegrationFailure('chat', 'request');
 
       const errorMsg: ChatMessage = {
-        id: `error-${Date.now()}`,
+        id: 'error-' + requestId,
         userId: 'system',
         conversationId: currentConversationId || 'local',
         role: 'assistant',
@@ -868,9 +918,12 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         timestamp: Date.now(),
       };
 
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) => [...prev.filter((message) => message.id !== errorMsg.id), errorMsg]);
+      if (canRetry) setFailedRequest({ requestId, userMessage: userMsg, attachments: outgoingAttachments });
+      if (!canRetry) setHistoryStatus('This request may still be processing. Check your conversation before trying it again.');
     } finally {
       setIsLoading(false);
+      sendLockRef.current = false;
       inputRef.current?.focus();
     }
   }, [input, attachments, isLoading, currentConversationId, businessContext, chatbotName, responseStyle, memoryEnabled, persistentMemory, messages, userId, captureLifeRadar]);
@@ -1133,6 +1186,18 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
         )}
 
         <div className="input-area">
+          {failedRequest && (
+            <div className="chat-retry" role="status" aria-live="polite">
+              <span>Your message is still here. The same request will be reused to prevent duplicate actions.</span>
+              <button type="button" onClick={() => void handleSendMessage(failedRequest)} disabled={isLoading}>
+                Retry message
+              </button>
+            </div>
+          )}
+          <HoldToTalk onUseTranscript={(text) => {
+            setInput(text);
+            inputRef.current?.focus();
+          }} />
           {attachments.length > 0 && (
             <div className="pending-attachments">
               {attachments.map((attachment) => (
@@ -1233,7 +1298,7 @@ export const AdvancedConversationalChat: React.FC<AdvancedChatProps> = ({
 
             <button
               className="send-btn"
-              onClick={handleSendMessage}
+              onClick={() => void handleSendMessage()}
               disabled={(!input.trim() && !attachments.length) || isLoading}
               type="button"
             >
@@ -1618,6 +1683,27 @@ const styles = `
     padding: 1rem;
     border-top: 1px solid rgba(255,255,255,0.08);
     background: #212121;
+  }
+  .chat-retry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #66583d;
+    border-radius: 10px;
+    color: #e5d7b8;
+    font-size: .72rem;
+  }
+  .chat-retry button {
+    flex: 0 0 auto;
+    min-height: 36px;
+    border: 1px solid #81704b;
+    border-radius: 8px;
+    padding: 0 12px;
+    background: #332f25;
+    color: #f3e7cb;
+    cursor: pointer;
   }
 
   .pending-attachments {

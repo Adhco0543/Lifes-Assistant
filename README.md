@@ -26,6 +26,7 @@ npm run dev                  # http://localhost:3000
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | for Gmail/Calendar | Google integration |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | for GitHub | Repository review |
 | `INTEGRATION_TOKEN_SECRET`, `INTEGRATION_STATE_SECRET` | for integrations | Encrypting stored OAuth tokens and state |
+| `CRON_SECRET`, `FIREBASE_SERVICE_ACCOUNT_JSON` | scheduled Life Radar | Server-only credentials for the daily authenticated Firestore sweep; see [`docs/setup/LIFE_RADAR_CRON.md`](docs/setup/LIFE_RADAR_CRON.md) |
 
 Step-by-step setup guides live in [`docs/setup/`](docs/setup/).
 
@@ -57,6 +58,7 @@ docs/           Documentation (below)
 - [`docs/setup/`](docs/setup/) – Firebase, Vercel, OpenAI, email setup.
 - [`docs/reference/`](docs/reference/) – Architecture, API reference, features, developer and multi-user guides, roadmap.
 - [`docs/TOOL_LAYER.md`](docs/TOOL_LAYER.md) – How the assistant acts: tools, autonomy policy, action receipts. (`TOOL_EXECUTION_LAYER.md` is the older design sketch.)
+- [`docs/reference/CHAT_RELIABILITY_VOICE_AND_ONBOARDING.md`](docs/reference/CHAT_RELIABILITY_VOICE_AND_ONBOARDING.md) – Onboarding, safe chat retry behavior, voice capture, and production incident evidence required.
 - [`docs/archive/`](docs/archive/) – Older status reports and design sketches. Historical only; do not treat as a description of current behavior.
 
 ## Principles
