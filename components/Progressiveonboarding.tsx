@@ -342,6 +342,14 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
             </div>
           )}
 
+          {step.id === 'capture' && (
+            <div className="confirmation-card">
+              <span className="confirm-check">✓</span>
+              <p>Got it. I’ll prioritize <strong>{mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'}</strong> and surface things related to <strong>{primarySlips.includes('unsure') ? 'a bit of everything' : primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ')}</strong>.</p>
+              <small>{capturePref ? `Capture preference: ${capturePref === 'forward' ? 'forward emails or notes later' : capturePref}.` : 'Capture preference skipped.'} You can change this anytime in Settings.</small>
+            </div>
+          )}
+
           {step.id === 'focus' && (
             <div className="field-block">
               <label htmlFor="onboarding-focus">A short note (optional)</label>

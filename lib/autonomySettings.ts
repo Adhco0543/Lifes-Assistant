@@ -77,14 +77,14 @@ export const DEFAULT_AUTONOMY_SETTINGS: AutonomySettings = {
   emailBehavior: "ask", // Safe default: ask before sending
   emailCategories: {
     customer: "ask",
-    followup: "auto_draft",
+    followup: "ask",
     invoice: "ask",
   },
 
   quoteBehavior: "ask",
   autoSendQuotesUnder: 0, // Never auto-send by default
 
-  jobSearchBehavior: "auto_search",
+  jobSearchBehavior: "ask",
   autoSearchFrequency: "weekly",
 
   autoFollowUpRules: {
@@ -96,8 +96,8 @@ export const DEFAULT_AUTONOMY_SETTINGS: AutonomySettings = {
   backgroundMode: false,
   backgroundModeBehavior: "draft_only",
 
-  autoTaskTypes: ["job_search", "materials", "customer_lookup"],
-  requiresApprovalForTasks: ["email", "quote"],
+  autoTaskTypes: [],
+  requiresApprovalForTasks: ["email", "quote", "job_search", "materials", "customer_lookup", "reminder", "calendar"],
 
   notifyOnApprovals: true,
   notifyOnAutoExecute: false,
