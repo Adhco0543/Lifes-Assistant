@@ -191,7 +191,7 @@ export const ProgressiveOnboarding: React.FC<ProgressiveOnboardingProps> = ({
             </div>
           )}
 
-          {false && (
+          {step.id === 'capture' && (
             <div className="confirmation-card">
               <span className="confirm-check">✓</span>
               <p>Got it. I’ll prioritize <strong>{mode === 'everyday' ? 'Everyday / Personal' : mode === 'business' ? 'Business / Freelance / Contractor' : 'Mix of both'}</strong> and surface things related to <strong>{primarySlips.includes('unsure') ? 'a bit of everything' : primarySlips.map((id) => PRIMARY_SLIPS.find((item) => item.id === id)?.label).filter(Boolean).join(', ')}</strong>.</p>
